@@ -184,6 +184,167 @@ The simplified geometry may therefore place the tile and steel solids directly a
 
 The professor's wording also covers wrapped tiles in general. It does not imply that every future wrapping system should use EJ-510 properties; EJ-510 is selected here specifically because D-007 fixes the current painted 50 mm-tile baseline.
 
+### D-010 — Staged center, one-dimensional, and two-dimensional study
+
+**Decision:** Build up the spatial study in three stages rather than starting with a full two-dimensional production scan:
+
+1. run the controlled `4 mm` versus `16 mm` comparison at the tile center, `x = 0`, `y = 0`;
+2. after the centered configuration passes validation, run a one-dimensional line scan through the tile center, using identical positions and source settings for both thicknesses;
+3. add a two-dimensional scan only after the center and one-dimensional results are understood.
+
+In the first two stages, “point” refers to the transverse source-position distribution. It does not mean a zero-angle beam: retain the D-008 nominal `55 mrad` angular divergence. Do not automatically copy the earlier electron-study `sigma = 5 mm` transverse profile into this neutron study.
+
+Because the D-007 geometry is nominally symmetric in `x` and `y`, an `x` scan at `y = 0` is the default line-scan interpretation. D-011 fixes the first line-scan grid and symmetry check; a finite transverse profile remains a later-stage decision.
+
+### D-011 — First one-dimensional scan grid
+
+**Decision:** After the centered comparison is validated, use the following point-position line scan for both tile thicknesses:
+
+```text
+y = 0 mm
+x = 0, 5, 10, 15, 20, 25, 30, 35, 40 mm
+```
+
+Reuse the validated centered result at `x = 0` rather than rerunning an identical configuration. The `x = 25 mm` point lies on the nominal edge of the `50 x 50 mm` tile; the `30–40 mm` points probe shower spill-in when the nominal beam position is outside the tile.
+
+Also run `x = -20 mm`, `y = 0` as a symmetry and geometry-offset cross-check. Its result must agree with the corresponding `x = +20 mm` result within statistical uncertainty before the positive-half scan is interpreted as representative of the full line.
+
+All positions retain the D-008 `55 mrad` angular divergence and the D-010 point-like transverse source-position distribution. A finite beam spot and the later two-dimensional grid are post-first-pass decisions, not blockers for implementing the center and one-dimensional stages.
+
+### D-012 — Event-level causal observable model
+
+**Decision:** Preserve a compact per-event record of the complete causal chain
+
+```text
+incident neutron
+-> interaction in steel
+-> charged-particle transport into the tile
+-> energy deposited in the tile
+-> optical photons produced
+-> photons entering the SiPM
+```
+
+The production ntuple and mergeable run summary must contain the following quantities.
+
+#### Steel interaction record
+
+- total energy deposited in steel, `steel_edep_mev`;
+- primary-neutron `elastic`, `inelastic`, and `capture` interaction counts in steel;
+- derived boolean flags for each interaction category and an `any_interaction` flag.
+
+These are diagnostic records, not switches that enable or disable physics. They are not mutually exclusive: for example, one primary neutron may scatter elastically before undergoing an inelastic interaction. `elastic` records direction/energy-changing nuclear scattering, `inelastic` identifies nuclear excitation or breakup that produces the main shower-like final state, and `capture` records neutron absorption after any slowing. Capture may be rare for the initial fast neutron but remains useful as an audit category.
+
+Classify interactions from the Geant4 process category or subtype for the primary-neutron track while it is in steel, rather than relying only on fragile process-name string matching.
+
+#### Transport into the tile
+
+- number of unique charged tracks entering the tile for the first time;
+- summed kinetic energy at first entry;
+- entry counts and summed kinetic energy split into `electron/positron`, `proton`, and `other charged` categories;
+- an explicit flag and position for whether the primary neutron itself enters the tile, retaining the meaning of the existing primary-only `hit_valid` field without mislabeling it as the whole shower.
+
+A charged track must be counted only on its first entry into the tile so that boundary re-entry does not inflate the shower multiplicity.
+
+#### Tile response and optical outcome
+
+- total tile energy deposition, plus diagnostic `electron/positron`, `proton`, and `other charged` deposition components;
+- existing total generated optical-photon and scintillation-photon counts;
+- an explicit per-event Cerenkov-photon count;
+- existing photons entering the SiPM proxy volume.
+
+Do not treat steel energy deposition as the shower energy delivered to the tile: energy carried out of the steel by tracked secondaries is separate. Likewise, tile energy deposition and scintillation yield need not be proportional event by event because particle composition and the existing scintillator quenching model matter.
+
+#### Zero-light handling and summary definitions
+
+If an event creates no optical photons, its per-event collection efficiency is undefined. Store `NaN` plus a validity flag rather than assigning zero. Report zero-scintillation and zero-SiPM event fractions separately.
+
+For every scan position and thickness, the primary run-level quantities are:
+
+```text
+production = sum(scintillation photons) / incident neutrons
+collection = sum(SiPM photons) / sum(generated optical photons)
+net response = sum(SiPM photons) / incident neutrons
+```
+
+The summary must also report the `16 mm / 4 mm` ratio for all three quantities, event-level mean/RMS/statistical error for tile energy deposition and photon yields, and the zero-light fractions. Do not use the mean of per-event collection ratios as the primary collection estimator.
+
+Production runs store these fixed event aggregates, not complete step or trajectory dumps. Full process/secondary traces are limited to low-event diagnostic runs. If the Cerenkov contribution is not negligible, origin-tagged SiPM counts can be added as a later diagnostic rather than expanding the first production schema preemptively.
+
+### D-013 — Geometry and configuration interface
+
+**Decision:** Use a two-layer interface: keep the low-level absorber geometry minimally configurable, and lock the accepted scientific configuration behind a versioned study preset.
+
+#### Low-level absorber geometry
+
+Add the following `PreInit`-only, non-broadcast Geant4 messenger commands:
+
+```text
+/opnovice2/absorber/enabled true
+/opnovice2/absorber/size 500 500 40 mm
+```
+
+`size` always means full `x y z` dimensions, not half-lengths. The detector defaults are `enabled=false` and `500 x 500 x 40 mm`, preserving all existing macros while making the production-size candidate the default whenever the absorber is enabled. Generated neutron-study macros must nevertheless write both commands explicitly rather than relying on those defaults.
+
+The absorber material is the exact D-002 `StainlessSteelSAE304` definition and is not exposed as a messenger option in this first model. Likewise, do not expose independent absorber gap or position commands. The absorber is centered on the tile in `x` and `y`, and its downstream face is derived to coincide with the tile's `+Z` face. This prevents configurations that silently violate the confirmed material, thickness, or no-gap geometry while retaining the size freedom required for the D-006 convergence check.
+
+Give the physical volume a stable `SteelAbsorber` identity and expose the constructed physical/logical volume through detector getters. D-012 interaction and energy-deposition accounting must use that volume identity rather than process or volume-name string matching.
+
+When the absorber is enabled, retain the D-009 ordered `tile -> steel` optical border surface in addition to the `tile -> world` surface used on faces that still border the world.
+
+#### Versioned study preset
+
+Extend the existing scan runner with:
+
+```text
+--study-preset realistic-neutron-v1
+```
+
+The preset locks the D-002 through D-009 source, absorber, optical-surface, and SiPM baseline, including the `1 GeV/c` neutron momentum and its derived `432.58 MeV` GPS kinetic energy. Under this preset, only the intended study axes may vary:
+
+- tile thickness: `4 mm` or `16 mm`;
+- absorber transverse size for the accepted `200/300/500 mm` convergence study, while its longitudinal thickness remains `40 mm`;
+- scan position/stage;
+- event count and random seed.
+
+Reject direct `--primary-energy`, material, gap, absorber-position, or manual `--beam-z` overrides under the preset. Momentum remains the authoritative source input. The generated macro must contain the resolved `/gps/particle neutron` and `/gps/energy 432.58 MeV` commands explicitly.
+
+#### Absorber-aware source placement
+
+Continue to center the tile at the origin and send the beam from `+Z` toward `-Z`. Derive the longitudinal positions from the resolved full tile thickness `t_tile`, absorber thickness `t_steel`, and a fixed source clearance `c = 1.5 mm`:
+
+```text
+z_tile_front     = t_tile / 2
+z_steel_center   = z_tile_front + t_steel / 2
+z_steel_upstream = z_tile_front + t_steel
+z_source         = z_steel_upstream + c
+```
+
+The accepted resolved positions are:
+
+| Tile thickness | Tile front | Steel center | Steel upstream face | Source Z |
+| ---: | ---: | ---: | ---: | ---: |
+| `4 mm` | `2 mm` | `22 mm` | `42 mm` | `43.5 mm` |
+| `16 mm` | `8 mm` | `28 mm` | `48 mm` | `49.5 mm` |
+
+Thus the source-to-tile-front distance is `41.5 mm` for both thicknesses. The `1.5 mm` clearance is a numerical separation between the virtual GPS vertex and the steel's upstream boundary; it is not a steel-to-tile air gap. No further professor clarification is needed unless a real gun-to-steel distance later becomes a scientific input. With the accepted per-axis `55 mrad` angular sigma, the nominal RMS transverse displacement over `41.5 mm` is approximately `2.28 mm` per axis.
+
+When the absorber is enabled, the runner must use this absorber-aware calculation rather than the legacy `tile half-thickness + 1.5 mm` rule and must reject manual `--beam-z`. Scan-point `x/y` coordinates remain the GPS transverse center.
+
+#### Validation and reproducibility metadata
+
+Fail before event generation if dimensions are non-positive, the absorber does not cover the tile in `x/y`, any detector volume lies outside the world, the source is not strictly upstream of and outside the steel, the source lies outside the world or nominal absorber footprint, or the resolved geometry overlaps. The study preset additionally enforces the locked `40 mm` steel thickness and the D-007 `-Z` SiPM configuration. Do not invent a fixed shower-containment margin: record the nominal minimum transverse distance from all requested source positions to the absorber edge, and use the D-006 `200/300/500 mm` convergence result to establish edge insensitivity.
+
+Extend `run_config.json` without removing existing fields. Record at least:
+
+- a configuration-schema version and `study_preset=realistic-neutron-v1`;
+- absorber enable state, box shape, stable volume identity, exact material name, density, mass fractions, and ePIC `26.07.0` reference;
+- full size, center, upstream/downstream face positions, zero tile gap, and tile-contact optical-boundary model;
+- requested neutron momentum and mass, derived total and kinetic energies, derivation label, GPS direction, source-clearance rule, and resolved source Z;
+- point-like transverse profile, `55 mrad` angular model, and nominal minimum absorber-edge distance for the requested grid;
+- runner validation results, exact generated macro paths, and the existing command and Git provenance.
+
+The local runner owns this resolution and validation logic. E-008 remains responsible for propagating the same versioned configuration through the OSC plan, Slurm, merge, and archive workflows without redefining it.
+
 ## Current repository facts relevant to implementation
 
 - `OpNovice2` currently uses `FTFP_BERT` together with `G4OpticalPhysics`; the existing physics list already provides neutron elastic, inelastic, and capture processes in the energy range needed here.
@@ -197,18 +358,6 @@ These statements describe the starting point. They are not approval of a particu
 ## Open engineering decisions
 
 The following must be decided after this record is accepted and before implementation is considered complete.
-
-### E-002 — Geometry and configuration interface
-
-Decide the absorber fields, messenger commands, defaults, validation rules, source-position calculation, and `run_config.json` representation.
-
-### E-005 — Beam geometry and scan shape
-
-With the scoped `55 mrad` divergence fixed by D-008, decide whether the first study uses centered point incidence, a finite transverse beam profile, or a position scan. A centered smoke/comparison run and a later spatial scan are separate stages.
-
-### E-006 — First-pass observables and shower diagnostics
-
-Separate the minimum model-building output from later validation quantities such as steel/tile energy deposition, inelastic-interaction flags, charged secondaries entering the tile, zero-light event fractions, and event-level fluctuations.
 
 ### E-007 — Validation and production statistics
 
@@ -227,6 +376,10 @@ Decide how the new source and absorber parameters enter the local runner, point-
 - Keep the same configurable steel transverse proxy across tile comparisons, and complete the accepted `200/300/500 mm` edge-leakage convergence check before production.
 - Keep the D-007 `50 x 50 x 4/16 mm` optical baseline fixed in the first comparison.
 - Label `55 mrad` as a provisional 50 mm-only choice; reopen `45/75 mrad` when the measured approximately `115 x 115 mm` groups enter scope.
+- Follow the D-010 center -> one-dimensional -> two-dimensional staging, retaining 55 mrad angular divergence while the first-pass transverse source position remains point-like.
+- Use the D-011 one-dimensional grid from `x = 0` through `40 mm` in `5 mm` steps at `y = 0`, plus the `x = -20 mm` symmetry check.
+- Preserve the D-012 causal event record and keep neutron interaction probability, light production, optical collection, and net response as separate quantities.
+- Preserve the D-013 two-layer configuration interface, absorber-aware source placement, and versioned `realistic-neutron-v1` preset; the `1.5 mm` source clearance is not a steel-to-tile gap.
 - Change one scientific variable at a time when comparing tile thicknesses.
 - Record enough metadata to reconstruct the geometry, source, physics environment, and derivation later.
 
