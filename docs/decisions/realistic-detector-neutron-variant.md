@@ -68,7 +68,7 @@ The current official ePIC `26.07.0` backward-HCal template contains a total `0.1
 
 Source for the official gap: [`compact/hcal/backward_template.xml`](https://github.com/eic/epic/blob/26.07.0/compact/hcal/backward_template.xml#L10-L18)
 
-Implementation consequence: the tile front face will border steel rather than the world volume. Its optical boundary must be defined for `tile -> steel`; the other tile faces still border their actual neighboring volumes. The exact surface implementation is deferred to engineering design.
+Implementation consequence: the tile front face will border steel rather than the world volume. Its optical boundary must be defined for `tile -> steel`; the other tile faces still border their actual neighboring volumes. D-009 records the confirmed reflector treatment at this contact.
 
 ### D-004 — Neutron momentum and Geant4 energy input
 
@@ -124,6 +124,66 @@ The following are not implied by this first scope:
 
 Those can be considered only after the single-layer model is understood.
 
+### D-006 — Local steel absorber proxy and convergence policy
+
+**Decision:** Represent the local portion of the continuous ePIC absorber with a configurable rectangular steel slab. Keep its transverse dimensions fixed across all tile configurations so that absorber containment does not become an additional tile-dependent variable.
+
+Use `500 x 500 x 40 mm` as the production-size candidate, where `40 mm` is the confirmed beam-axis thickness. Before production, run centered-beam transverse-size checks with:
+
+```text
+200 x 200 x 40 mm
+300 x 300 x 40 mm
+500 x 500 x 40 mm
+```
+
+Adopt the `500 x 500 mm` transverse size after the `300 x 300 mm` and `500 x 500 mm` results agree within statistical uncertainty for both scintillation photons per incident neutron and photons entering the SiPM per incident neutron.
+
+All later position scans must also validate that every beam position, together with the required shower margin, remains inside the absorber footprint.
+
+### D-007 — Controlled tile and optical baseline
+
+**Decision:** The first neutron comparison will use only the two established `50 x 50 mm` EJ-200 tile configurations and vary thickness from `4 mm` to `16 mm`.
+
+Keep the following optical configuration fixed across both thicknesses:
+
+- surface preset: `polishedfrontpainted`;
+- reflectivity model: repository empirical EJ-510 curve;
+- SiPM: `2.4 x 2.4 x 0.5 mm`, centered on the `-Z` face;
+- dimple: disabled;
+- SiPM coupling: current undimpled zero-gap proxy (`optical_coupling=none`);
+- steel absorber: the same D-006 slab configuration for both tiles;
+- scintillator and optical-process properties: unchanged from the current practice baseline.
+
+`polishedfrontpainted` is the best current working surface proxy under the primary 50 mm-tile shape metric. It is not claimed to uniquely identify the physical finish. The measured approximately `115 x 115 mm` tile groups and the prospective 24 mm-thick tile are excluded from the first neutron comparison.
+
+### D-008 — Scope of the 55 mrad divergence choice
+
+**Decision:** Use `55 mrad` as the nominal divergence for the first neutron study because D-007 intentionally includes only the two `50 x 50 mm` tile groups.
+
+This choice is scoped and provisional:
+
+- in the 5000-event, 50 mm-only refinement, `55 mrad` is the numerical minimum of the primary all-point scaled-RMSE metric;
+- the same refinement supports a broad `45–75 mrad` plateau rather than a uniquely resolved divergence;
+- when the two measured approximately `115 x 115 mm` groups are included, the four-sample calibration does not select 55 mrad: shape and inside-tile metrics favor `45 mrad`, while all-point chi-square favors `75 mrad`;
+- therefore `55 mrad` must not be described as the global best value for all four tile groups.
+
+If either `115 x 115 mm` group is added to this neutron study, the divergence decision must be reopened with `45 mrad` and `75 mrad` as the established candidates. The present use of 55 mrad records a deliberate dataset-scope choice, not a universal beam calibration.
+
+### D-009 — Reflector retained at the no-air-gap steel contact
+
+**Decision:** The tile remains painted or wrapped at the face next to the steel. The professor's “no air-gap” clarification means that the steel contacts the outside of the retained reflector; it does not mean that the reflector is removed to create a bare EJ-200-to-steel optical interface.
+
+For the D-007 first comparison, retain the current EJ-510 painted baseline and represent the coating as an implicit optical boundary rather than an explicit volume:
+
+- add an ordered `tile -> steel` border surface on the steel-facing tile face;
+- give that boundary the same `polishedfrontpainted`, UNIFIED `dielectric_dielectric`, and empirical EJ-510 reflectivity model used by the controlled optical baseline;
+- retain the existing painted `tile -> world` treatment on tile faces that still border the world;
+- do not use a bare `dielectric_metal` steel interface in the primary comparison.
+
+The simplified geometry may therefore place the tile and steel solids directly adjacent while the zero-thickness optical surface stands in for the retained coating. This preserves zero **air** gap without falsely removing the paint/wrap. A bare-steel boundary would be a separate sensitivity model and would require its own steel optical properties.
+
+The professor's wording also covers wrapped tiles in general. It does not imply that every future wrapping system should use EJ-510 properties; EJ-510 is selected here specifically because D-007 fixes the current painted 50 mm-tile baseline.
+
 ## Current repository facts relevant to implementation
 
 - `OpNovice2` currently uses `FTFP_BERT` together with `G4OpticalPhysics`; the existing physics list already provides neutron elastic, inelastic, and capture processes in the energy range needed here.
@@ -138,25 +198,13 @@ These statements describe the starting point. They are not approval of a particu
 
 The following must be decided after this record is accepted and before implementation is considered complete.
 
-### E-001 — Local absorber transverse proxy
-
-Choose a configurable local slab size and an edge-leakage convergence check. The full `14–267 cm` annular ePIC layer should not be copied blindly into the current single-tile world.
-
 ### E-002 — Geometry and configuration interface
 
 Decide the absorber fields, messenger commands, defaults, validation rules, source-position calculation, and `run_config.json` representation.
 
-### E-003 — Optical boundary at direct contact
-
-Define how the existing tile surface model applies to the new `tile -> steel` front boundary, including whether it represents an implicit coating or a bare material interface.
-
-### E-004 — Controlled comparison baseline
-
-Select the tile dimensions/thicknesses, optical surface preset, SiPM geometry and placement, dimple state, and coupling configuration that remain fixed while thickness is varied.
-
 ### E-005 — Beam geometry and scan shape
 
-Decide whether the first study uses centered point incidence, a finite beam profile, or a position scan. A centered smoke/comparison run and a later spatial scan are separate stages.
+With the scoped `55 mrad` divergence fixed by D-008, decide whether the first study uses centered point incidence, a finite transverse beam profile, or a position scan. A centered smoke/comparison run and a later spatial scan are separate stages.
 
 ### E-006 — First-pass observables and shower diagnostics
 
@@ -175,7 +223,10 @@ Decide how the new source and absorber parameters enter the local runner, point-
 - Preserve `1 GeV/c` as the authoritative neutron input and derive the GPS kinetic energy.
 - Preserve 4 cm `StainlessSteelSAE304` as the absorber material/thickness reference.
 - Preserve the professor-confirmed no-gap geometry and document its difference from ePIC `26.07.0`.
-- Keep the steel transverse proxy configurable and verify that its edges do not control the result.
+- Preserve the paint/wrap at the steel-facing tile surface; no air gap must not be implemented as a bare EJ-200-to-steel optical interface.
+- Keep the same configurable steel transverse proxy across tile comparisons, and complete the accepted `200/300/500 mm` edge-leakage convergence check before production.
+- Keep the D-007 `50 x 50 x 4/16 mm` optical baseline fixed in the first comparison.
+- Label `55 mrad` as a provisional 50 mm-only choice; reopen `45/75 mrad` when the measured approximately `115 x 115 mm` groups enter scope.
 - Change one scientific variable at a time when comparing tile thicknesses.
 - Record enough metadata to reconstruct the geometry, source, physics environment, and derivation later.
 
@@ -202,3 +253,7 @@ Follow-up clarifications:
 > No gap
 >
 > If energy then about 2 GeV (1 GeV of mass and 1 GeV of momentum)
+
+Optical-boundary clarification:
+
+> the tiles will still be painted/wrapped, just mean there is no air-gap between the tiles and steel.
