@@ -8,3 +8,6 @@ test/OpNovice2/LOCAL_USAGE_GUIDE.zh.md
 .vscode/
 out_archives/
 out_files/
+
+# Local-language mirrors of tracked decision records
+docs/decisions/*.local.zh.md
