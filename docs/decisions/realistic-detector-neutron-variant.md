@@ -1,7 +1,8 @@
 # Realistic Detector Neutron Variant — Decision Record
 
-- **Status:** Confirmed scientific inputs; engineering design pending
+- **Status:** Scientific inputs and engineering design confirmed; implementation pending
 - **Recorded:** 2026-07-13
+- **Last updated:** 2026-07-14
 - **Working branch:** `exp/realistic-detector`
 - **Branch baseline:** `practice` at `50ec06d4`
 - **Primary implementation area:** `test/OpNovice2`
@@ -343,7 +344,159 @@ Extend `run_config.json` without removing existing fields. Record at least:
 - point-like transverse profile, `55 mrad` angular model, and nominal minimum absorber-edge distance for the requested grid;
 - runner validation results, exact generated macro paths, and the existing command and Git provenance.
 
-The local runner owns this resolution and validation logic. E-008 remains responsible for propagating the same versioned configuration through the OSC plan, Slurm, merge, and archive workflows without redefining it.
+The local runner owns this resolution and validation logic. D-015 propagates the same versioned configuration through the OSC plan, Slurm, merge, and archive workflows without redefining it.
+
+### D-014 — Validation ladder and production-statistics policy
+
+**Decision:** Do not copy a fixed event count from the electron studies. Use a staged validation ladder, estimate the neutron model's variance and cost with a fixed pilot, and freeze the final production event count from explicit precision targets before production begins.
+
+#### Deterministic and geometry gates
+
+Before statistical interpretation, the implementation must pass all of the following:
+
+- a fixed-seed, absorber-disabled electron regression that preserves the selected legacy physics-summary values;
+- dry-run generation and schema checks for all `4/16 mm tile x 200/300/500 mm absorber` combinations;
+- fail-fast tests for every D-013 forbidden preset override;
+- geometry initialization and overlap checks for all six combinations;
+- exact checks of the D-013 resolved source positions, including `43.5 mm` for the `4 mm` tile and `49.5 mm` for the `16 mm` tile;
+- visual inspection of both tile thicknesses with the production-size candidate, showing the steel/tile contact, `-Z` SiPM, and `+Z -> -Z` beam direction;
+- one full-optical event for each of the six geometry combinations to verify initialization, output creation, and the complete D-012 event schema.
+
+The one-event runs are execution and schema smoke tests only. They are not evidence that neutron interaction or light-production physics is correct. Automated checks must also enforce the D-012 causal invariants: category sums equal their totals, flags equal `count > 0`, a SiPM photon implies generated optical light, invalid collection ratios use `NaN` plus the validity flag, and no unexpected `NaN` or negative count/energy appears.
+
+Hadronic-only runs with optical production disabled may be used for bounded debugging of the shower and interaction classification. They cannot satisfy a full-model acceptance gate and cannot be merged with production results.
+
+#### Full-optical benchmark and pilot
+
+At the center with the `500 x 500 x 40 mm` absorber, run a `100-event` full-optical benchmark for each tile thickness. Record wall time per event, maximum resident memory, output bytes per event, photon multiplicities, and zero-light fractions. Size later OSC tasks from the slower `16 mm` configuration, targeting no more than approximately one hour per task.
+
+The fixed statistical pilot is `1000 events` per configuration, split into four independent `250-event` seed blocks. If the benchmark requires smaller execution blocks to stay within the task-time target, retain the same `1000-event` aggregate pilot. All seeds must be explicit, distinct, and recorded. Do not reuse the same random stream for the `4 mm` and `16 mm` configurations or analyze their events as paired samples.
+
+#### Absorber transverse-size convergence
+
+Run the centered pilot for both tile thicknesses at `200`, `300`, and `500 mm` square transverse absorber sizes. The `200 mm` result diagnoses the edge-leakage trend but is not required to agree with the larger sizes.
+
+For each thickness, compute independent-event bootstrap `95%` confidence intervals for the `300 mm / 500 mm` ratios of:
+
+- scintillation photons per incident neutron;
+- SiPM photons per incident neutron, the net response.
+
+The production-size candidate passes only when both confidence intervals lie entirely within `[0.95, 1.05]` for both tile thicknesses. If an interval is too broad, add statistics before judging convergence. If it is sufficiently narrow but remains outside the equivalence band, do not declare `500 mm` converged; reopen the absorber-size decision with a larger candidate.
+
+#### Production event-count derivation and inference
+
+Use the full-optical pilot event records to estimate the event-level uncertainty of the `16 mm / 4 mm` ratios for production, collection, and net response. Determine the required event count so that the bootstrap `95%` confidence interval for every centered ratio has a relative half-width no larger than `5%`. Inflate the pilot-derived requirement by `25%`, round it to complete execution blocks, and freeze that common event count for both thicknesses before the final centered production run.
+
+Production data must contain at least four independent seed blocks per configuration. Use a fixed analysis seed and `10,000` event-level bootstrap resamples while recomputing each ratio-of-sums estimator. Report event-level mean, RMS, and standard error as required by D-012; use Wilson `95%` intervals for interaction and zero-light event fractions.
+
+Interpret the centered net-response ratio as follows:
+
+- if its `95%` confidence interval is wholly above `1`, the `16 mm` tile has the larger net response;
+- if it is wholly below `1`, the `4 mm` tile has the larger net response;
+- if it still crosses `1` after the `5%` precision target is met, report that no winner is resolved at the achieved precision rather than increasing the sample indefinitely.
+
+The production and collection ratios explain the two competing effects; they must not be collapsed into the net ratio alone. If the final frozen sample unexpectedly misses the precision target, report the achieved interval and treat any top-up as a new, explicitly recorded extension rather than silently continuing the run.
+
+#### One-dimensional scan precision
+
+For the D-011 line scan, use the same event count for the two thicknesses at every compared position. At `x = 0–25 mm`, target a relative half-width no larger than `10%` for the thickness-ratio confidence intervals. At the low-signal spill-in points `x = 30–40 mm`, do not chase unstable relative precision when the response is near zero; report the mean response, zero-light fraction, and a `95%` upper interval instead.
+
+The `x = -20 mm` symmetry check passes only when, for both production and net response, the `-20/+20` point estimate lies within `[0.95, 1.05]`, its `95%` confidence interval contains `1`, and its relative half-width is no larger than `10%`.
+
+These `5%` centered/convergence and `10%` exploratory-line targets are analysis thresholds for this first study, not professor-specified detector constants. D-015 preserves configuration identity, independent seed blocks, and mergeable sufficient statistics so these rules can be applied without rerunning successful tasks.
+
+### D-015 — Local and OSC campaign workflow
+
+**Decision:** Keep the general scan runner as the single configuration resolver and add a dedicated, versioned campaign layer for the realistic-neutron study. Do not duplicate the D-013 scientific constants across local, plan-generation, Slurm, merge, or analysis scripts.
+
+#### Campaign source of truth
+
+The existing runner remains authoritative through:
+
+```text
+run_sipm_cavity_scan.sh --study-preset realistic-neutron-v1
+```
+
+Add a dedicated campaign generator, such as:
+
+```text
+hpc/osc/generate_realistic_neutron_campaign.py
+```
+
+Each generated campaign directory contains:
+
+```text
+campaign.json
+tasks.tsv
+scan_args.txt
+README.md
+```
+
+`tasks.tsv` is the machine-readable logical-task manifest. `scan_args.txt` is a derived, shell-quoted execution file for the current Slurm harness. The campaign manifest records its schema version, study preset, stage, creation time, clean Git commit, plan hash, requested event/block structure, and expected task count. The general electron/Sr-90 plan generator remains available for its existing workflows and does not become the source of truth for this study.
+
+#### Staged task decomposition
+
+Generate and gate campaigns sequentially rather than submitting one combined plan:
+
+| Campaign stage | Logical task matrix |
+| --- | --- |
+| full-optical geometry smoke | `2 thicknesses x 3 absorber sizes = 6` |
+| OSC benchmark | `2 thicknesses = 2` |
+| convergence pilot | `2 thicknesses x 3 sizes x 4 seed blocks = 24` |
+| centered production | `2 thicknesses x B production blocks` |
+| one-dimensional scan | `2 thicknesses x 9 new positions x B line blocks` |
+
+One Slurm task represents exactly one `(stage, tile thickness, absorber size, x, y, seed block)` tuple. The D-011 line campaign contains only the nine new positions `x = 5–40 mm` plus `x = -20 mm`; it imports `x = 0` from the accepted centered production campaign. It must not rerun the center or substitute pilot data for it. The later two-dimensional stage requires a new campaign decision after the first stages are understood.
+
+#### Stable identity and random seeds
+
+Every logical task has a stable, Slurm-independent `logical_task_id` and a canonical `configuration_hash`. Slurm job and array-task IDs identify execution attempts only and are never used as the scientific configuration identity.
+
+Add an explicit Geant4 seed-pair interface to the runner. The campaign generator deterministically derives two valid, globally unique seeds from a campaign seed and logical task ID, then writes them to the task manifest, generated macro, and `run_config.json`. Different thicknesses, positions, sizes, and blocks do not reuse a random stream. A retry of one logical task reuses that task's original seeds and configuration hash so that it is an exact replacement, not a new statistical block.
+
+#### Pilot and confirmatory production separation
+
+The convergence pilot may be extended with additional independent blocks solely to resolve the D-014 absorber-size gate. The centered `500 mm` pilot used to estimate production `N` is not included in the final thickness comparison. After `N` is frozen, centered production uses new independent seeds. This prevents the same pilot fluctuations from both choosing the sample size and entering the final confidence interval.
+
+Pilot, hadronic-only debug, geometry smoke, benchmark, centered production, and line-scan data remain distinct stages in metadata and cannot be silently merged. The center reused by the line scan is the confirmatory centered-production dataset.
+
+#### Pinned production environment and immutable source
+
+The repository currently uses Geant4 `11.3.2` in the local Docker image and `11.4.2` in the OSC Apptainer workflow. Do not mix their event data. All accepted benchmark, pilot, convergence, and production evidence for this study uses the pinned OSC Geant4 `11.4.2` environment. Local `11.3.2` runs are development and early-smoke artifacts only; upgrading the local image for parity is desirable but is not a first-production blocker. Final smoke gates must be repeated in the pinned OSC environment.
+
+Every OSC campaign records the Apptainer image SHA-256, reported Geant4 version, all Geant4 dataset identities, compiler/build identity, and executable checksum. Production generation and submission require a clean Git worktree at one fixed commit. Stage the campaign in an immutable commit-specific source/build directory, complete one prebuild smoke, and have all array tasks run that frozen executable. Tasks must fail rather than build from or continue against a shared checkout that changed after submission.
+
+#### Submission, recovery, finalization, and analysis
+
+Provide campaign-specific submission support for:
+
+```text
+--check-only
+--resume
+--retry-failed
+```
+
+The append-only submission manifest maps each execution attempt to the campaign/plan hash, Git commit, image hash, job ID, and submission time. Resume or recovery submits only missing or invalid logical tasks. A retry does not overwrite prior evidence; the finalizer selects the explicitly valid attempt and rejects ambiguous duplicate successes.
+
+The dedicated finalizer audits every expected logical task for a completion marker, configuration hash, preset, commit, environment identity, event count, seed identity, and the presence of its ROOT file, summary, macro, log, and `run_config.json`. Existing one-row efficiency-map merging may be reused as a convenience view, but it is not sufficient for D-014.
+
+The finalized campaign writes at least:
+
+```text
+task_index.tsv
+configuration_summary.csv
+thickness_ratios.csv
+validation_report.json
+analysis_config.json
+```
+
+Event-level bootstrap analysis reads all audited per-block ROOT files. If a combined ROOT file is produced, retain the original block files and their seed provenance. The analysis configuration records the fixed bootstrap seed, resample count, estimators, thresholds, included campaign/task IDs, and any excluded invalid attempts.
+
+#### Archive boundary
+
+For every campaign that passes its gate, package the campaign/task/submission manifests, generated macros, run configurations, logs, original ROOT blocks, summaries, finalized analysis products, environment manifest, and `SHA256SUMS`. Keep debug and hadronic-only artifacts separate from full-optical evidence.
+
+The repository stores source code and workflow infrastructure; large run products are working artifacts until a complete package is copied into the established OneDrive `Results` archive. The archive package, not repo-local `scan_latest` links or Slurm job IDs, is the durable result identity.
 
 ## Current repository facts relevant to implementation
 
@@ -355,17 +508,9 @@ The local runner owns this resolution and validation logic. E-008 remains respon
 
 These statements describe the starting point. They are not approval of a particular implementation.
 
-## Open engineering decisions
+## Engineering decision status
 
-The following must be decided after this record is accepted and before implementation is considered complete.
-
-### E-007 — Validation and production statistics
-
-Define geometry visualization, one-event and low-statistics smoke tests, runtime benchmarking, convergence checks, and only then production event counts. Existing electron-study event counts must not be copied automatically to a GeV-scale neutron shower with optical tracking.
-
-### E-008 — Local and OSC workflow
-
-Decide how the new source and absorber parameters enter the local runner, point-plan generator, Slurm workflow, merge tools, and reproducibility metadata.
+No engineering decisions remain open before implementation begins. Newly discovered choices that would alter a confirmed scientific input, comparison baseline, validation threshold, or campaign identity must be recorded as a new decision rather than silently folded into the implementation.
 
 ## Invariants for the next phase
 
@@ -380,6 +525,8 @@ Decide how the new source and absorber parameters enter the local runner, point-
 - Use the D-011 one-dimensional grid from `x = 0` through `40 mm` in `5 mm` steps at `y = 0`, plus the `x = -20 mm` symmetry check.
 - Preserve the D-012 causal event record and keep neutron interaction probability, light production, optical collection, and net response as separate quantities.
 - Preserve the D-013 two-layer configuration interface, absorber-aware source placement, and versioned `realistic-neutron-v1` preset; the `1.5 mm` source clearance is not a steel-to-tile gap.
+- Follow the D-014 deterministic, geometry, benchmark, pilot, convergence, and production gates; derive and freeze production statistics from the accepted `5%/10%` precision policy rather than copying electron-study event counts.
+- Follow the D-015 dedicated campaign workflow, keep pilot and confirmatory production separate, preserve stable logical-task and seed identities, and use only the pinned OSC Geant4 `11.4.2` environment for accepted statistical evidence.
 - Change one scientific variable at a time when comparing tile thicknesses.
 - Record enough metadata to reconstruct the geometry, source, physics environment, and derivation later.
 
