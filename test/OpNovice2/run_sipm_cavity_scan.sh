@@ -1028,6 +1028,47 @@ if [[ "${campaign_metadata_count}" -ne 0 ]]; then
   fi
 fi
 
+execution_metadata_count=0
+for execution_value in \
+  "${RN_ATTEMPT_ID:-}" "${RN_LOGICAL_TASK_INDEX:-}" \
+  "${RN_LOGICAL_TASK_ID:-}" "${RN_PLAN_HASH:-}" \
+  "${RN_GIT_COMMIT:-}" "${RN_ENVIRONMENT_MODE:-}" \
+  "${RN_ENVIRONMENT_IDENTITY:-}" "${RN_IMAGE_SHA256:-}" \
+  "${RN_G4_DATA_MANIFEST_SHA256:-}" "${RN_EXECUTABLE_SHA256:-}"; do
+  [[ -n "${execution_value}" ]] && execution_metadata_count=$((execution_metadata_count + 1))
+done
+if [[ "${execution_metadata_count}" -ne 0 ]]; then
+  if [[ "${campaign_metadata_count}" -ne 5 || "${execution_metadata_count}" -ne 10 ]]; then
+    echo "Formal campaign execution metadata is incomplete; use the campaign submission wrapper." >&2
+    exit 1
+  fi
+  if [[ ! "${RN_ATTEMPT_ID}" =~ ^[A-Za-z0-9._-]+$ ||
+        ! "${RN_LOGICAL_TASK_INDEX}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Invalid formal campaign attempt or logical task index." >&2
+    exit 1
+  fi
+  if [[ "${RN_LOGICAL_TASK_ID}" != "${LOGICAL_TASK_ID}" ]]; then
+    echo "Execution logical task ID does not match --logical-task-id." >&2
+    exit 1
+  fi
+  if [[ "${RN_ENVIRONMENT_MODE}" != "osc-production" ]]; then
+    echo "Formal realistic-neutron campaign tasks require RN_ENVIRONMENT_MODE=osc-production." >&2
+    exit 1
+  fi
+  if [[ ! "${RN_GIT_COMMIT}" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "Invalid RN_GIT_COMMIT: expected a lowercase 40-character commit." >&2
+    exit 1
+  fi
+  for execution_digest in \
+    "${RN_PLAN_HASH}" "${RN_ENVIRONMENT_IDENTITY}" "${RN_IMAGE_SHA256}" \
+    "${RN_G4_DATA_MANIFEST_SHA256}" "${RN_EXECUTABLE_SHA256}"; do
+    if [[ ! "${execution_digest}" =~ ^[0-9a-f]{64}$ ]]; then
+      echo "Invalid formal campaign SHA-256 identity: ${execution_digest}" >&2
+      exit 1
+    fi
+  done
+fi
+
 case "${PLOT_WITH_ROOT}" in
   1|true|TRUE|yes|YES|on|ON)
     PLOT_WITH_ROOT="1"
@@ -2727,6 +2768,36 @@ write_run_config() {
     printf ',\n'
     printf '    "seed_block": '
     if [[ -n "${SEED_BLOCK}" ]]; then printf '%s' "${SEED_BLOCK}"; else printf 'null'; fi
+    printf '\n'
+    printf '  },\n'
+    printf '  "execution": {\n'
+    printf '    "formal_campaign_task": %s,\n' "$(if [[ "${execution_metadata_count}" -eq 10 ]]; then echo true; else echo false; fi)"
+    printf '    "attempt_id": '
+    if [[ -n "${RN_ATTEMPT_ID:-}" ]]; then printf '"%s"' "$(json_string "${RN_ATTEMPT_ID}")"; else printf 'null'; fi
+    printf ',\n'
+    printf '    "logical_task_index": '
+    if [[ -n "${RN_LOGICAL_TASK_INDEX:-}" ]]; then printf '%s' "${RN_LOGICAL_TASK_INDEX}"; else printf 'null'; fi
+    printf ',\n'
+    printf '    "plan_hash": '
+    if [[ -n "${RN_PLAN_HASH:-}" ]]; then printf '"%s"' "${RN_PLAN_HASH}"; else printf 'null'; fi
+    printf ',\n'
+    printf '    "git_commit": '
+    if [[ -n "${RN_GIT_COMMIT:-}" ]]; then printf '"%s"' "${RN_GIT_COMMIT}"; else printf 'null'; fi
+    printf ',\n'
+    printf '    "environment_mode": '
+    if [[ -n "${RN_ENVIRONMENT_MODE:-}" ]]; then printf '"%s"' "$(json_string "${RN_ENVIRONMENT_MODE}")"; else printf 'null'; fi
+    printf ',\n'
+    printf '    "environment_identity": '
+    if [[ -n "${RN_ENVIRONMENT_IDENTITY:-}" ]]; then printf '"%s"' "${RN_ENVIRONMENT_IDENTITY}"; else printf 'null'; fi
+    printf ',\n'
+    printf '    "image_sha256": '
+    if [[ -n "${RN_IMAGE_SHA256:-}" ]]; then printf '"%s"' "${RN_IMAGE_SHA256}"; else printf 'null'; fi
+    printf ',\n'
+    printf '    "g4_data_manifest_sha256": '
+    if [[ -n "${RN_G4_DATA_MANIFEST_SHA256:-}" ]]; then printf '"%s"' "${RN_G4_DATA_MANIFEST_SHA256}"; else printf 'null'; fi
+    printf ',\n'
+    printf '    "executable_sha256": '
+    if [[ -n "${RN_EXECUTABLE_SHA256:-}" ]]; then printf '"%s"' "${RN_EXECUTABLE_SHA256}"; else printf 'null'; fi
     printf '\n'
     printf '  },\n'
     printf '  "generated_at_utc": "%s",\n' "$(json_string "${generated_at}")"

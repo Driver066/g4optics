@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+from realistic_neutron_campaign_lib import environment_identity
+
 
 SCHEMA_VERSION = "realistic-neutron-campaign-v1"
 STUDY_PRESET = "realistic-neutron-v1"
@@ -334,6 +336,25 @@ def main() -> int:
                 "osc-production campaigns require provenance artifacts: " + ", ".join(missing)
             )
 
+    image_record = artifact_record(args.image)
+    data_manifest_record = artifact_record(args.g4_data_manifest)
+    build_artifact_record = artifact_record(args.build_artifact)
+    if args.environment_mode == "osc-production":
+        assert args.build_artifact is not None
+        if (args.build_artifact.expanduser().resolve().stat().st_mode & 0o111) == 0:
+            raise SystemExit(
+                "--build-artifact must be an executable frozen OpNovice2 binary"
+            )
+    environment = {
+        "mode": args.environment_mode,
+        "geant4_version": geant4_version,
+        "accepted_statistical_evidence": args.environment_mode == "osc-production",
+        "image": image_record,
+        "g4_data_manifest": data_manifest_record,
+        "build_artifact": build_artifact_record,
+    }
+    environment["identity_hash"] = environment_identity(environment)
+
     events, blocks = resolve_stage_shape(args)
     tasks = build_tasks(
         stage=args.stage,
@@ -377,14 +398,28 @@ def main() -> int:
 - Environment class: `{args.environment_mode}` (Geant4 `{geant4_version}`)
 - Plan hash: `{plan_hash}`
 
-Submit from the repository root after reviewing `campaign.json` and `tasks.tsv`:
+Validate from the repository root after reviewing `campaign.json` and `tasks.tsv`:
 
 ```bash
-SCAN_ARGS_FILE={scan_args_path.relative_to(repo_root) if scan_args_path.is_relative_to(repo_root) else scan_args_path} \\
-  sbatch --array=1-{len(tasks)} hpc/osc/submit_scan.sbatch
+python3 hpc/osc/submit_realistic_neutron_campaign.py \\
+  --campaign-dir {out_dir} --check-only
 ```
 
-Retries must use the same logical task row, configuration hash, and seed pair.
+An `osc-production` campaign is submitted only through the same wrapper with
+`--account`, `--g4-data-root`, and `--frozen-root`. Recovery uses `--resume` or
+`--retry-failed`; do not call `sbatch` directly. After every expected task has
+one unambiguous valid result, run:
+
+```bash
+python3 hpc/osc/finalize_realistic_neutron_campaign.py \\
+  --campaign-dir {out_dir}
+
+python3 hpc/osc/analyze_realistic_neutron_campaign.py \\
+  --campaign-dir {out_dir} \\
+  --finalized-dir {out_dir / "finalized"}
+```
+
+Retries retain the same logical task row, configuration hash, and seed pair.
 Pilot, benchmark, centered production, and line-scan campaigns are separate evidence sets.
 """
     readme_path.write_text(readme, encoding="utf-8")
@@ -407,14 +442,7 @@ Pilot, benchmark, centered production, and line-scan campaigns are separate evid
             "dirty": dirty,
             "dirty_paths": dirty_output.splitlines() if dirty else [],
         },
-        "environment": {
-            "mode": args.environment_mode,
-            "geant4_version": geant4_version,
-            "accepted_statistical_evidence": args.environment_mode == "osc-production",
-            "image": artifact_record(args.image),
-            "g4_data_manifest": artifact_record(args.g4_data_manifest),
-            "build_artifact": artifact_record(args.build_artifact),
-        },
+        "environment": environment,
         "artifacts": {
             "tasks_tsv": {"path": "tasks.tsv", "sha256": sha256_file(tasks_path)},
             "scan_args": {"path": "scan_args.txt", "sha256": sha256_file(scan_args_path)},

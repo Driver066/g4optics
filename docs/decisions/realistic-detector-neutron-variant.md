@@ -7,13 +7,15 @@
 - **Branch baseline:** `practice` at `50ec06d4`
 - **Primary implementation area:** `test/OpNovice2`
 
-The first infrastructure slice now includes the opt-in SAE 304 absorber,
-neutron causal observables, mergeable event summaries, the locked
-`realistic-neutron-v1` runner preset, deterministic campaign generation, and
-local validation checks. It has compiled and completed the six one-event
-full-optical geometry smoke configurations under local Geant4 `11.3.2`.
-Formal statistical evidence still requires the documented OSC production
-environment and Geant4 `11.4.2` gate.
+The infrastructure baseline now includes the opt-in SAE 304 absorber, neutron
+causal observables, mergeable event summaries, the locked
+`realistic-neutron-v1` runner preset, deterministic campaign generation,
+append-only submission/recovery attempts, frozen-source and executable gates,
+per-task result identities, campaign finalization, and pinned event-level
+bootstrap analysis. Local checks include six one-event full-optical geometry
+smoke configurations under Geant4 `11.3.2` plus deterministic fake-Slurm and
+finalization tests. Formal statistical evidence still requires executing the
+documented smoke gates and campaigns in the OSC Geant4 `11.4.2` environment.
 
 ## Purpose
 

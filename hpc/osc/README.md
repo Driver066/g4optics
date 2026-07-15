@@ -31,6 +31,73 @@ SCAN_ARGS_FILE=hpc/osc/scan_args_week5_8_smoke.txt \
 
 Explicit scan arguments passed after `submit_scan.sbatch` take precedence over `SCAN_ARGS_FILE`.
 
+## Realistic-Neutron Campaigns
+
+The realistic detector study uses a dedicated immutable campaign workflow. A
+formal campaign pins Geant4 `11.4.2`, the Apptainer image, a Geant4 dataset
+manifest, a prebuilt `OpNovice2` executable, the clean Git commit, every task
+configuration, and every random seed pair.
+
+Generate one stage only after its preceding gate has passed. For example:
+
+```bash
+python3 hpc/osc/generate_realistic_neutron_campaign.py \
+  --out-dir /path/to/campaigns/convergence-pilot \
+  --stage convergence-pilot \
+  --campaign-seed 20260714 \
+  --environment-mode osc-production \
+  --geant4-version 11.4.2 \
+  --image /path/to/geant4-11.4.2.sif \
+  --g4-data-manifest /path/to/g4-data-manifest.json \
+  --build-artifact /path/to/frozen/OpNovice2
+```
+
+Validate without contacting Slurm:
+
+```bash
+python3 hpc/osc/submit_realistic_neutron_campaign.py \
+  --campaign-dir /path/to/campaigns/convergence-pilot \
+  --check-only
+```
+
+Submit through the campaign wrapper, not through raw `sbatch`. The wrapper
+creates a read-only Git archive and an append-only attempt record, then gives
+every array task an isolated output directory:
+
+```bash
+python3 hpc/osc/submit_realistic_neutron_campaign.py \
+  --campaign-dir /path/to/campaigns/convergence-pilot \
+  --account PAS2524 \
+  --g4-data-root /path/to/geant4-data/11.4.2 \
+  --frozen-root /path/to/frozen-campaign-sources
+```
+
+`--resume` submits only tasks never recorded in a successful Slurm submission.
+`--retry-failed` consults `sacct` and submits only terminal or completed tasks
+that lack a valid, checksum-verified task result. Retries keep the original
+logical task ID, configuration hash, and seeds, while writing a new attempt
+directory; prior evidence is never overwritten.
+
+After every expected task has one unambiguous valid result, finalize and run
+the pinned event-level bootstrap analysis:
+
+```bash
+python3 hpc/osc/finalize_realistic_neutron_campaign.py \
+  --campaign-dir /path/to/campaigns/convergence-pilot
+
+python3 hpc/osc/analyze_realistic_neutron_campaign.py \
+  --campaign-dir /path/to/campaigns/convergence-pilot \
+  --finalized-dir /path/to/campaigns/convergence-pilot/finalized
+```
+
+The finalizer rejects missing or changed artifacts, mismatched configuration or
+environment identities, and ambiguous duplicate successes. The analyzer reads
+the audited `scan` trees from the original ROOT blocks, applies the pinned
+10,000-resample independent event bootstrap, and writes thickness-ratio
+intervals plus Wilson intervals for interaction and zero-light fractions.
+`local-dev` campaigns and the analyzer's explicitly marked fixture mode are
+never accepted as statistical evidence.
+
 ## Point-Level Array Scans
 
 For longer scans, split the grid so each Slurm array task runs one `(x, y)` point in serial Geant4. This keeps the stable `G4RUN_MANAGER_TYPE=Serial` path while letting Slurm run points concurrently.

@@ -26,7 +26,39 @@ SCRIPT_DIR="${PROJECT_ROOT}/hpc/osc"
 
 cd "${PROJECT_ROOT}"
 
-if [[ -z "${SCAN_RUN_ID_SUFFIX:-}" && -n "${SLURM_ARRAY_JOB_ID:-}" && -n "${SLURM_ARRAY_TASK_ID:-}" ]]; then
+if [[ -n "${RN_ATTEMPT_TASKS_FILE:-}" ]]; then
+  if [[ -z "${RN_CAMPAIGN_HOST_DIR:-}" || -z "${RN_ATTEMPT_ID:-}" ]]; then
+    echo "RN_ATTEMPT_TASKS_FILE requires RN_CAMPAIGN_HOST_DIR and RN_ATTEMPT_ID." >&2
+    exit 1
+  fi
+  attempt_tasks_file="${RN_ATTEMPT_TASKS_FILE}"
+  if [[ "${attempt_tasks_file}" != /* ]]; then
+    attempt_tasks_file="${PROJECT_ROOT}/${attempt_tasks_file}"
+  fi
+  if [[ ! -f "${attempt_tasks_file}" ]]; then
+    echo "Missing realistic-neutron attempt task map: ${attempt_tasks_file}" >&2
+    exit 1
+  fi
+  task_id="${SLURM_ARRAY_TASK_ID:-1}"
+  task_row="$(awk -F '\t' -v n="${task_id}" 'NR == n + 1 { print; exit }' "${attempt_tasks_file}")"
+  if [[ -z "${task_row}" ]]; then
+    echo "No realistic-neutron task mapping for array task ${task_id}." >&2
+    exit 1
+  fi
+  IFS=$'\t' read -r array_index logical_task_index logical_task_id _ <<< "${task_row}"
+  if [[ "${array_index}" != "${task_id}" ||
+        ! "${logical_task_index}" =~ ^[1-9][0-9]*$ ||
+        ! "${logical_task_id}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "Invalid realistic-neutron task mapping: ${task_row}" >&2
+    exit 1
+  fi
+  export RN_LOGICAL_TASK_INDEX="${logical_task_index}"
+  export RN_LOGICAL_TASK_ID="${logical_task_id}"
+fi
+
+if [[ -z "${SCAN_RUN_ID_SUFFIX:-}" && -n "${RN_ATTEMPT_ID:-}" && -n "${RN_LOGICAL_TASK_ID:-}" ]]; then
+  export SCAN_RUN_ID_SUFFIX="${RN_ATTEMPT_ID}_${RN_LOGICAL_TASK_ID}"
+elif [[ -z "${SCAN_RUN_ID_SUFFIX:-}" && -n "${SLURM_ARRAY_JOB_ID:-}" && -n "${SLURM_ARRAY_TASK_ID:-}" ]]; then
   export SCAN_RUN_ID_SUFFIX="job${SLURM_ARRAY_JOB_ID}_task${SLURM_ARRAY_TASK_ID}"
 elif [[ -z "${SCAN_RUN_ID_SUFFIX:-}" && -n "${SLURM_JOB_ID:-}" ]]; then
   export SCAN_RUN_ID_SUFFIX="job${SLURM_JOB_ID}"
