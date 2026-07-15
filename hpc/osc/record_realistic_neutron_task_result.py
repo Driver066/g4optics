@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from realistic_neutron_campaign_lib import (
+    EVENT_SCHEMA_VERSION,
     RESULT_SCHEMA_VERSION,
     RUN_CONFIG_SCHEMA_VERSION,
     STUDY_PRESET,
@@ -67,6 +68,8 @@ def validate_run_config(
 ) -> None:
     if config.get("schema_version") != RUN_CONFIG_SCHEMA_VERSION:
         raise ValueError("run_config schema mismatch")
+    if config.get("event_schema_version") != EVENT_SCHEMA_VERSION:
+        raise ValueError("run_config event schema mismatch")
     if config.get("study_preset") != STUDY_PRESET or config.get("dry_run") is not False:
         raise ValueError("run_config is not a completed realistic-neutron task")
 

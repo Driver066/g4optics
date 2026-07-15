@@ -20,6 +20,13 @@ from realistic_neutron_campaign_lib import (
     environment_identity,
     sha256_file,
 )
+from realistic_neutron_event_audit import EVENT_SCHEMA_FIELDS, audit_event_arrays
+from analyze_realistic_neutron_campaign import production_statistics_recommendation
+from run_realistic_neutron_electron_regression import (
+    FLOAT_FIELDS as FLOAT_FIELDS_FOR_REGRESSION,
+    INTEGER_FIELDS as INTEGER_FIELDS_FOR_REGRESSION,
+    compare_summaries,
+)
 
 
 EXPECTED_SCAN_COLUMNS = [
@@ -49,6 +56,7 @@ EXPECTED_SCAN_COLUMNS = [
     "primary_neutron_elastic_flag",
     "primary_neutron_inelastic_flag",
     "primary_neutron_capture_flag",
+    "primary_neutron_any_interaction_flag",
     "charged_tile_entry_count",
     "charged_tile_entry_ke_mev",
     "electron_tile_entry_count",
@@ -129,6 +137,7 @@ def validate_event_schema(opnovice_dir: Path) -> None:
     scan_booking = histo_source[start:end]
     columns = re.findall(r'CreateNtuple[IDS]Column\("([^"]+)"\)', scan_booking)
     assert columns == EXPECTED_SCAN_COLUMNS, (columns, EXPECTED_SCAN_COLUMNS)
+    assert columns == list(EVENT_SCHEMA_FIELDS)
 
     event_source = (opnovice_dir / "src/EventAction.cc").read_text(encoding="utf-8")
     filled_ids = [
@@ -136,6 +145,112 @@ def validate_event_schema(opnovice_dir: Path) -> None:
         for value in re.findall(r"FillNtuple[IDS]Column\(\s*(\d+)", event_source)
     ]
     assert sorted(filled_ids) == list(range(len(EXPECTED_SCAN_COLUMNS))), filled_ids
+
+
+def validate_event_causal_audit() -> None:
+    nan = float("nan")
+    row = {
+        "event_id": 0,
+        "shoot_x_mm": 0.0,
+        "shoot_y_mm": 0.0,
+        "shoot_z_mm": 43.5,
+        "hit_valid": 0,
+        "hit_x_mm": nan,
+        "hit_y_mm": nan,
+        "hit_z_mm": nan,
+        "scint_centroid_valid": 1,
+        "scint_centroid_x_mm": 0.1,
+        "scint_centroid_y_mm": 0.2,
+        "scint_centroid_z_mm": 0.3,
+        "generated_optical_photons": 10,
+        "scintillation_photons": 10,
+        "sipm_detected_photons": 2,
+        "collection_efficiency": 0.2,
+        "primary_kinetic_energy_mev": 432.58,
+        "collection_efficiency_valid": 1,
+        "cerenkov_photons": 0,
+        "steel_edep_mev": 1.5,
+        "primary_neutron_elastic_count": 1,
+        "primary_neutron_inelastic_count": 0,
+        "primary_neutron_capture_count": 0,
+        "primary_neutron_elastic_flag": 1,
+        "primary_neutron_inelastic_flag": 0,
+        "primary_neutron_capture_flag": 0,
+        "primary_neutron_any_interaction_flag": 1,
+        "charged_tile_entry_count": 3,
+        "charged_tile_entry_ke_mev": 6.0,
+        "electron_tile_entry_count": 1,
+        "electron_tile_entry_ke_mev": 1.0,
+        "proton_tile_entry_count": 1,
+        "proton_tile_entry_ke_mev": 2.0,
+        "other_charged_tile_entry_count": 1,
+        "other_charged_tile_entry_ke_mev": 3.0,
+        "primary_neutron_tile_entry_valid": 0,
+        "primary_neutron_tile_entry_x_mm": nan,
+        "primary_neutron_tile_entry_y_mm": nan,
+        "primary_neutron_tile_entry_z_mm": nan,
+        "tile_edep_mev": 1.0,
+        "electron_tile_edep_mev": 0.2,
+        "proton_tile_edep_mev": 0.3,
+        "other_charged_tile_edep_mev": 0.4,
+        "neutral_tile_edep_mev": 0.1,
+    }
+    arrays = {field: [row[field]] for field in EVENT_SCHEMA_FIELDS}
+    report = audit_event_arrays(arrays, expected_events=1, context="fixture")
+    assert report["events"] == 1
+    assert report["primary_neutron_interaction_events"] == 1
+
+    invalid = {field: list(values) for field, values in arrays.items()}
+    invalid["primary_neutron_any_interaction_flag"][0] = 0
+    try:
+        audit_event_arrays(invalid, expected_events=1, context="invalid-fixture")
+    except ValueError as exc:
+        assert "any_interaction_flag" in str(exc)
+    else:
+        raise AssertionError("causal audit accepted an invalid any-interaction flag")
+
+    recommendation = production_statistics_recommendation(
+        [
+            {
+                "absorber_transverse_mm": 500,
+                "x_mm": 0,
+                "y_mm": 0,
+                "events_4mm": 1000,
+                "events_16mm": 1000,
+                "production_ratio_16_over_4": 1.2,
+                "production_ci95_low": 1.1,
+                "production_ci95_high": 1.3,
+                "collection_ratio_16_over_4": 0.8,
+                "collection_ci95_low": 0.74,
+                "collection_ci95_high": 0.86,
+                "net_ratio_16_over_4": 0.96,
+                "net_ci95_low": 0.88,
+                "net_ci95_high": 1.04,
+            }
+        ],
+        stage="convergence-pilot",
+        block_events=250,
+    )
+    assert recommendation["status"] == "recommendation_requires_review"
+    assert int(recommendation["recommended_total_events_per_thickness"]) % 250 == 0
+    assert int(recommendation["recommended_blocks_per_thickness"]) >= 4
+
+    baseline = {field: "1" for field in INTEGER_FIELDS_FOR_REGRESSION}
+    baseline.update({field: "1.0" for field in FLOAT_FIELDS_FOR_REGRESSION})
+    candidate = dict(baseline)
+    comparisons = compare_summaries(
+        baseline, candidate, rel_tol=1e-12, abs_tol=1e-12
+    )
+    assert all(item["passed"] is True for item in comparisons)
+    candidate["generated_optical_photons"] = "2"
+    comparisons = compare_summaries(
+        baseline, candidate, rel_tol=1e-12, abs_tol=1e-12
+    )
+    assert any(
+        item["field"] == "generated_optical_photons"
+        and item["passed"] is False
+        for item in comparisons
+    )
 
 
 def validate_runner_campaign(repo_root: Path, temp_root: Path) -> None:
@@ -192,7 +307,8 @@ def validate_runner_campaign(repo_root: Path, temp_root: Path) -> None:
     seen_seeds: set[int] = set()
     for config_path in configs:
         config = json.loads(config_path.read_text(encoding="utf-8"))
-        assert config["schema_version"] == "opnovice2-run-config-v2"
+        assert config["schema_version"] == "opnovice2-run-config-v3"
+        assert config["event_schema_version"] == "opnovice2-scan-event-v2"
         assert config["study_preset"] == "realistic-neutron-v1"
         assert config["simulation"]["primary_particle"] == "neutron"
         assert config["simulation"]["derived_gps_kinetic_energy_mev"] == 432.58
@@ -298,9 +414,104 @@ def validate_runner_campaign(repo_root: Path, temp_root: Path) -> None:
     assert "/gps/particle e-" in legacy_macro
 
 
+def validate_visualization_tool(repo_root: Path, temp_root: Path) -> None:
+    output_dir = temp_root / "geometry-visual"
+    run(
+        [
+            sys.executable,
+            "test/OpNovice2/visualize_realistic_neutron_geometry.py",
+            "--tile-thickness-mm",
+            "16",
+            "--absorber-transverse-mm",
+            "500",
+            "--output-dir",
+            str(output_dir),
+            "--prepare-only",
+        ],
+        cwd=repo_root,
+    )
+    macro = (output_dir / "realistic_neutron_geometry_visual.mac").read_text(
+        encoding="utf-8"
+    )
+    assert "/opnovice2/tank/size 50 50 16 mm" in macro
+    assert "/opnovice2/absorber/size 500 500 40 mm" in macro
+    assert "/opnovice2/sipm/face -Z" in macro
+    assert "/gps/direction 0 0 -1" in macro
+    assert "/vis/geometry/set/forceWireframe SteelAbsorber 0 true" in macro
+    assert "/run/beamOn 0" in macro
+
+
 def write_executable(path: Path, body: str) -> None:
     path.write_text(body, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+def regression_fixture_executable(*, generated: int) -> str:
+    fields = (*INTEGER_FIELDS_FOR_REGRESSION, *FLOAT_FIELDS_FOR_REGRESSION)
+    values = [
+        str(generated) if field == "generated_optical_photons" else "1"
+        for field in INTEGER_FIELDS_FOR_REGRESSION
+    ] + ["1.0" for _ in FLOAT_FIELDS_FOR_REGRESSION]
+    return (
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        'base="${1%.mac}"\n'
+        f"printf '%s\\n' '{','.join(fields)}' > \"${{base}}_summary.csv\"\n"
+        f"printf '%s\\n' '{','.join(values)}' >> \"${{base}}_summary.csv\"\n"
+        "printf '%s\\n' fixture-root > \"${base}.root\"\n"
+    )
+
+
+def validate_electron_regression_orchestration(
+    repo_root: Path, temp_root: Path
+) -> None:
+    baseline = temp_root / "regression-baseline"
+    candidate = temp_root / "regression-candidate"
+    write_executable(baseline, regression_fixture_executable(generated=1))
+    write_executable(candidate, regression_fixture_executable(generated=1))
+    output_dir = temp_root / "electron-regression-pass"
+    run(
+        [
+            sys.executable,
+            "hpc/osc/run_realistic_neutron_electron_regression.py",
+            "--baseline-executable",
+            str(baseline),
+            "--candidate-executable",
+            str(candidate),
+            "--output-dir",
+            str(output_dir),
+        ],
+        cwd=repo_root,
+    )
+    report = json.loads(
+        (output_dir / "regression_report.json").read_text(encoding="utf-8")
+    )
+    assert report["valid"] is True
+    assert (output_dir / "baseline.root").is_file()
+    assert (output_dir / "candidate.root").is_file()
+
+    changed = temp_root / "regression-candidate-changed"
+    write_executable(changed, regression_fixture_executable(generated=2))
+    failed_dir = temp_root / "electron-regression-fail"
+    run(
+        [
+            sys.executable,
+            "hpc/osc/run_realistic_neutron_electron_regression.py",
+            "--baseline-executable",
+            str(baseline),
+            "--candidate-executable",
+            str(changed),
+            "--output-dir",
+            str(failed_dir),
+        ],
+        cwd=repo_root,
+        expect_success=False,
+    )
+    failed_report = json.loads(
+        (failed_dir / "regression_report.json").read_text(encoding="utf-8")
+    )
+    assert failed_report["valid"] is False
+    assert failed_report["failed_fields"] == ["generated_optical_photons"]
 
 
 def promote_campaign_to_production(
@@ -344,28 +555,41 @@ def promote_campaign_to_production(
 
 def write_fake_summary(path: Path, task: dict[str, str]) -> None:
     tile = int(task["tile_thickness_mm"])
+    events = int(task["events"])
     if tile == 4:
-        generated, scintillation, sipm = 100, 40, 10
+        generated_per_event, scintillation_per_event, sipm_per_event = 100, 40, 10
     else:
-        generated, scintillation, sipm = 200, 120, 15
+        generated_per_event, scintillation_per_event, sipm_per_event = 200, 120, 15
+    generated = generated_per_event * events
+    scintillation = scintillation_per_event * events
+    sipm = sipm_per_event * events
     row = {
-        "events": 1,
-        "committed_events": 1,
+        "events": events,
+        "committed_events": events,
         "generated_optical_photons": generated,
         "scintillation_photons": scintillation,
         "sipm_detected_photons": sipm,
         "cerenkov_photons": 0,
-        "steel_edep_sum_mev": 1.0,
-        "tile_edep_sum_mev": 2.0,
-        "primary_neutron_interaction_events": 1,
-        "primary_neutron_elastic_count": 1,
+        "steel_edep_sum_mev": float(events),
+        "tile_edep_sum_mev": 2.0 * events,
+        "primary_neutron_interaction_events": events,
+        "primary_neutron_elastic_count": events,
         "primary_neutron_inelastic_count": 0,
         "primary_neutron_capture_count": 0,
-        "charged_tile_entry_events": 1,
-        "charged_tile_entry_count": 1,
+        "charged_tile_entry_events": events,
+        "charged_tile_entry_count": events,
         "generated_optical_zero_events": 0,
         "scintillation_zero_events": 0,
         "sipm_detected_zero_events": 0,
+        "generated_optical_mean": generated_per_event,
+        "generated_optical_rms": 1.0,
+        "generated_optical_zero_fraction": 0.0,
+        "scintillation_mean": scintillation_per_event,
+        "scintillation_rms": 1.0,
+        "scintillation_zero_fraction": 0.0,
+        "sipm_detected_mean": sipm_per_event,
+        "sipm_detected_rms": 1.0,
+        "sipm_detected_zero_fraction": 0.0,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as stream:
@@ -655,10 +879,84 @@ def validate_result_finalizer(repo_root: Path, temp_root: Path) -> None:
         and math.isclose(float(row["production_ci95_high"]), 3.0)
         for row in analyzed
     )
+    convergence = read_csv_rows(analysis_dir / "absorber_convergence.csv")
+    assert len(convergence) == 2
+    assert all(row["passes_absorber_convergence"] == "True" for row in convergence)
+    production_statistics = json.loads(
+        (analysis_dir / "production_statistics.json").read_text(encoding="utf-8")
+    )
+    assert production_statistics["status"] == "not_applicable_outside_convergence_pilot"
     completed_config = json.loads(
         (analysis_dir / "analysis_config.json").read_text(encoding="utf-8")
     )
     assert completed_config["accepted_statistical_evidence"] is False
+
+
+def validate_benchmark_summary(repo_root: Path, temp_root: Path) -> None:
+    campaign_dir = temp_root / "benchmark-campaign"
+    generate_campaign(
+        repo_root=repo_root,
+        out_dir=campaign_dir,
+        stage="benchmark",
+        extra=["--geant4-version", "11.4.2"],
+    )
+    git_commit = run(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
+    manifest = promote_campaign_to_production(
+        campaign_dir, temp_root / "benchmark-artifacts", git_commit=git_commit
+    )
+    prepare_fake_results(repo_root, campaign_dir, manifest)
+    finalized_dir = campaign_dir / "finalized"
+    run(
+        [
+            sys.executable,
+            "hpc/osc/finalize_realistic_neutron_campaign.py",
+            "--campaign-dir",
+            str(campaign_dir),
+            "--output-dir",
+            str(finalized_dir),
+            "--bootstrap-resamples",
+            "100",
+        ],
+        cwd=repo_root,
+    )
+    sacct = temp_root / "benchmark-sacct.psv"
+    sacct.write_text(
+        "12345_1|COMPLETED|0:0|100| | |\n"
+        "12345_1.batch|COMPLETED|0:0|100|256M|512M|\n"
+        "12345_2|COMPLETED|0:0|200| | |\n"
+        "12345_2.batch|COMPLETED|0:0|200|384M|768M|\n",
+        encoding="utf-8",
+    )
+    output_dir = finalized_dir / "benchmark"
+    run(
+        [
+            sys.executable,
+            "hpc/osc/summarize_realistic_neutron_benchmark.py",
+            "--campaign-dir",
+            str(campaign_dir),
+            "--finalized-dir",
+            str(finalized_dir),
+            "--output-dir",
+            str(output_dir),
+            "--sacct-input",
+            str(sacct),
+        ],
+        cwd=repo_root,
+    )
+    rows = read_csv_rows(output_dir / "benchmark_report.csv")
+    assert len(rows) == 2
+    assert {int(row["max_rss_bytes"]) for row in rows} == {
+        256 * 1024 * 1024,
+        384 * 1024 * 1024,
+    }
+    report = json.loads(
+        (output_dir / "benchmark_report.json").read_text(encoding="utf-8")
+    )
+    recommendation = report["convergence_pilot_block_recommendation"]
+    assert recommendation["recommended_events_per_task"] == 250
+    assert recommendation["recommended_blocks_per_configuration"] == 4
+    assert recommendation["recommended_block_within_target"] is True
+    assert recommendation["target_feasible_at_one_event"] is True
 
 
 def read_csv_rows(path: Path) -> list[dict[str, str]]:
@@ -847,17 +1145,38 @@ def main() -> int:
             "hpc/osc/record_realistic_neutron_task_result.py",
             "hpc/osc/finalize_realistic_neutron_campaign.py",
             "hpc/osc/analyze_realistic_neutron_campaign.py",
+            "hpc/osc/realistic_neutron_event_audit.py",
+            "hpc/osc/audit_realistic_neutron_campaign.py",
+            "hpc/osc/summarize_realistic_neutron_benchmark.py",
+            "hpc/osc/run_realistic_neutron_electron_regression.py",
+            "test/OpNovice2/visualize_realistic_neutron_geometry.py",
         ],
         cwd=repo_root,
     )
     run(["bash", "-n", "hpc/osc/run_scan_apptainer.sh"], cwd=repo_root)
+    run(
+        ["bash", "-n", "hpc/osc/configure_geant4_data_env.sh"],
+        cwd=repo_root,
+    )
+    run(
+        [
+            "bash",
+            "-n",
+            "hpc/osc/run_realistic_neutron_electron_regression_apptainer.sh",
+        ],
+        cwd=repo_root,
+    )
     run(["bash", "-n", "hpc/osc/submit_scan.sbatch"], cwd=repo_root)
     validate_event_schema(opnovice_dir)
+    validate_event_causal_audit()
     with tempfile.TemporaryDirectory(prefix="g4optics-realistic-neutron-") as temp:
         temp_root = Path(temp)
         validate_runner_campaign(repo_root, temp_root)
+        validate_visualization_tool(repo_root, temp_root)
+        validate_electron_regression_orchestration(repo_root, temp_root)
         validate_stage_shapes(repo_root, temp_root)
         validate_result_finalizer(repo_root, temp_root)
+        validate_benchmark_summary(repo_root, temp_root)
         validate_submission_workflow(repo_root, temp_root)
         validate_sbatch_task_mapping(repo_root, temp_root)
     print("realistic-neutron infrastructure checks passed")

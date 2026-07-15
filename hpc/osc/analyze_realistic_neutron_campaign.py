@@ -25,7 +25,9 @@ from realistic_neutron_campaign_lib import (
     load_json,
     resolve_campaign_path,
     sha256_file,
+    verify_finalized_checksums,
 )
+from realistic_neutron_event_audit import read_and_audit_root
 
 
 EVENT_FIELDS = (
@@ -76,6 +78,26 @@ FRACTION_FIELDS = (
     "sipm_zero_wilson95_high",
 )
 
+ABSORBER_CONVERGENCE_FIELDS = (
+    "stage",
+    "tile_thickness_mm",
+    "x_mm",
+    "y_mm",
+    "events_300mm",
+    "events_500mm",
+    "production_ratio_300_over_500",
+    "production_ci95_low",
+    "production_ci95_high",
+    "production_valid_resamples",
+    "production_equivalent_0p95_1p05",
+    "net_ratio_300_over_500",
+    "net_ci95_low",
+    "net_ci95_high",
+    "net_valid_resamples",
+    "net_equivalent_0p95_1p05",
+    "passes_absorber_convergence",
+)
+
 
 @dataclass(frozen=True)
 class Event:
@@ -110,6 +132,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Explicitly mark fixture analysis as non-scientific infrastructure testing.",
     )
+    parser.add_argument(
+        "--production-block-events",
+        type=int,
+        help=(
+            "Execution block size used when rounding the convergence-pilot "
+            "production-N recommendation; defaults to campaign events_per_task."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -121,35 +151,6 @@ def read_tsv(path: Path) -> list[dict[str, str]]:
 def read_csv(path: Path) -> list[dict[str, str]]:
     with path.open(encoding="utf-8", newline="") as stream:
         return list(csv.DictReader(stream))
-
-
-def verify_finalized_checksums(finalized_dir: Path) -> None:
-    checksum_path = finalized_dir / "SHA256SUMS"
-    required = {
-        "task_index.tsv",
-        "configuration_summary.csv",
-        "thickness_ratios.csv",
-        "validation_report.json",
-        "analysis_config.json",
-    }
-    recorded: set[str] = set()
-    for raw in checksum_path.read_text(encoding="utf-8").splitlines():
-        if not raw.strip():
-            continue
-        parts = raw.split("  ", 1)
-        if len(parts) != 2:
-            raise ValueError(f"invalid finalized checksum row: {raw!r}")
-        digest, name = parts
-        if Path(name).name != name or name in recorded:
-            raise ValueError(f"invalid finalized checksum filename: {name!r}")
-        path = finalized_dir / name
-        if not path.is_file() or sha256_file(path) != digest:
-            raise ValueError(f"finalized checksum mismatch: {path}")
-        recorded.add(name)
-    if not required.issubset(recorded):
-        raise ValueError(
-            f"finalized checksums omit required files: {sorted(required - recorded)}"
-        )
 
 
 def event_from_row(row: dict[str, object]) -> Event:
@@ -174,19 +175,12 @@ def read_fixture_events(path: Path) -> list[Event]:
     return events
 
 
-def read_root_events(path: Path) -> list[Event]:
-    try:
-        import uproot  # type: ignore[import-not-found]
-    except ImportError as exc:
-        raise ValueError(
-            "ROOT event analysis requires uproot and numpy in the analysis environment"
-        ) from exc
-    try:
-        with uproot.open(path) as root_file:
-            tree = root_file["scan"]
-            arrays = tree.arrays(list(EVENT_FIELDS), library="np")
-    except Exception as exc:
-        raise ValueError(f"cannot read scan tree from {path}: {exc}") from exc
+def read_root_events(path: Path, expected_events: int) -> list[Event]:
+    arrays, _ = read_and_audit_root(
+        path,
+        expected_events=expected_events,
+        context=str(path),
+    )
     count = len(arrays[EVENT_FIELDS[0]])
     events = [
         event_from_row({field: arrays[field][index] for field in EVENT_FIELDS})
@@ -228,11 +222,11 @@ def load_events(
         root_digest = root_record.get("sha256")
         if not isinstance(root_digest, str) or sha256_file(root_path) != root_digest:
             raise ValueError(f"audited ROOT checksum mismatch: {root_path}")
+        expected_events = int(row["events"])
         if fixture_dir is not None:
             events = read_fixture_events(fixture_dir / f"{logical_id}.csv")
         else:
-            events = read_root_events(root_path)
-        expected_events = int(row["events"])
+            events = read_root_events(root_path, expected_events)
         if len(events) != expected_events:
             raise ValueError(
                 f"event count mismatch for {logical_id}: {len(events)} != {expected_events}"
@@ -424,6 +418,159 @@ def ratio_rows(
     return rows
 
 
+def absorber_convergence_rows(
+    groups: dict[tuple[object, ...], list[Event]],
+    *,
+    bootstrap_seed: int,
+    resamples: int,
+) -> list[dict[str, object]]:
+    """Compare the 300 mm absorber against the 500 mm production candidate."""
+
+    configurations: dict[tuple[object, ...], dict[int, list[Event]]] = defaultdict(dict)
+    for key, events in groups.items():
+        stage, tile, absorber, x_mm, y_mm = key
+        configurations[(stage, tile, x_mm, y_mm)][int(absorber)] = events
+
+    rows: list[dict[str, object]] = []
+    for key in sorted(configurations):
+        by_absorber = configurations[key]
+        if 300 not in by_absorber or 500 not in by_absorber:
+            continue
+        candidate = by_absorber[300]
+        reference = by_absorber[500]
+        candidate_point = estimator(candidate)
+        reference_point = estimator(reference)
+        bootstraps = bootstrap_ratios_numpy(
+            reference,
+            candidate,
+            resamples=resamples,
+            seed=configuration_seed(bootstrap_seed, (*key, "absorber-300-over-500")),
+        )
+        row: dict[str, object] = {
+            "stage": key[0],
+            "tile_thickness_mm": key[1],
+            "x_mm": key[2],
+            "y_mm": key[3],
+            "events_300mm": len(candidate),
+            "events_500mm": len(reference),
+        }
+        passed: list[bool] = []
+        for name in ("production", "net"):
+            values = bootstraps[name]
+            low = percentile(values, 0.025)
+            high = percentile(values, 0.975)
+            equivalent = (
+                math.isfinite(low)
+                and math.isfinite(high)
+                and low >= 0.95
+                and high <= 1.05
+            )
+            row[f"{name}_ratio_300_over_500"] = ratio(
+                candidate_point[name], reference_point[name]
+            )
+            row[f"{name}_ci95_low"] = low
+            row[f"{name}_ci95_high"] = high
+            row[f"{name}_valid_resamples"] = sum(
+                math.isfinite(value) for value in values
+            )
+            row[f"{name}_equivalent_0p95_1p05"] = equivalent
+            passed.append(equivalent)
+        row["passes_absorber_convergence"] = all(passed)
+        rows.append(row)
+    return rows
+
+
+def production_statistics_recommendation(
+    ratios: list[dict[str, object]],
+    *,
+    stage: str,
+    block_events: int,
+    target_relative_half_width: float = 0.05,
+    safety_factor: float = 1.25,
+) -> dict[str, object]:
+    """Project and round a reviewable production N from the 500 mm pilot CI."""
+
+    base: dict[str, object] = {
+        "schema_version": "realistic-neutron-production-statistics-v1",
+        "stage": stage,
+        "method": "bootstrap_ci_width_sqrt_n_projection",
+        "target_relative_half_width": target_relative_half_width,
+        "safety_factor": safety_factor,
+        "minimum_seed_blocks": 4,
+        "events_per_execution_block": block_events,
+        "caveat": (
+            "The recommendation projects the observed bootstrap CI width with "
+            "1/sqrt(N), adds the fixed safety factor, and requires human review "
+            "before a center-production campaign is generated."
+        ),
+    }
+    if stage != "convergence-pilot":
+        return {**base, "status": "not_applicable_outside_convergence_pilot"}
+    if block_events <= 0:
+        raise ValueError("--production-block-events must be positive")
+
+    center = [
+        row
+        for row in ratios
+        if int(row["absorber_transverse_mm"]) == 500
+        and int(row["x_mm"]) == 0
+        and int(row["y_mm"]) == 0
+    ]
+    if len(center) != 1:
+        raise ValueError("convergence pilot must contain one centered 500 mm ratio row")
+    row = center[0]
+    events4 = int(row["events_4mm"])
+    events16 = int(row["events_16mm"])
+    if events4 != events16:
+        raise ValueError("production-N derivation requires equal 4 mm and 16 mm events")
+    current_events = events4
+
+    requirements: dict[str, dict[str, object]] = {}
+    rounded_totals: list[int] = []
+    for name in ("production", "collection", "net"):
+        point = float(row[f"{name}_ratio_16_over_4"])
+        low = float(row[f"{name}_ci95_low"])
+        high = float(row[f"{name}_ci95_high"])
+        if not all(math.isfinite(value) for value in (point, low, high)) or point == 0:
+            return {
+                **base,
+                "status": "cannot_recommend_from_nonfinite_or_zero_ratio",
+                "failed_metric": name,
+            }
+        relative_half_width = (high - low) / (2.0 * abs(point))
+        projected = math.ceil(
+            current_events
+            * (relative_half_width / target_relative_half_width) ** 2
+        )
+        pilot_derived = max(current_events, projected)
+        buffered = math.ceil(pilot_derived * safety_factor)
+        rounded = max(
+            4 * block_events,
+            math.ceil(buffered / block_events) * block_events,
+        )
+        requirements[name] = {
+            "ratio": point,
+            "ci95_low": low,
+            "ci95_high": high,
+            "observed_relative_half_width": relative_half_width,
+            "pilot_events_per_thickness": current_events,
+            "projected_events_before_safety_factor": pilot_derived,
+            "events_after_safety_factor": buffered,
+            "rounded_events_per_thickness": rounded,
+        }
+        rounded_totals.append(rounded)
+
+    recommended_total = max(rounded_totals)
+    return {
+        **base,
+        "status": "recommendation_requires_review",
+        "metric_requirements": requirements,
+        "recommended_events_per_task": block_events,
+        "recommended_blocks_per_thickness": recommended_total // block_events,
+        "recommended_total_events_per_thickness": recommended_total,
+    }
+
+
 def fraction_rows(
     groups: dict[tuple[object, ...], list[Event]]
 ) -> list[dict[str, object]]:
@@ -574,6 +721,21 @@ def main() -> int:
             groups, bootstrap_seed=bootstrap_seed, resamples=resamples
         )
         fractions = fraction_rows(groups)
+        convergence = absorber_convergence_rows(
+            groups, bootstrap_seed=bootstrap_seed, resamples=resamples
+        )
+        block_events = (
+            args.production_block_events
+            if args.production_block_events is not None
+            else int(bundle.manifest["events_per_task"])
+        )
+        if block_events <= 0:
+            raise ValueError("--production-block-events must be positive")
+        production_statistics = production_statistics_recommendation(
+            ratios,
+            stage=str(bundle.manifest["stage"]),
+            block_events=block_events,
+        )
         if output_dir.exists():
             raise ValueError(f"refusing to overwrite analysis directory: {output_dir}")
         output_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -583,6 +745,14 @@ def main() -> int:
         try:
             write_csv(temp_dir / "thickness_ratios.csv", RATIO_FIELDS, ratios)
             write_csv(temp_dir / "configuration_intervals.csv", FRACTION_FIELDS, fractions)
+            write_csv(
+                temp_dir / "absorber_convergence.csv",
+                ABSORBER_CONVERGENCE_FIELDS,
+                convergence,
+            )
+            atomic_write_json(
+                temp_dir / "production_statistics.json", production_statistics
+            )
             completed_config = {
                 **analysis_config,
                 "created_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -597,6 +767,8 @@ def main() -> int:
                 "outputs": {
                     "thickness_ratios": "thickness_ratios.csv",
                     "configuration_intervals": "configuration_intervals.csv",
+                    "absorber_convergence": "absorber_convergence.csv",
+                    "production_statistics": "production_statistics.json",
                 },
             }
             atomic_write_json(temp_dir / "analysis_config.json", completed_config)

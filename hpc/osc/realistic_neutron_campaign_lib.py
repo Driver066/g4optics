@@ -14,10 +14,18 @@ from typing import Any, Iterable
 
 
 CAMPAIGN_SCHEMA_VERSION = "realistic-neutron-campaign-v1"
-RUN_CONFIG_SCHEMA_VERSION = "opnovice2-run-config-v2"
+RUN_CONFIG_SCHEMA_VERSION = "opnovice2-run-config-v3"
+EVENT_SCHEMA_VERSION = "opnovice2-scan-event-v2"
 RESULT_SCHEMA_VERSION = "realistic-neutron-task-result-v1"
 STUDY_PRESET = "realistic-neutron-v1"
 ATTEMPT_MANIFEST_NAME = "submission-attempts.tsv"
+FINALIZED_REQUIRED_FILES = (
+    "task_index.tsv",
+    "configuration_summary.csv",
+    "thickness_ratios.csv",
+    "validation_report.json",
+    "analysis_config.json",
+)
 
 ATTEMPT_FIELDS = (
     "attempt_id",
@@ -90,6 +98,49 @@ def sha256_file(path: Path) -> str:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def verify_checksum_manifest(
+    directory: Path,
+    *,
+    required: Iterable[str] = (),
+    manifest_name: str = "SHA256SUMS",
+) -> set[str]:
+    """Verify a flat checksum manifest and return its recorded filenames."""
+
+    checksum_path = directory / manifest_name
+    recorded: set[str] = set()
+    for raw in checksum_path.read_text(encoding="utf-8").splitlines():
+        if not raw.strip():
+            continue
+        parts = raw.split("  ", 1)
+        if len(parts) != 2:
+            raise ValueError(f"invalid checksum row in {checksum_path}: {raw!r}")
+        digest, name = parts
+        if (
+            len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest)
+            or Path(name).name != name
+            or name in recorded
+        ):
+            raise ValueError(f"invalid checksum entry in {checksum_path}: {raw!r}")
+        path = directory / name
+        if not path.is_file() or sha256_file(path) != digest:
+            raise ValueError(f"checksum mismatch: {path}")
+        recorded.add(name)
+    missing = set(required) - recorded
+    if missing:
+        raise ValueError(
+            f"checksums omit required files in {directory}: {sorted(missing)}"
+        )
+    return recorded
+
+
+def verify_finalized_checksums(finalized_dir: Path) -> set[str]:
+    return verify_checksum_manifest(
+        finalized_dir,
+        required=FINALIZED_REQUIRED_FILES,
+    )
 
 
 def canonical_json(value: object) -> bytes:

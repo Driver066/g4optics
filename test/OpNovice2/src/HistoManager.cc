@@ -159,6 +159,7 @@ void HistoManager::Book()
   analysisMan->CreateNtupleIColumn("primary_neutron_elastic_flag");
   analysisMan->CreateNtupleIColumn("primary_neutron_inelastic_flag");
   analysisMan->CreateNtupleIColumn("primary_neutron_capture_flag");
+  analysisMan->CreateNtupleIColumn("primary_neutron_any_interaction_flag");
   analysisMan->CreateNtupleIColumn("charged_tile_entry_count");
   analysisMan->CreateNtupleDColumn("charged_tile_entry_ke_mev");
   analysisMan->CreateNtupleIColumn("electron_tile_entry_count");

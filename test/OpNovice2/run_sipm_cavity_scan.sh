@@ -2745,7 +2745,8 @@ mkdir -p "${MACRO_DIR}" "${ROOT_DIR}" "${LOG_DIR}"
 write_run_config() {
   {
     printf '{\n'
-    printf '  "schema_version": "opnovice2-run-config-v2",\n'
+    printf '  "schema_version": "opnovice2-run-config-v3",\n'
+    printf '  "event_schema_version": "opnovice2-scan-event-v2",\n'
     printf '  "study_preset": '
     if [[ -n "${STUDY_PRESET}" ]]; then
       printf '"%s"' "$(json_string "${STUDY_PRESET}")"

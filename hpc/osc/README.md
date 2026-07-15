@@ -38,6 +38,60 @@ formal campaign pins Geant4 `11.4.2`, the Apptainer image, a Geant4 dataset
 manifest, a prebuilt `OpNovice2` executable, the clean Git commit, every task
 configuration, and every random seed pair.
 
+The event audit and bootstrap analysis require Python 3, NumPy, and uproot on
+the login node where finalization is performed. Check that environment before
+submitting an expensive stage:
+
+```bash
+python3 -c 'import numpy, uproot; print(numpy.__version__, uproot.__version__)'
+python3 hpc/osc/check_realistic_neutron_infrastructure.py
+```
+
+Any change to the event schema requires rebuilding the frozen executable and
+rerunning the six-task `geometry-smoke` stage. Old smoke results remain useful
+historical artifacts but do not validate a newer executable/schema pair.
+
+### Optional one-time geometry view
+
+Because the steel volume is new, a one-time interactive view of the `4 mm` and
+`16 mm` production-size geometries is recommended. It is intentionally not an
+acceptance gate; `--prepare-only` can still preserve the exact macro and run
+configuration on a machine without a Geant4 GUI build.
+
+```bash
+cd test/OpNovice2
+cmake -S . -B build-gui -DWITH_GEANT4_UIVIS=ON
+cmake --build build-gui -j4
+python3 visualize_realistic_neutron_geometry.py --tile-thickness-mm 4
+python3 visualize_realistic_neutron_geometry.py --tile-thickness-mm 16
+```
+
+### Electron differential regression
+
+Before statistical interpretation, build one `OpNovice2` executable from the
+`practice` baseline commit `50ec06d4` and one from the candidate study commit,
+using the same pinned Geant4 `11.4.2` image. The dedicated wrapper supplies the
+same Geant4 dataset environment as the scan runner:
+
+```bash
+G4_APPTAINER_IMAGE=/path/to/geant4-11.4.2.sif \
+G4_DATA_ROOT=/path/to/geant4-data/11.4.2 \
+  hpc/osc/run_realistic_neutron_electron_regression_apptainer.sh \
+  --baseline-executable /path/to/practice-50ec06d4/OpNovice2 \
+  --candidate-executable /path/to/candidate/OpNovice2 \
+  --baseline-label practice-50ec06d4 \
+  --candidate-label "$(git rev-parse HEAD)" \
+  --output-dir /path/to/evidence/electron-regression
+```
+
+The script generates one canonical absorber-disabled `100-event`, fixed-seed,
+centered `1 MeV` electron macro and runs both binaries against it. It records
+both executable hashes, summaries, ROOT files, logs, comparison tolerances, and
+checksums. A failed comparison is preserved as evidence and blocks statistical
+interpretation.
+
+### Generate, submit, and finalize one stage
+
 Generate one stage only after its preceding gate has passed. For example:
 
 ```bash
@@ -78,11 +132,15 @@ that lack a valid, checksum-verified task result. Retries keep the original
 logical task ID, configuration hash, and seeds, while writing a new attempt
 directory; prior evidence is never overwritten.
 
-After every expected task has one unambiguous valid result, finalize and run
-the pinned event-level bootstrap analysis:
+After every expected task has one unambiguous valid result, finalize, preserve
+the complete D-012 ROOT audit, and run the pinned event-level bootstrap
+analysis:
 
 ```bash
 python3 hpc/osc/finalize_realistic_neutron_campaign.py \
+  --campaign-dir /path/to/campaigns/convergence-pilot
+
+python3 hpc/osc/audit_realistic_neutron_campaign.py \
   --campaign-dir /path/to/campaigns/convergence-pilot
 
 python3 hpc/osc/analyze_realistic_neutron_campaign.py \
@@ -91,12 +149,69 @@ python3 hpc/osc/analyze_realistic_neutron_campaign.py \
 ```
 
 The finalizer rejects missing or changed artifacts, mismatched configuration or
-environment identities, and ambiguous duplicate successes. The analyzer reads
-the audited `scan` trees from the original ROOT blocks, applies the pinned
-10,000-resample independent event bootstrap, and writes thickness-ratio
-intervals plus Wilson intervals for interaction and zero-light fractions.
+environment identities, and ambiguous duplicate successes. The event audit
+checks every row and every field of every original ROOT `scan` tree against the
+complete D-012 causal invariants and aggregate summaries. The analyzer reads
+those same audited trees, applies the pinned 10,000-resample independent event
+bootstrap, writes thickness-ratio and absorber-convergence intervals plus
+Wilson intervals for interaction and zero-light fractions, and emits a
+review-only production-`N` recommendation for a convergence pilot.
 `local-dev` campaigns and the analyzer's explicitly marked fixture mode are
 never accepted as statistical evidence.
+
+### Two-task benchmark
+
+The benchmark is exactly two centered tasks: `4 mm` and `16 mm`, each with
+`100` full-optical events and the `500 x 500 x 40 mm` absorber. With the same
+immutable image, data manifest, and candidate executable that passed the new
+geometry smoke, generate it as follows:
+
+```bash
+python3 hpc/osc/generate_realistic_neutron_campaign.py \
+  --out-dir /path/to/campaigns/benchmark \
+  --stage benchmark \
+  --campaign-seed 20260715 \
+  --environment-mode osc-production \
+  --geant4-version 11.4.2 \
+  --image /path/to/geant4-11.4.2.sif \
+  --g4-data-manifest /path/to/g4-data-manifest.json \
+  --build-artifact /path/to/frozen/OpNovice2
+
+python3 hpc/osc/submit_realistic_neutron_campaign.py \
+  --campaign-dir /path/to/campaigns/benchmark \
+  --check-only
+
+python3 hpc/osc/submit_realistic_neutron_campaign.py \
+  --campaign-dir /path/to/campaigns/benchmark \
+  --account YOUR_ACCOUNT \
+  --g4-data-root /path/to/geant4-data/11.4.2 \
+  --frozen-root /path/to/frozen-campaign-sources
+```
+
+After both array tasks finish, run finalization and the ROOT audit first, then
+capture `sacct` while the accounting rows are readily available:
+
+```bash
+python3 hpc/osc/finalize_realistic_neutron_campaign.py \
+  --campaign-dir /path/to/campaigns/benchmark
+
+python3 hpc/osc/audit_realistic_neutron_campaign.py \
+  --campaign-dir /path/to/campaigns/benchmark
+
+python3 hpc/osc/summarize_realistic_neutron_benchmark.py \
+  --campaign-dir /path/to/campaigns/benchmark
+
+python3 hpc/osc/analyze_realistic_neutron_campaign.py \
+  --campaign-dir /path/to/campaigns/benchmark \
+  --finalized-dir /path/to/campaigns/benchmark/finalized
+```
+
+The benchmark report preserves raw `sacct` rows, elapsed time, MaxRSS,
+MaxVMSize when reported, ROOT and total artifact bytes per event, optical
+multiplicities, interaction/zero-light fractions, and a reviewable
+events-per-task recommendation for the `1000-event` convergence pilot. The
+report measures which thickness is limiting rather than assuming it is the
+`16 mm` tile.
 
 ## Point-Level Array Scans
 

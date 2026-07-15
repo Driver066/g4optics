@@ -2,7 +2,7 @@
 
 - **Status:** Scientific inputs and engineering design confirmed; infrastructure baseline implemented, OSC production validation pending
 - **Recorded:** 2026-07-13
-- **Last updated:** 2026-07-14
+- **Last updated:** 2026-07-15
 - **Working branch:** `exp/realistic-detector`
 - **Branch baseline:** `practice` at `50ec06d4`
 - **Primary implementation area:** `test/OpNovice2`
@@ -11,11 +11,14 @@ The infrastructure baseline now includes the opt-in SAE 304 absorber, neutron
 causal observables, mergeable event summaries, the locked
 `realistic-neutron-v1` runner preset, deterministic campaign generation,
 append-only submission/recovery attempts, frozen-source and executable gates,
-per-task result identities, campaign finalization, and pinned event-level
-bootstrap analysis. Local checks include six one-event full-optical geometry
-smoke configurations under Geant4 `11.3.2` plus deterministic fake-Slurm and
-finalization tests. Formal statistical evidence still requires executing the
-documented smoke gates and campaigns in the OSC Geant4 `11.4.2` environment.
+per-task result identities, campaign finalization, complete ROOT event audits,
+an absorber-disabled electron differential regression, benchmark resource
+capture, absorber-convergence analysis, production-statistics recommendation,
+and pinned event-level bootstrap analysis. An optional Geant4 visualization
+tool provides a one-time human check of the steel/tile/SiPM layout. Local checks
+include deterministic fixture and fake-Slurm coverage; formal acceptance and
+statistical evidence still require executing the documented gates and campaigns
+in the OSC Geant4 `11.4.2` environment.
 
 ## Purpose
 
@@ -364,21 +367,35 @@ The local runner owns this resolution and validation logic. D-015 propagates the
 
 Before statistical interpretation, the implementation must pass all of the following:
 
-- a fixed-seed, absorber-disabled electron regression that preserves the selected legacy physics-summary values;
+- a differential, fixed-seed, absorber-disabled electron regression: build the
+  baseline executable from `practice` commit `50ec06d4` and the candidate from
+  the study commit in the same pinned Geant4 `11.4.2` environment, then run the
+  same `100-event`, centered, fixed-`1 MeV` electron macro with the `50 x 50 x 4
+  mm`, polished-front-painted/EJ-510, `-Z` SiPM configuration and the same two
+  seeds; selected integer summary fields must agree exactly and selected
+  floating fields within the recorded tolerance, with both executable hashes
+  retained;
 - dry-run generation and schema checks for all `4/16 mm tile x 200/300/500 mm absorber` combinations;
 - fail-fast tests for every D-013 forbidden preset override;
 - geometry initialization and overlap checks for all six combinations;
 - exact checks of the D-013 resolved source positions, including `43.5 mm` for the `4 mm` tile and `49.5 mm` for the `16 mm` tile;
-- visual inspection of both tile thicknesses with the production-size candidate, showing the steel/tile contact, `-Z` SiPM, and `+Z -> -Z` beam direction;
 - one full-optical event for each of the six geometry combinations to verify initialization, output creation, and the complete D-012 event schema.
 
-The one-event runs are execution and schema smoke tests only. They are not evidence that neutron interaction or light-production physics is correct. Automated checks must also enforce the D-012 causal invariants: category sums equal their totals, flags equal `count > 0`, a SiPM photon implies generated optical light, invalid collection ratios use `NaN` plus the validity flag, and no unexpected `NaN` or negative count/energy appears.
+The repository also provides an optional visualization for both tile thicknesses
+with the production-size candidate, showing the steel/tile contact, `-Z` SiPM,
+and `+Z -> -Z` beam direction. A one-time visual review is recommended because
+the steel geometry is new, but by study-owner decision it is not an acceptance
+gate. The generated macro and run configuration make the view reproducible;
+machine-checked geometry initialization, overlaps, source resolution, and event
+schema remain the formal geometry gates.
+
+The one-event runs are execution and schema smoke tests only. They are not evidence that neutron interaction or light-production physics is correct. A full audit of every real ROOT `scan` tree must also enforce the D-012 causal invariants: category sums equal their totals, flags equal `count > 0` (including the derived any-interaction flag), a SiPM photon implies generated optical light, invalid collection ratios and optional coordinates use `NaN` plus their validity flags, event IDs are contiguous, and no unexpected `NaN` or negative count/energy appears.
 
 Hadronic-only runs with optical production disabled may be used for bounded debugging of the shower and interaction classification. They cannot satisfy a full-model acceptance gate and cannot be merged with production results.
 
 #### Full-optical benchmark and pilot
 
-At the center with the `500 x 500 x 40 mm` absorber, run a `100-event` full-optical benchmark for each tile thickness. Record wall time per event, maximum resident memory, output bytes per event, photon multiplicities, and zero-light fractions. Size later OSC tasks from the slower `16 mm` configuration, targeting no more than approximately one hour per task.
+At the center with the `500 x 500 x 40 mm` absorber, run a `100-event` full-optical benchmark for each tile thickness. Immediately after finalization, capture the parent and batch-step `sacct` rows and record wall time per event, maximum resident memory, ROOT and total recorded bytes per event, photon multiplicities, interaction fraction, and zero-light fractions. The benchmark report identifies the measured limiting configuration and recommends a divisor of `1000` no larger than `250` events per task that is projected to remain within approximately one hour. Review and freeze that block size before generating the pilot; do not assume in advance that `16 mm` is slower.
 
 The fixed statistical pilot is `1000 events` per configuration, split into four independent `250-event` seed blocks. If the benchmark requires smaller execution blocks to stay within the task-time target, retain the same `1000-event` aggregate pilot. All seeds must be explicit, distinct, and recorded. Do not reuse the same random stream for the `4 mm` and `16 mm` configurations or analyze their events as paired samples.
 
@@ -395,7 +412,7 @@ The production-size candidate passes only when both confidence intervals lie ent
 
 #### Production event-count derivation and inference
 
-Use the full-optical pilot event records to estimate the event-level uncertainty of the `16 mm / 4 mm` ratios for production, collection, and net response. Determine the required event count so that the bootstrap `95%` confidence interval for every centered ratio has a relative half-width no larger than `5%`. Inflate the pilot-derived requirement by `25%`, round it to complete execution blocks, and freeze that common event count for both thicknesses before the final centered production run.
+Use the full-optical pilot event records to estimate the event-level uncertainty of the `16 mm / 4 mm` ratios for production, collection, and net response. Determine the required event count so that the bootstrap `95%` confidence interval for every centered ratio has a relative half-width no larger than `5%`. The analysis tool projects each observed pilot half-width with the explicit `1/sqrt(N)` scaling approximation, takes the largest requirement, inflates it by `25%`, rounds upward to complete execution blocks with at least four blocks, and emits a recommendation requiring human review. Freeze the reviewed common event count for both thicknesses before generating the final centered production campaign; the analysis tool never launches production automatically.
 
 Production data must contain at least four independent seed blocks per configuration. Use a fixed analysis seed and `10,000` event-level bootstrap resamples while recomputing each ratio-of-sums estimator. Report event-level mean, RMS, and standard error as required by D-012; use Wilson `95%` intervals for interaction and zero-light event fractions.
 
@@ -495,9 +512,17 @@ The finalized campaign writes at least:
 ```text
 task_index.tsv
 configuration_summary.csv
-thickness_ratios.csv
+thickness_ratios.csv              # finalized point estimates; no bootstrap CI
 validation_report.json
-analysis_config.json
+analysis_config.json              # pinned bootstrap definition from finalizer
+event-audit/event_audit.json
+analysis/thickness_ratios.csv
+analysis/configuration_intervals.csv
+analysis/absorber_convergence.csv
+analysis/production_statistics.json
+analysis/analysis_config.json
+benchmark/benchmark_report.csv     # benchmark stage only
+benchmark/benchmark_report.json    # benchmark stage only
 ```
 
 Event-level bootstrap analysis reads all audited per-block ROOT files. If a combined ROOT file is produced, retain the original block files and their seed provenance. The analysis configuration records the fixed bootstrap seed, resample count, estimators, thresholds, included campaign/task IDs, and any excluded invalid attempts.
@@ -511,12 +536,12 @@ The repository stores source code and workflow infrastructure; large run product
 ## Current repository facts relevant to implementation
 
 - `OpNovice2` currently uses `FTFP_BERT` together with `G4OpticalPhysics`; the existing physics list already provides neutron elastic, inelastic, and capture processes in the energy range needed here.
-- The current detector geometry has no steel absorber volume.
-- The primary source is backed by `G4GeneralParticleSource`, but the scan runner and metadata are still electron/Sr-90 oriented.
+- The detector now has an opt-in `StainlessSteelSAE304` absorber volume; it remains disabled outside the locked neutron preset so legacy studies retain their geometry.
+- The primary source is backed by `G4GeneralParticleSource`; the general runner still supports electron/Sr-90 studies while the locked `realistic-neutron-v1` preset resolves and records the neutron configuration.
 - The current beam convention is from `+Z` toward `-Z`; adding 4 cm of steel requires absorber-aware source placement.
 - Existing output already separates generated/scintillation photon counts, collection efficiency, and photons entering the SiPM volume.
 
-These statements describe the starting point. They are not approval of a particular implementation.
+These statements describe the implemented baseline and its compatibility boundary; OSC acceptance remains pending.
 
 ## Engineering decision status
 
