@@ -21,6 +21,22 @@ MACRO_GENERATOR="generate_scan_macro.py"
 MODE="surface"
 GRID="near5"
 SOURCE_MODE="${SOURCE_MODE:-auto}"
+SOURCE_MODE_SET="0"
+STUDY_PRESET=""
+TILE_THICKNESS_MM=""
+ABSORBER_TRANSVERSE_MM=""
+ABSORBER_THICKNESS_MM="40"
+NEUTRON_MOMENTUM_GEV_C="1"
+NEUTRON_KINETIC_ENERGY_MEV="432.58"
+NEUTRON_TOTAL_ENERGY_GEV="1.372145"
+SOURCE_CLEARANCE_MM="1.5"
+RANDOM_SEED_1=""
+RANDOM_SEED_2=""
+CAMPAIGN_ID=""
+CAMPAIGN_STAGE=""
+LOGICAL_TASK_ID=""
+CONFIGURATION_HASH=""
+SEED_BLOCK=""
 TEMPLATE_MACRO_OVERRIDE=""
 PRIMARY_ENERGY_OVERRIDE=""
 SOURCE_MODEL_OVERRIDE=""
@@ -44,6 +60,7 @@ BACKPAINTED_AIR_RINDEX="1.0003"
 BACKPAINTED_AIR_GAP_CAVEAT="Backpainted is an air-gap sensitivity proxy with RINDEX=1.0003; observed lab EJ-510 appears directly applied, so frontpainted is more physically representative."
 BACKPAINTED_MODEL_CAVEAT="Backpainted is a sensitivity model; observed lab EJ-510 appears directly applied, so frontpainted is more physically representative."
 OPTICAL_COUPLING="none"
+OPTICAL_COUPLING_SET="0"
 GREASE_THICKNESS_OVERRIDE=""
 GREASE_SIZE_OVERRIDE=""
 GREASE_RINDEX_OVERRIDE=""
@@ -78,13 +95,14 @@ BEAM_PROFILE="point"
 BEAM_SIGMA=""
 BEAM_ANGULAR_MODEL="pencil"
 BEAM_DIVERGENCE_MRAD=""
+MIN_ABSORBER_EDGE_DISTANCE_MM=""
 
 BEAM_DIRECTION="0 0 -1"
-SCAN_RUNS_DIR="scan_runs"
-LATEST_RUN_LINK="scan_latest"
-LATEST_POINTS_CSV="points.csv"
-LATEST_RUN_CONFIG="run_config.json"
-LATEST_EFFICIENCY_MAP="efficiency_map.csv"
+SCAN_RUNS_DIR="${SCAN_RUNS_DIR:-scan_runs}"
+LATEST_RUN_LINK="${LATEST_RUN_LINK:-scan_latest}"
+LATEST_POINTS_CSV="${LATEST_POINTS_CSV:-points.csv}"
+LATEST_RUN_CONFIG="${LATEST_RUN_CONFIG:-run_config.json}"
+LATEST_EFFICIENCY_MAP="${LATEST_EFFICIENCY_MAP:-efficiency_map.csv}"
 
 SR90_SPECTRUM_MODEL="sr90_allowed_beta_v1"
 SR90_SPECTRUM_TABLE="spectra/sr90_allowed_beta_v1.csv"
@@ -176,6 +194,17 @@ Grid / beam options:
                                       pencil beam
 
 Output / execution options:
+  --study-preset PRESET              locked scientific preset;
+                                      currently realistic-neutron-v1
+  --tile-thickness-mm VALUE          realistic-neutron-v1: 4 or 16
+  --absorber-transverse-mm VALUE     realistic-neutron-v1: 200, 300, or 500
+  --seed1 N                          first explicit Geant4 random seed
+  --seed2 N                          second explicit Geant4 random seed
+  --campaign-id ID                   campaign provenance identifier
+  --campaign-stage STAGE             campaign stage provenance
+  --logical-task-id ID               stable logical task identifier
+  --configuration-hash SHA256        resolved task configuration hash
+  --seed-block N                     independent seed-block index
   --events N                          events per scan point; overrides N_EVENTS
   --dry-run                           generate macros/config only
   --no-root-plots                     skip ROOT quick-look plot generation
@@ -220,6 +249,126 @@ while [[ $# -gt 0 ]]; do
       N_EVENTS="${1#*=}"
       shift
       ;;
+    --study-preset)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --study-preset" >&2
+        exit 1
+      fi
+      STUDY_PRESET="$2"
+      shift 2
+      ;;
+    --study-preset=*)
+      STUDY_PRESET="${1#*=}"
+      shift
+      ;;
+    --tile-thickness-mm)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --tile-thickness-mm" >&2
+        exit 1
+      fi
+      TILE_THICKNESS_MM="$2"
+      shift 2
+      ;;
+    --tile-thickness-mm=*)
+      TILE_THICKNESS_MM="${1#*=}"
+      shift
+      ;;
+    --absorber-transverse-mm)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --absorber-transverse-mm" >&2
+        exit 1
+      fi
+      ABSORBER_TRANSVERSE_MM="$2"
+      shift 2
+      ;;
+    --absorber-transverse-mm=*)
+      ABSORBER_TRANSVERSE_MM="${1#*=}"
+      shift
+      ;;
+    --seed1)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --seed1" >&2
+        exit 1
+      fi
+      RANDOM_SEED_1="$2"
+      shift 2
+      ;;
+    --seed1=*)
+      RANDOM_SEED_1="${1#*=}"
+      shift
+      ;;
+    --seed2)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --seed2" >&2
+        exit 1
+      fi
+      RANDOM_SEED_2="$2"
+      shift 2
+      ;;
+    --seed2=*)
+      RANDOM_SEED_2="${1#*=}"
+      shift
+      ;;
+    --campaign-id)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --campaign-id" >&2
+        exit 1
+      fi
+      CAMPAIGN_ID="$2"
+      shift 2
+      ;;
+    --campaign-id=*)
+      CAMPAIGN_ID="${1#*=}"
+      shift
+      ;;
+    --campaign-stage)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --campaign-stage" >&2
+        exit 1
+      fi
+      CAMPAIGN_STAGE="$2"
+      shift 2
+      ;;
+    --campaign-stage=*)
+      CAMPAIGN_STAGE="${1#*=}"
+      shift
+      ;;
+    --logical-task-id)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --logical-task-id" >&2
+        exit 1
+      fi
+      LOGICAL_TASK_ID="$2"
+      shift 2
+      ;;
+    --logical-task-id=*)
+      LOGICAL_TASK_ID="${1#*=}"
+      shift
+      ;;
+    --configuration-hash)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --configuration-hash" >&2
+        exit 1
+      fi
+      CONFIGURATION_HASH="$2"
+      shift 2
+      ;;
+    --configuration-hash=*)
+      CONFIGURATION_HASH="${1#*=}"
+      shift
+      ;;
+    --seed-block)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --seed-block" >&2
+        exit 1
+      fi
+      SEED_BLOCK="$2"
+      shift 2
+      ;;
+    --seed-block=*)
+      SEED_BLOCK="${1#*=}"
+      shift
+      ;;
     --dry-run)
       DRY_RUN="1"
       shift
@@ -258,10 +407,12 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       SOURCE_MODE="$2"
+      SOURCE_MODE_SET="1"
       shift 2
       ;;
     --source-mode=*)
       SOURCE_MODE="${1#*=}"
+      SOURCE_MODE_SET="1"
       shift
       ;;
     --source-model)
@@ -450,10 +601,12 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       OPTICAL_COUPLING="$2"
+      OPTICAL_COUPLING_SET="1"
       shift 2
       ;;
     --optical-coupling=*)
       OPTICAL_COUPLING="${1#*=}"
+      OPTICAL_COUPLING_SET="1"
       shift
       ;;
     --grease-thickness)
@@ -727,6 +880,154 @@ if [[ "${#POSITIONAL[@]}" -ge 2 ]]; then
   GRID="${POSITIONAL[1]}"
 fi
 
+if [[ -z "${STUDY_PRESET}" ]]; then
+  if [[ -n "${TILE_THICKNESS_MM}" || -n "${ABSORBER_TRANSVERSE_MM}" ]]; then
+    echo "--tile-thickness-mm and --absorber-transverse-mm require --study-preset realistic-neutron-v1." >&2
+    exit 1
+  fi
+else
+  case "${STUDY_PRESET}" in
+    realistic-neutron-v1)
+      ;;
+    *)
+      echo "Unknown --study-preset: ${STUDY_PRESET}. Use realistic-neutron-v1." >&2
+      exit 1
+      ;;
+  esac
+
+  if [[ "${MODE}" != "full" || "${GRID}" != "custom" ]]; then
+    echo "--study-preset realistic-neutron-v1 requires MODE=full and GRID=custom." >&2
+    exit 1
+  fi
+
+  locked_conflicts=()
+  [[ "${SOURCE_MODE_SET}" == "1" ]] && locked_conflicts+=(--source-mode)
+  [[ -n "${SOURCE_MODEL_OVERRIDE}" ]] && locked_conflicts+=(--source-model)
+  [[ -n "${TEMPLATE_MACRO_OVERRIDE}" ]] && locked_conflicts+=(--template-macro)
+  [[ -n "${PRIMARY_ENERGY_OVERRIDE}" ]] && locked_conflicts+=(--primary-energy)
+  [[ -n "${ELECTRON_ENERGY_MODE_OVERRIDE}" ]] && locked_conflicts+=(--electron-energy-mode)
+  [[ -n "${SIPM_FACE_OVERRIDE}" ]] && locked_conflicts+=(--sipm-face)
+  [[ -n "${SIPM_CAVITY_MODE_OVERRIDE}" ]] && locked_conflicts+=(--sipm-cavity-mode)
+  [[ -n "${SIPM_LOCAL_POSITION_OVERRIDE}" ]] && locked_conflicts+=(--sipm-local-position)
+  [[ -n "${SIPM_SIZE_OVERRIDE}" ]] && locked_conflicts+=(--sipm-size)
+  [[ -n "${TANK_SIZE_OVERRIDE}" ]] && locked_conflicts+=(--tank-size)
+  [[ -n "${TANK_SIZE_PRESET_OVERRIDE}" ]] && locked_conflicts+=(--tank-size-preset)
+  [[ -n "${SURFACE_PRESET_OVERRIDE}" ]] && locked_conflicts+=(--surface-preset)
+  [[ -n "${SURFACE_REFLECTIVITY_MODEL_OVERRIDE}" ]] && locked_conflicts+=(--surface-reflectivity-model)
+  [[ -n "${SURFACE_REFLECTIVITY_VALUE_OVERRIDE}" ]] && locked_conflicts+=(--surface-reflectivity)
+  [[ -n "${SURFACE_REFLECTIVITY_CSV_OVERRIDE}" ]] && locked_conflicts+=(--surface-reflectivity-csv)
+  [[ -n "${SURFACE_RINDEX_OVERRIDE}" ]] && locked_conflicts+=(--surface-rindex)
+  [[ -n "${SURFACE_RINDEX_CSV_OVERRIDE}" ]] && locked_conflicts+=(--surface-rindex-csv)
+  [[ "${OPTICAL_COUPLING_SET}" == "1" ]] && locked_conflicts+=(--optical-coupling)
+  [[ -n "${GREASE_THICKNESS_OVERRIDE}" ]] && locked_conflicts+=(--grease-thickness)
+  [[ -n "${GREASE_SIZE_OVERRIDE}" ]] && locked_conflicts+=(--grease-size)
+  [[ -n "${GREASE_RINDEX_OVERRIDE}" ]] && locked_conflicts+=(--grease-rindex)
+  [[ -n "${GREASE_RINDEX_CSV_OVERRIDE}" ]] && locked_conflicts+=(--grease-rindex-csv)
+  [[ -n "${GREASE_ABSORPTION_MODEL_OVERRIDE}" ]] && locked_conflicts+=(--grease-absorption-model)
+  [[ -n "${GREASE_TRANSMISSION_CSV_OVERRIDE}" ]] && locked_conflicts+=(--grease-transmission-csv)
+  [[ "${GREASE_ABS_LENGTH_SET}" == "1" ]] && locked_conflicts+=(--grease-abs-length)
+  [[ "${DIMPLE_ENABLED}" == "1" ]] && locked_conflicts+=(--dimple)
+  [[ "${DIMPLE_RADIUS_SET}" == "1" ]] && locked_conflicts+=(--dimple-radius)
+  [[ "${DIMPLE_UNIT_SET}" == "1" ]] && locked_conflicts+=(--dimple-unit)
+  [[ "${DIMPLE_SIPM_MODE_SET}" == "1" ]] && locked_conflicts+=(--dimple-sipm-mode)
+  [[ -n "${CUSTOM_BEAM_Z}" ]] && locked_conflicts+=(--beam-z)
+  [[ -n "${CUSTOM_BEAM_SIGMA}" ]] && locked_conflicts+=(--beam-sigma)
+  [[ -n "${CUSTOM_BEAM_DIVERGENCE_MRAD}" ]] && locked_conflicts+=(--beam-divergence-mrad)
+
+  if [[ "${#locked_conflicts[@]}" -gt 0 ]]; then
+    echo "The realistic-neutron-v1 preset locks these options: ${locked_conflicts[*]}" >&2
+    exit 1
+  fi
+
+  case "${TILE_THICKNESS_MM}" in
+    4|16)
+      ;;
+    "")
+      echo "--study-preset realistic-neutron-v1 requires --tile-thickness-mm 4 or 16." >&2
+      exit 1
+      ;;
+    *)
+      echo "Invalid --tile-thickness-mm: ${TILE_THICKNESS_MM}. Use 4 or 16." >&2
+      exit 1
+      ;;
+  esac
+
+  if [[ -z "${ABSORBER_TRANSVERSE_MM}" ]]; then
+    ABSORBER_TRANSVERSE_MM="500"
+  fi
+  case "${ABSORBER_TRANSVERSE_MM}" in
+    200|300|500)
+      ;;
+    *)
+      echo "Invalid --absorber-transverse-mm: ${ABSORBER_TRANSVERSE_MM}. Use 200, 300, or 500." >&2
+      exit 1
+      ;;
+  esac
+
+  SOURCE_MODE="gps"
+  SOURCE_MODEL_OVERRIDE="realistic-neutron-v1"
+  SIPM_FACE_OVERRIDE="-Z"
+  SIPM_LOCAL_POSITION_OVERRIDE="0 0 0 mm"
+  SIPM_SIZE_OVERRIDE="2.4 2.4 0.5 mm"
+  TANK_SIZE_OVERRIDE="50 50 ${TILE_THICKNESS_MM} mm"
+  SURFACE_PRESET_OVERRIDE="polishedfrontpainted"
+  SURFACE_REFLECTIVITY_MODEL_OVERRIDE="ej510-empirical"
+  OPTICAL_COUPLING="none"
+  CUSTOM_BEAM_DIVERGENCE_MRAD="55"
+fi
+
+if [[ -n "${RANDOM_SEED_1}" || -n "${RANDOM_SEED_2}" ]]; then
+  if [[ -z "${RANDOM_SEED_1}" || -z "${RANDOM_SEED_2}" ]]; then
+    echo "Use --seed1 and --seed2 together." >&2
+    exit 1
+  fi
+  for random_seed in "${RANDOM_SEED_1}" "${RANDOM_SEED_2}"; do
+    if [[ ! "${random_seed}" =~ ^[0-9]+$ || "${random_seed}" -le 0 ||
+          "${random_seed}" -ge 2147483647 ]]; then
+      echo "Invalid Geant4 random seed: ${random_seed}. Use an integer in [1, 2147483646]." >&2
+      exit 1
+    fi
+  done
+  if [[ "${RANDOM_SEED_1}" == "${RANDOM_SEED_2}" ]]; then
+    echo "--seed1 and --seed2 must be distinct." >&2
+    exit 1
+  fi
+elif [[ -n "${STUDY_PRESET}" ]]; then
+  echo "--study-preset realistic-neutron-v1 requires explicit --seed1 and --seed2." >&2
+  exit 1
+fi
+
+campaign_metadata_count=0
+for campaign_value in \
+  "${CAMPAIGN_ID}" "${CAMPAIGN_STAGE}" "${LOGICAL_TASK_ID}" \
+  "${CONFIGURATION_HASH}" "${SEED_BLOCK}"; do
+  [[ -n "${campaign_value}" ]] && campaign_metadata_count=$((campaign_metadata_count + 1))
+done
+if [[ "${campaign_metadata_count}" -ne 0 ]]; then
+  if [[ "${STUDY_PRESET}" != "realistic-neutron-v1" ]]; then
+    echo "Campaign provenance options require --study-preset realistic-neutron-v1." >&2
+    exit 1
+  fi
+  if [[ "${campaign_metadata_count}" -ne 5 ]]; then
+    echo "Use --campaign-id, --campaign-stage, --logical-task-id, --configuration-hash, and --seed-block together." >&2
+    exit 1
+  fi
+  for campaign_identifier in "${CAMPAIGN_ID}" "${CAMPAIGN_STAGE}" "${LOGICAL_TASK_ID}"; do
+    if [[ ! "${campaign_identifier}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+      echo "Invalid campaign identifier: ${campaign_identifier}. Use letters, numbers, dot, underscore, or hyphen." >&2
+      exit 1
+    fi
+  done
+  if [[ ! "${CONFIGURATION_HASH}" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "Invalid --configuration-hash: expected a lowercase SHA-256 hex digest." >&2
+    exit 1
+  fi
+  if [[ ! "${SEED_BLOCK}" =~ ^[0-9]+$ ]]; then
+    echo "Invalid --seed-block: ${SEED_BLOCK}. Expected a non-negative integer." >&2
+    exit 1
+  fi
+fi
+
 case "${PLOT_WITH_ROOT}" in
   1|true|TRUE|yes|YES|on|ON)
     PLOT_WITH_ROOT="1"
@@ -811,13 +1112,18 @@ esac
 
 if [[ -n "${SOURCE_MODEL_OVERRIDE}" ]]; then
   case "${SOURCE_MODEL_OVERRIDE}" in
-    fixed-electron|sr90-spectrum|sr90-empirical|sr90-decay)
+    fixed-electron|sr90-spectrum|sr90-empirical|sr90-decay|realistic-neutron-v1)
       ;;
     *)
-      echo "Invalid --source-model: ${SOURCE_MODEL_OVERRIDE}. Use fixed-electron, sr90-spectrum, sr90-empirical, or sr90-decay." >&2
+      echo "Invalid --source-model: ${SOURCE_MODEL_OVERRIDE}. Use fixed-electron, sr90-spectrum, sr90-empirical, sr90-decay, or realistic-neutron-v1." >&2
       exit 1
       ;;
   esac
+fi
+if [[ "${SOURCE_MODEL_OVERRIDE}" == "realistic-neutron-v1" &&
+      "${STUDY_PRESET}" != "realistic-neutron-v1" ]]; then
+  echo "The realistic-neutron-v1 source model is available only through --study-preset realistic-neutron-v1." >&2
+  exit 1
 fi
 
 if [[ -n "${CUSTOM_BEAM_SIGMA}" && "${SOURCE_MODE}" != "gps" ]]; then
@@ -1601,7 +1907,12 @@ infer_custom_beam_z() {
   fi
 
   thickness_grid="$(length_to_unit "${thickness_value}" "${thickness_unit}" "${GRID_UNIT}")"
-  offset_grid="$(length_to_unit "1.5" "mm" "${GRID_UNIT}")"
+  if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
+    offset_grid="$(length_to_unit "${ABSORBER_THICKNESS_MM}" "mm" "${GRID_UNIT}")"
+    offset_grid="$(awk -v steel="${offset_grid}" -v clearance="$(length_to_unit "${SOURCE_CLEARANCE_MM}" "mm" "${GRID_UNIT}")" 'BEGIN { printf "%.10g", steel + clearance }')"
+  else
+    offset_grid="$(length_to_unit "1.5" "mm" "${GRID_UNIT}")"
+  fi
   awk -v t="${thickness_grid}" -v dz="${offset_grid}" 'BEGIN { printf "%.10g", 0.5 * t + dz }'
 }
 
@@ -1736,6 +2047,47 @@ Y_MIN_VALUE="${YS[0]}"
 Y_MAX_VALUE="${YS[$((${#YS[@]} - 1))]}"
 POINT_COUNT=$(( ${#XS[@]} * ${#YS[@]} ))
 
+if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
+  if [[ "${POINT_COUNT}" -ne 1 ]]; then
+    echo "--study-preset realistic-neutron-v1 requires exactly one scan point per invocation so each physical point has its own explicit random stream." >&2
+    exit 1
+  fi
+
+  x_min_mm="$(length_to_unit "${X_MIN_VALUE}" "${GRID_UNIT}" "mm")"
+  x_max_mm="$(length_to_unit "${X_MAX_VALUE}" "${GRID_UNIT}" "mm")"
+  y_min_mm="$(length_to_unit "${Y_MIN_VALUE}" "${GRID_UNIT}" "mm")"
+  y_max_mm="$(length_to_unit "${Y_MAX_VALUE}" "${GRID_UNIT}" "mm")"
+  max_abs_coordinate_mm="$(awk \
+    -v xmin="${x_min_mm}" -v xmax="${x_max_mm}" \
+    -v ymin="${y_min_mm}" -v ymax="${y_max_mm}" '
+      function abs(v) { return v < 0 ? -v : v }
+      BEGIN {
+        m = abs(xmin)
+        if (abs(xmax) > m) m = abs(xmax)
+        if (abs(ymin) > m) m = abs(ymin)
+        if (abs(ymax) > m) m = abs(ymax)
+        printf "%.10g", m
+      }')"
+  MIN_ABSORBER_EDGE_DISTANCE_MM="$(awk \
+    -v size="${ABSORBER_TRANSVERSE_MM}" -v maxabs="${max_abs_coordinate_mm}" \
+    'BEGIN { printf "%.10g", 0.5 * size - maxabs }')"
+  if ! awk -v margin="${MIN_ABSORBER_EDGE_DISTANCE_MM}" \
+      'BEGIN { exit(margin > 0 ? 0 : 1) }'; then
+    echo "Requested source positions extend outside the absorber footprint; nominal edge distance is ${MIN_ABSORBER_EDGE_DISTANCE_MM} mm." >&2
+    exit 1
+  fi
+
+  source_z_mm="$(length_to_unit "${Z0}" "${GRID_UNIT}" "mm")"
+  absorber_upstream_z_mm="$(awk \
+    -v tile="${TILE_THICKNESS_MM}" -v steel="${ABSORBER_THICKNESS_MM}" \
+    'BEGIN { printf "%.10g", 0.5 * tile + steel }')"
+  if ! awk -v source="${source_z_mm}" -v upstream="${absorber_upstream_z_mm}" \
+      'BEGIN { exit(source > upstream && source < 500 ? 0 : 1) }'; then
+    echo "Resolved neutron source z=${source_z_mm} mm must be strictly upstream of the steel at z=${absorber_upstream_z_mm} mm and inside the world." >&2
+    exit 1
+  fi
+fi
+
 if [[ "${SOURCE_MODE}" == "gps" ]]; then
   SCAN_NAME="${SCAN_NAME} (GPS source)"
   PREFIX="${PREFIX_ROOT}_gps_${GRID}"
@@ -1787,7 +2139,7 @@ fi
 if [[ -n "${SOURCE_MODEL_OVERRIDE}" ]]; then
   source_model="${SOURCE_MODEL_OVERRIDE}"
   case "${source_model}" in
-    fixed-electron|sr90-spectrum|sr90-decay)
+    fixed-electron|sr90-spectrum|sr90-decay|realistic-neutron-v1)
       electron_energy_mode="fixed"
       ;;
     sr90-empirical)
@@ -1867,6 +2219,15 @@ if [[ "${source_model}" == "sr90-decay" ]]; then
   fi
   primary_particle="ion"
   primary_energy="${SR90_DECAY_PRIMARY_ION} ion at rest"
+fi
+if [[ "${source_model}" == "realistic-neutron-v1" ]]; then
+  if [[ "${SOURCE_MODE}" != "gps" ]]; then
+    echo "--study-preset realistic-neutron-v1 requires the GPS source." >&2
+    exit 1
+  fi
+  primary_particle="neutron"
+  primary_energy="${NEUTRON_KINETIC_ENERGY_MEV} MeV"
+  electron_energy_mode="fixed"
 fi
 if [[ -n "${PRIMARY_ENERGY_OVERRIDE}" ]]; then
   primary_energy="${PRIMARY_ENERGY_OVERRIDE}"
@@ -2343,6 +2704,31 @@ mkdir -p "${MACRO_DIR}" "${ROOT_DIR}" "${LOG_DIR}"
 write_run_config() {
   {
     printf '{\n'
+    printf '  "schema_version": "opnovice2-run-config-v2",\n'
+    printf '  "study_preset": '
+    if [[ -n "${STUDY_PRESET}" ]]; then
+      printf '"%s"' "$(json_string "${STUDY_PRESET}")"
+    else
+      printf 'null'
+    fi
+    printf ',\n'
+    printf '  "campaign": {\n'
+    printf '    "campaign_id": '
+    if [[ -n "${CAMPAIGN_ID}" ]]; then printf '"%s"' "$(json_string "${CAMPAIGN_ID}")"; else printf 'null'; fi
+    printf ',\n'
+    printf '    "stage": '
+    if [[ -n "${CAMPAIGN_STAGE}" ]]; then printf '"%s"' "$(json_string "${CAMPAIGN_STAGE}")"; else printf 'null'; fi
+    printf ',\n'
+    printf '    "logical_task_id": '
+    if [[ -n "${LOGICAL_TASK_ID}" ]]; then printf '"%s"' "$(json_string "${LOGICAL_TASK_ID}")"; else printf 'null'; fi
+    printf ',\n'
+    printf '    "configuration_hash": '
+    if [[ -n "${CONFIGURATION_HASH}" ]]; then printf '"%s"' "${CONFIGURATION_HASH}"; else printf 'null'; fi
+    printf ',\n'
+    printf '    "seed_block": '
+    if [[ -n "${SEED_BLOCK}" ]]; then printf '%s' "${SEED_BLOCK}"; else printf 'null'; fi
+    printf '\n'
+    printf '  },\n'
     printf '  "generated_at_utc": "%s",\n' "$(json_string "${generated_at}")"
     printf '  "command": {\n'
     printf '    "argv": '
@@ -2395,6 +2781,27 @@ write_run_config() {
     printf '    "events_per_point": %s,\n' "${N_EVENTS}"
     printf '    "scintillation_yield_per_mev": %s,\n' "${scint_yield}"
     printf '    "source_model": "%s",\n' "$(json_string "${source_model}")"
+    printf '    "authoritative_momentum_gev_c": '
+    if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
+      printf '%s' "${NEUTRON_MOMENTUM_GEV_C}"
+    else
+      printf 'null'
+    fi
+    printf ',\n'
+    printf '    "derived_total_energy_gev": '
+    if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
+      printf '%s' "${NEUTRON_TOTAL_ENERGY_GEV}"
+    else
+      printf 'null'
+    fi
+    printf ',\n'
+    printf '    "derived_gps_kinetic_energy_mev": '
+    if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
+      printf '%s' "${NEUTRON_KINETIC_ENERGY_MEV}"
+    else
+      printf 'null'
+    fi
+    printf ',\n'
     printf '    "spectrum_model": '
     if [[ "${source_model}" == "sr90-spectrum" ]]; then
       printf '"%s"' "$(json_string "${SR90_SPECTRUM_MODEL}")"
@@ -2499,6 +2906,23 @@ write_run_config() {
     printf '    "beam_direction": "%s",\n' "$(json_string "${BEAM_DIRECTION}")"
     printf '    "beam_z": "%s %s",\n' "$(format_num "${Z0}")" "$(json_string "${GRID_UNIT}")"
     printf '    "beam_z_inferred": %s\n' "$(if [[ "${BEAM_Z_INFERRED}" == "1" ]]; then echo true; else echo false; fi)"
+    printf '  },\n'
+    printf '  "random": {\n'
+    printf '    "explicit_seed_pair": %s,\n' "$(if [[ -n "${RANDOM_SEED_1}" ]]; then echo true; else echo false; fi)"
+    printf '    "seed1": '
+    if [[ -n "${RANDOM_SEED_1}" ]]; then
+      printf '%s' "${RANDOM_SEED_1}"
+    else
+      printf 'null'
+    fi
+    printf ',\n'
+    printf '    "seed2": '
+    if [[ -n "${RANDOM_SEED_2}" ]]; then
+      printf '%s' "${RANDOM_SEED_2}"
+    else
+      printf 'null'
+    fi
+    printf '\n'
     printf '  },\n'
     printf '  "beam": {\n'
     printf '    "profile": "%s",\n' "$(json_string "${BEAM_PROFILE}")"
@@ -2709,6 +3133,39 @@ write_run_config() {
     printf '    "size_preset": '
     if [[ -n "${tank_size_preset}" ]]; then
       printf '"%s"' "$(json_string "${tank_size_preset}")"
+    else
+      printf 'null'
+    fi
+    printf '\n'
+    printf '  },\n'
+    printf '  "absorber": {\n'
+    printf '    "enabled": %s,\n' "$(if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then echo true; else echo false; fi)"
+    printf '    "shape": "box",\n'
+    printf '    "physical_volume_name": "SteelAbsorber",\n'
+    printf '    "material": "StainlessSteelSAE304",\n'
+    printf '    "density_g_cm3": 7.9,\n'
+    printf '    "mass_fractions": {"Fe": 0.74, "Cr": 0.18, "Ni": 0.08},\n'
+    printf '    "epic_geometry_release_reference": "26.07.0",\n'
+    printf '    "full_size_mm": '
+    if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
+      printf '[%s, %s, %s]' \
+        "${ABSORBER_TRANSVERSE_MM}" "${ABSORBER_TRANSVERSE_MM}" "${ABSORBER_THICKNESS_MM}"
+    else
+      printf 'null'
+    fi
+    printf ',\n'
+    printf '    "tile_gap_mm": 0,\n'
+    printf '    "tile_to_steel_surface": "shared_EJ510_polishedfrontpainted_proxy",\n'
+    printf '    "source_clearance_upstream_mm": '
+    if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
+      printf '%s' "${SOURCE_CLEARANCE_MM}"
+    else
+      printf 'null'
+    fi
+    printf ',\n'
+    printf '    "nominal_min_source_to_edge_mm": '
+    if [[ -n "${MIN_ABSORBER_EDGE_DISTANCE_MM}" ]]; then
+      printf '%s' "$(format_num "${MIN_ABSORBER_EDGE_DISTANCE_MM}")"
     else
       printf 'null'
     fi
@@ -2981,6 +3438,9 @@ else
 fi
 
 echo "Scan: ${SCAN_NAME}"
+if [[ -n "${STUDY_PRESET}" ]]; then
+  echo "Study preset: ${STUDY_PRESET}"
+fi
 echo "Template: ${TEMPLATE_MACRO}"
 echo "Source mode: ${SOURCE_MODE}"
 echo "Source model: ${source_model}"
@@ -3008,12 +3468,20 @@ else
   echo "Beam angular divergence: pencil"
 fi
 echo "Events per point: ${N_EVENTS}"
+if [[ -n "${RANDOM_SEED_1}" ]]; then
+  echo "Random seeds: ${RANDOM_SEED_1} ${RANDOM_SEED_2}"
+fi
 echo "Electron energy mode: ${electron_energy_mode}"
 if [[ -n "${tank_size}" ]]; then
   echo "Tank size: ${tank_size}"
 fi
 if [[ -n "${tank_size_preset}" ]]; then
   echo "Tank size preset: ${tank_size_preset}"
+fi
+if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
+  echo "Steel absorber: ${ABSORBER_TRANSVERSE_MM} x ${ABSORBER_TRANSVERSE_MM} x ${ABSORBER_THICKNESS_MM} mm SAE 304, zero tile gap"
+  echo "Neutron source: p=${NEUTRON_MOMENTUM_GEV_C} GeV/c, kinetic energy=${NEUTRON_KINETIC_ENERGY_MEV} MeV, clearance=${SOURCE_CLEARANCE_MM} mm"
+  echo "Nominal minimum absorber-edge distance: ${MIN_ABSORBER_EDGE_DISTANCE_MM} mm"
 fi
 if [[ -n "${surface_preset}" ]]; then
   echo "Surface preset: ${surface_preset} (finish=${surface_finish}, sigma_alpha=${surface_sigma_alpha})"
@@ -3061,7 +3529,14 @@ tail -n +2 "${POINTS_CSV}" | while IFS=, read -r tag x y z unit macro root log; 
     --require "/opnovice2/sipm/size"
   )
 
-  if [[ "${source_model}" == "sr90-decay" ]]; then
+  if [[ "${source_model}" == "realistic-neutron-v1" ]]; then
+    macro_args+=(
+      --set "${particle_cmd}=neutron"
+      --set "${energy_cmd}=${NEUTRON_KINETIC_ENERGY_MEV} MeV"
+      --require "${particle_cmd}"
+      --require "${energy_cmd}"
+    )
+  elif [[ "${source_model}" == "sr90-decay" ]]; then
     macro_args+=(
       --set "${particle_cmd}=ion"
       --set "${energy_cmd}=0 eV"
@@ -3106,6 +3581,14 @@ tail -n +2 "${POINTS_CSV}" | while IFS=, read -r tag x y z unit macro root log; 
   fi
   if [[ "${MODE}" == "full" ]]; then
     macro_args+=(--set "/opnovice2/tank/bottomCavity=false")
+  fi
+  if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
+    macro_args+=(
+      --set "/opnovice2/absorber/enabled=true"
+      --set "/opnovice2/absorber/size=${ABSORBER_TRANSVERSE_MM} ${ABSORBER_TRANSVERSE_MM} ${ABSORBER_THICKNESS_MM} mm"
+      --require "/opnovice2/absorber/enabled"
+      --require "/opnovice2/absorber/size"
+    )
   fi
   if [[ "${DIMPLE_ENABLED}" == "1" ]]; then
     macro_args+=(
@@ -3187,6 +3670,13 @@ tail -n +2 "${POINTS_CSV}" | while IFS=, read -r tag x y z unit macro root log; 
       --set "/opnovice2/gun/electronEnergyMode=${electron_energy_mode}"
       --require "/opnovice2/gun/electronEnergyMode"
       --insert-missing-before "/opnovice2/gun/electronEnergyMode=/run/beamOn"
+    )
+  fi
+  if [[ -n "${RANDOM_SEED_1}" ]]; then
+    macro_args+=(
+      --set "/random/setSeeds=${RANDOM_SEED_1} ${RANDOM_SEED_2}"
+      --require "/random/setSeeds"
+      --insert-missing-before "/random/setSeeds=/run/initialize"
     )
   fi
 

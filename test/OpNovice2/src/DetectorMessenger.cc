@@ -139,6 +139,24 @@ DetectorMessenger::DetectorMessenger(DetectorConstruction* Det) : G4UImessenger(
   fTankBottomCavityCmd->AvailableForStates(G4State_PreInit);
   fTankBottomCavityCmd->SetToBeBroadcasted(false);
 
+  fAbsorberEnabledCmd =
+    new G4UIcmdWithABool("/opnovice2/absorber/enabled", this);
+  fAbsorberEnabledCmd->SetGuidance(
+    "Enable the fixed-composition SAE 304 steel absorber in front of the tile.");
+  fAbsorberEnabledCmd->SetDefaultValue(false);
+  fAbsorberEnabledCmd->AvailableForStates(G4State_PreInit);
+  fAbsorberEnabledCmd->SetToBeBroadcasted(false);
+
+  fAbsorberSizeCmd =
+    new G4UIcmdWith3VectorAndUnit("/opnovice2/absorber/size", this);
+  fAbsorberSizeCmd->SetGuidance(
+    "Set full steel absorber size: transverse_x transverse_y thickness.");
+  fAbsorberSizeCmd->SetParameterName("x", "y", "thickness", false);
+  fAbsorberSizeCmd->SetUnitCategory("Length");
+  fAbsorberSizeCmd->SetDefaultUnit("mm");
+  fAbsorberSizeCmd->AvailableForStates(G4State_PreInit);
+  fAbsorberSizeCmd->SetToBeBroadcasted(false);
+
   fDimpleEnabledCmd = new G4UIcmdWithABool("/opnovice2/dimple/enabled", this);
   fDimpleEnabledCmd->SetGuidance("Enable the Week 8.1 bottom-center hemispherical dimple.");
   fDimpleEnabledCmd->SetDefaultValue(false);
@@ -266,6 +284,8 @@ DetectorMessenger::~DetectorMessenger()
   delete fTankSizeCmd;
   delete fTankSizePresetCmd;
   delete fTankBottomCavityCmd;
+  delete fAbsorberEnabledCmd;
+  delete fAbsorberSizeCmd;
   delete fDimpleEnabledCmd;
   delete fDimpleRadiusCmd;
   delete fDimpleModeCmd;
@@ -620,6 +640,12 @@ void DetectorMessenger::SetNewValue(G4UIcommand* command, G4String newValue)
   }
   else if (command == fTankBottomCavityCmd) {
     fDetector->SetBottomCavityEnabled(fTankBottomCavityCmd->GetNewBoolValue(newValue));
+  }
+  else if (command == fAbsorberEnabledCmd) {
+    fDetector->SetAbsorberEnabled(fAbsorberEnabledCmd->GetNewBoolValue(newValue));
+  }
+  else if (command == fAbsorberSizeCmd) {
+    fDetector->SetAbsorberSize(fAbsorberSizeCmd->GetNew3VectorValue(newValue));
   }
   else if (command == fDimpleEnabledCmd) {
     fDetector->SetDimpleEnabled(fDimpleEnabledCmd->GetNewBoolValue(newValue));

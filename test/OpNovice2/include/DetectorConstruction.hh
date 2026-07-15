@@ -54,8 +54,24 @@ class DetectorConstruction : public G4VUserDetectorConstruction
 
     G4VPhysicalVolume* Construct() override;
 
-    G4VPhysicalVolume* GetTank() { return fTank; }
-    G4double GetTankXSize() { return fTank_x; }
+    G4VPhysicalVolume* GetTank() const { return fTank; }
+    G4double GetTankXSize() const { return fTank_x; }
+
+    G4VPhysicalVolume* GetAbsorber() const { return fAbsorber; }
+    G4LogicalVolume* GetAbsorberLogicalVolume() const { return fAbsorber_LV; }
+    G4Material* GetAbsorberMaterial() const { return fAbsorberMaterial; }
+    G4bool IsAbsorberEnabled() const { return fAbsorberEnabled; }
+    G4ThreeVector GetAbsorberFullSize() const
+    {
+      return G4ThreeVector(2. * fAbsorber_x,
+                           2. * fAbsorber_y,
+                           2. * fAbsorber_z);
+    }
+    G4double GetAbsorberCenterZ() const { return fTank_z + fAbsorber_z; }
+    G4double GetAbsorberUpstreamFaceZ() const
+    {
+      return fTank_z + 2. * fAbsorber_z;
+    }
 
     G4OpticalSurface* GetSurface(void) { return fSurface; }
 
@@ -108,6 +124,8 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     G4Material* GetTankMaterial() const { return fTankMaterial; }
     void SetTankSize(const G4ThreeVector& fullSize);
     void SetTankSizePreset(const G4String& preset);
+    void SetAbsorberEnabled(G4bool enabled);
+    void SetAbsorberSize(const G4ThreeVector& fullSize);
     void SetBottomCavityEnabled(G4bool enabled);
     void SetDimpleEnabled(G4bool enabled);
     void SetDimpleRadius(G4double radius);
@@ -126,10 +144,15 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     G4double fExpHall_z = 50. * CLHEP::cm;
 
     G4VPhysicalVolume* fTank = nullptr;
+    G4VPhysicalVolume* fAbsorber = nullptr;
 
     G4double fTank_x = 5. * CLHEP::cm;
     G4double fTank_y = 5. * CLHEP::cm;
     G4double fTank_z = .25 * CLHEP::cm;
+    G4bool fAbsorberEnabled = false;
+    G4double fAbsorber_x = 25. * CLHEP::cm;
+    G4double fAbsorber_y = 25. * CLHEP::cm;
+    G4double fAbsorber_z = 2. * CLHEP::cm;
     G4bool fBottomCavityEnabled = false;
     G4bool fDimpleEnabled = false;
     G4double fDimpleRadius = 3. * CLHEP::mm;
@@ -139,9 +162,11 @@ class DetectorConstruction : public G4VUserDetectorConstruction
 
     G4LogicalVolume* fWorld_LV = nullptr;
     G4LogicalVolume* fTank_LV = nullptr;
+    G4LogicalVolume* fAbsorber_LV = nullptr;
 
     G4Material* fWorldMaterial = nullptr;
     G4Material* fTankMaterial = nullptr;
+    G4Material* fAbsorberMaterial = nullptr;
 
     G4OpticalSurface* fSurface = nullptr;
 
@@ -210,6 +235,7 @@ class DetectorConstruction : public G4VUserDetectorConstruction
                                 G4ThreeVector& pos) const;
     void ValidateDimpleConfiguration() const;
     void ValidateGreaseConfiguration() const;
+    void ValidateAbsorberConfiguration() const;
     void ResetSurfaceMaterialPropertiesTable();
 };
 

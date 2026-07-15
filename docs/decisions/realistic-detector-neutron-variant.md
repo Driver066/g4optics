@@ -1,11 +1,19 @@
 # Realistic Detector Neutron Variant — Decision Record
 
-- **Status:** Scientific inputs and engineering design confirmed; implementation pending
+- **Status:** Scientific inputs and engineering design confirmed; infrastructure baseline implemented, OSC production validation pending
 - **Recorded:** 2026-07-13
 - **Last updated:** 2026-07-14
 - **Working branch:** `exp/realistic-detector`
 - **Branch baseline:** `practice` at `50ec06d4`
 - **Primary implementation area:** `test/OpNovice2`
+
+The first infrastructure slice now includes the opt-in SAE 304 absorber,
+neutron causal observables, mergeable event summaries, the locked
+`realistic-neutron-v1` runner preset, deterministic campaign generation, and
+local validation checks. It has compiled and completed the six one-event
+full-optical geometry smoke configurations under local Geant4 `11.3.2`.
+Formal statistical evidence still requires the documented OSC production
+environment and Geant4 `11.4.2` gate.
 
 ## Purpose
 

@@ -52,11 +52,23 @@ void EventAction::EndOfEventAction(const G4Event* event)
   }
 
   const G4int generatedOptical = run->GetEventGeneratedOpticalCount();
+  const G4int cerenkov = run->GetEventCerenkovCount();
   const G4int scintillation = run->GetEventScintillationCount();
   const G4int sipmDetected = run->GetEventSiPMDetectionCount();
+  const G4bool collectionEfficiencyValid = generatedOptical > 0;
   const G4double collectionEfficiency =
-    generatedOptical > 0 ? G4double(sipmDetected) / G4double(generatedOptical) : 0.;
+    collectionEfficiencyValid
+      ? G4double(sipmDetected) / G4double(generatedOptical)
+      : std::numeric_limits<G4double>::quiet_NaN();
   const G4double missingPosition = std::numeric_limits<G4double>::quiet_NaN();
+
+  const G4double steelEnergyDeposit = run->GetEventSteelEnergyDeposit();
+  const G4int neutronElasticCount = run->GetEventPrimaryNeutronElasticCount();
+  const G4int neutronInelasticCount = run->GetEventPrimaryNeutronInelasticCount();
+  const G4int neutronCaptureCount = run->GetEventPrimaryNeutronCaptureCount();
+  const G4bool neutronTileEntryValid = run->HasEventPrimaryNeutronTileEntry();
+  const G4ThreeVector neutronTileEntryPosition =
+    run->GetEventPrimaryNeutronTileEntryPosition();
 
   auto analysisMan = G4AnalysisManager::Instance();
   analysisMan->FillNtupleIColumn(0, event->GetEventID());
@@ -76,5 +88,44 @@ void EventAction::EndOfEventAction(const G4Event* event)
   analysisMan->FillNtupleIColumn(14, sipmDetected);
   analysisMan->FillNtupleDColumn(15, collectionEfficiency);
   analysisMan->FillNtupleDColumn(16, primaryEnergy / MeV);
+  analysisMan->FillNtupleIColumn(17, collectionEfficiencyValid ? 1 : 0);
+  analysisMan->FillNtupleIColumn(18, cerenkov);
+  analysisMan->FillNtupleDColumn(19, steelEnergyDeposit / MeV);
+  analysisMan->FillNtupleIColumn(20, neutronElasticCount);
+  analysisMan->FillNtupleIColumn(21, neutronInelasticCount);
+  analysisMan->FillNtupleIColumn(22, neutronCaptureCount);
+  analysisMan->FillNtupleIColumn(23, neutronElasticCount > 0 ? 1 : 0);
+  analysisMan->FillNtupleIColumn(24, neutronInelasticCount > 0 ? 1 : 0);
+  analysisMan->FillNtupleIColumn(25, neutronCaptureCount > 0 ? 1 : 0);
+  analysisMan->FillNtupleIColumn(26, run->GetEventChargedTileEntryCount());
+  analysisMan->FillNtupleDColumn(
+    27, run->GetEventChargedTileEntryKineticEnergy() / MeV);
+  analysisMan->FillNtupleIColumn(28, run->GetEventElectronTileEntryCount());
+  analysisMan->FillNtupleDColumn(
+    29, run->GetEventElectronTileEntryKineticEnergy() / MeV);
+  analysisMan->FillNtupleIColumn(30, run->GetEventProtonTileEntryCount());
+  analysisMan->FillNtupleDColumn(
+    31, run->GetEventProtonTileEntryKineticEnergy() / MeV);
+  analysisMan->FillNtupleIColumn(32, run->GetEventOtherChargedTileEntryCount());
+  analysisMan->FillNtupleDColumn(
+    33, run->GetEventOtherChargedTileEntryKineticEnergy() / MeV);
+  analysisMan->FillNtupleIColumn(34, neutronTileEntryValid ? 1 : 0);
+  analysisMan->FillNtupleDColumn(
+    35, neutronTileEntryValid ? neutronTileEntryPosition.x() / mm : missingPosition);
+  analysisMan->FillNtupleDColumn(
+    36, neutronTileEntryValid ? neutronTileEntryPosition.y() / mm : missingPosition);
+  analysisMan->FillNtupleDColumn(
+    37, neutronTileEntryValid ? neutronTileEntryPosition.z() / mm : missingPosition);
+  analysisMan->FillNtupleDColumn(38, run->GetEventTileEnergyDeposit() / MeV);
+  analysisMan->FillNtupleDColumn(
+    39, run->GetEventElectronTileEnergyDeposit() / MeV);
+  analysisMan->FillNtupleDColumn(
+    40, run->GetEventProtonTileEnergyDeposit() / MeV);
+  analysisMan->FillNtupleDColumn(
+    41, run->GetEventOtherChargedTileEnergyDeposit() / MeV);
+  analysisMan->FillNtupleDColumn(
+    42, run->GetEventNeutralTileEnergyDeposit() / MeV);
   analysisMan->AddNtupleRow();
+
+  run->CommitEventStatistics();
 }

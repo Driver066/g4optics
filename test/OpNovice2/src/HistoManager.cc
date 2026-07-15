@@ -150,6 +150,32 @@ void HistoManager::Book()
   analysisMan->CreateNtupleIColumn("sipm_detected_photons");
   analysisMan->CreateNtupleDColumn("collection_efficiency");
   analysisMan->CreateNtupleDColumn("primary_kinetic_energy_mev");
+  analysisMan->CreateNtupleIColumn("collection_efficiency_valid");
+  analysisMan->CreateNtupleIColumn("cerenkov_photons");
+  analysisMan->CreateNtupleDColumn("steel_edep_mev");
+  analysisMan->CreateNtupleIColumn("primary_neutron_elastic_count");
+  analysisMan->CreateNtupleIColumn("primary_neutron_inelastic_count");
+  analysisMan->CreateNtupleIColumn("primary_neutron_capture_count");
+  analysisMan->CreateNtupleIColumn("primary_neutron_elastic_flag");
+  analysisMan->CreateNtupleIColumn("primary_neutron_inelastic_flag");
+  analysisMan->CreateNtupleIColumn("primary_neutron_capture_flag");
+  analysisMan->CreateNtupleIColumn("charged_tile_entry_count");
+  analysisMan->CreateNtupleDColumn("charged_tile_entry_ke_mev");
+  analysisMan->CreateNtupleIColumn("electron_tile_entry_count");
+  analysisMan->CreateNtupleDColumn("electron_tile_entry_ke_mev");
+  analysisMan->CreateNtupleIColumn("proton_tile_entry_count");
+  analysisMan->CreateNtupleDColumn("proton_tile_entry_ke_mev");
+  analysisMan->CreateNtupleIColumn("other_charged_tile_entry_count");
+  analysisMan->CreateNtupleDColumn("other_charged_tile_entry_ke_mev");
+  analysisMan->CreateNtupleIColumn("primary_neutron_tile_entry_valid");
+  analysisMan->CreateNtupleDColumn("primary_neutron_tile_entry_x_mm");
+  analysisMan->CreateNtupleDColumn("primary_neutron_tile_entry_y_mm");
+  analysisMan->CreateNtupleDColumn("primary_neutron_tile_entry_z_mm");
+  analysisMan->CreateNtupleDColumn("tile_edep_mev");
+  analysisMan->CreateNtupleDColumn("electron_tile_edep_mev");
+  analysisMan->CreateNtupleDColumn("proton_tile_edep_mev");
+  analysisMan->CreateNtupleDColumn("other_charged_tile_edep_mev");
+  analysisMan->CreateNtupleDColumn("neutral_tile_edep_mev");
   // When all ntuple columns are created, the ntuple has to be closed using `FinishNtuple()` function.
   analysisMan->FinishNtuple();
 

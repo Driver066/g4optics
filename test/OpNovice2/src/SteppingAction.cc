@@ -31,6 +31,7 @@
 
 #include "SteppingAction.hh"
 
+#include "DetectorConstruction.hh"
 #include "HistoManager.hh"
 #include "Run.hh"
 #include "SteppingMessenger.hh"
@@ -39,9 +40,11 @@
 #include "G4Cerenkov.hh"
 #include "G4Event.hh"
 #include "G4EventManager.hh"
+#include "G4HadronicProcessType.hh"
 #include "G4OpBoundaryProcess.hh"
 #include "G4OpticalPhoton.hh"
 #include "G4ProcessManager.hh"
+#include "G4ProcessType.hh"
 #include "G4RunManager.hh"
 #include "G4Scintillation.hh"
 #include "G4Step.hh"
@@ -78,12 +81,54 @@ void SteppingAction::UserSteppingAction(const G4Step* step)
   const G4DynamicParticle* theParticle = track->GetDynamicParticle();
   const G4ParticleDefinition* particleDef = theParticle->GetParticleDefinition();
 
+  const auto detector = static_cast<const DetectorConstruction*>(
+    G4RunManager::GetRunManager()->GetUserDetectorConstruction());
+  const auto tankPV = detector ? detector->GetTank() : nullptr;
+  const auto absorberPV = detector ? detector->GetAbsorber() : nullptr;
+
   auto trackInfo = (TrackInformation*)(track->GetUserInformation());
 
-  if (track->GetParentID() == 0 && prePV && postPV
-      && prePV->GetName() != "Tank" && postPV->GetName() == "Tank")
-  {
+  const G4bool entersTile = tankPV && prePV != tankPV && postPV == tankPV;
+  if (track->GetParentID() == 0 && entersTile) {
     run->SetPrimaryHitPosition(endPoint->GetPosition());
+    if (particleDef->GetParticleName() == "neutron") {
+      run->SetPrimaryNeutronTileEntry(endPoint->GetPosition());
+    }
+  }
+
+  if (entersTile && particleDef->GetPDGCharge() != 0.) {
+    run->RecordChargedTileEntry(track->GetTrackID(),
+                                particleDef->GetPDGEncoding(),
+                                particleDef->GetPDGCharge(),
+                                endPoint->GetKineticEnergy());
+  }
+
+  const G4double energyDeposit = step->GetTotalEnergyDeposit();
+  if (prePV == absorberPV) {
+    run->AddSteelEnergyDeposit(energyDeposit);
+  }
+  if (prePV == tankPV) {
+    run->AddTileEnergyDeposit(particleDef->GetPDGEncoding(),
+                              particleDef->GetPDGCharge(),
+                              energyDeposit);
+  }
+
+  if (absorberPV && prePV == absorberPV && track->GetParentID() == 0
+      && particleDef->GetParticleName() == "neutron") {
+    const G4VProcess* process = endPoint->GetProcessDefinedStep();
+    if (process && process->GetProcessType() == fHadronic) {
+      const G4int subtype = process->GetProcessSubType();
+      const G4String& processName = process->GetProcessName();
+      if (subtype == fHadronElastic || processName == "hadElastic") {
+        run->AddPrimaryNeutronElasticInteraction();
+      }
+      else if (subtype == fHadronInelastic || processName == "neutronInelastic") {
+        run->AddPrimaryNeutronInelasticInteraction();
+      }
+      else if (subtype == fCapture || processName == "nCapture") {
+        run->AddPrimaryNeutronCaptureInteraction();
+      }
+    }
   }
 
   if (particleDef == opticalphoton) {
@@ -353,8 +398,11 @@ void SteppingAction::UserSteppingAction(const G4Step* step)
     if (endPoint->GetMaterial() == startPoint->GetMaterial()) {
       G4double trackVelocity = track->GetVelocity();
       G4double materialVelocity = CLHEP::c_light;
-      G4MaterialPropertyVector* velVector =
-        endPoint->GetMaterial()->GetMaterialPropertiesTable()->GetProperty(kGROUPVEL);
+      G4MaterialPropertyVector* velVector = nullptr;
+      auto materialProperties = endPoint->GetMaterial()->GetMaterialPropertiesTable();
+      if (materialProperties) {
+        velVector = materialProperties->GetProperty(kGROUPVEL);
+      }
       if (velVector) {
         materialVelocity = velVector->Value(theParticle->GetTotalMomentum(), fIdxVelocity);
       }

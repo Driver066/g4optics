@@ -78,6 +78,15 @@ DetectorConstruction::DetectorConstruction()
   auto nist = G4NistManager::Instance();
   fTankMaterial = nist->FindOrBuildMaterial("G4_PLASTIC_SC_VINYLTOLUENE");
   fWorldMaterial = nist->FindOrBuildMaterial("G4_AIR");
+
+  // SAE 304 stainless steel baseline used by the realistic-neutron study.
+  // Keep the study composition explicit rather than relying on a Geant4
+  // material alias whose alloy fractions may differ across releases.
+  fAbsorberMaterial = new G4Material("StainlessSteelSAE304", 7.9 * g / cm3, 3);
+  fAbsorberMaterial->AddElement(nist->FindOrBuildElement("Fe"), 0.74);
+  fAbsorberMaterial->AddElement(nist->FindOrBuildElement("Cr"), 0.18);
+  fAbsorberMaterial->AddElement(nist->FindOrBuildElement("Ni"), 0.08);
+
   // The material of SiPM
   fSiPMMaterial = nist->FindOrBuildMaterial("G4_Si");
 
@@ -125,6 +134,9 @@ DetectorConstruction::~DetectorConstruction()
 
 G4VPhysicalVolume* DetectorConstruction::Construct()
 {
+  fAbsorber = nullptr;
+  fAbsorber_LV = nullptr;
+
   fTankMaterial->SetMaterialPropertiesTable(fTankMPT);
   fTankMaterial->GetIonisation()->SetBirksConstant(0.126 * mm / MeV);
 
@@ -193,6 +205,37 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
   fTank_LV = new G4LogicalVolume(tank_solid, fTankMaterial, "Tank");
 
   fTank = new G4PVPlacement(nullptr, G4ThreeVector(), fTank_LV, "Tank", fWorld_LV, false, 0);
+
+  if (fAbsorberEnabled) {
+    ValidateAbsorberConfiguration();
+
+    auto absorberBox =
+      new G4Box("SteelAbsorber_Box", fAbsorber_x, fAbsorber_y, fAbsorber_z);
+    fAbsorber_LV =
+      new G4LogicalVolume(absorberBox, fAbsorberMaterial, "SteelAbsorber");
+
+    auto absorberVis = new G4VisAttributes(G4Colour(0.45, 0.45, 0.50, 0.75));
+    absorberVis->SetForceSolid(true);
+    fAbsorber_LV->SetVisAttributes(absorberVis);
+
+    fAbsorber = new G4PVPlacement(nullptr,
+                                 G4ThreeVector(0., 0., GetAbsorberCenterZ()),
+                                 fAbsorber_LV,
+                                 "SteelAbsorber",
+                                 fWorld_LV,
+                                 false,
+                                 0,
+                                 true);
+
+    G4cout << "Realistic-neutron absorber: material="
+           << fAbsorberMaterial->GetName()
+           << ", density=" << fAbsorberMaterial->GetDensity() / (g / cm3)
+           << " g/cm3, full_size="
+           << 2. * fAbsorber_x / mm << " x "
+           << 2. * fAbsorber_y / mm << " x "
+           << 2. * fAbsorber_z / mm << " mm, center_z="
+           << GetAbsorberCenterZ() / mm << " mm, tile_gap=0 mm" << G4endl;
+  }
 
   if (fGreaseEnabled) {
     ValidateGreaseConfiguration();
@@ -283,6 +326,13 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
   // ------------- Surface --------------
 
   auto surface = new G4LogicalBorderSurface("Surface", fTank, world_PV, fSurface);
+
+  // The tile remains painted/wrapped where it touches the steel. Border
+  // surfaces are ordered, so this explicitly covers photons leaving the tile
+  // toward the absorber while the existing tile-to-world boundary remains.
+  if (fAbsorberEnabled) {
+    new G4LogicalBorderSurface("TankToSteelSurface", fTank, fAbsorber, fSurface);
+  }
 
   auto opticalSurface =
     dynamic_cast<G4OpticalSurface*>(surface->GetSurface(fTank, world_PV)->GetSurfaceProperty());
@@ -549,6 +599,38 @@ void DetectorConstruction::SetTankSizePreset(const G4String& preset)
   }
 }
 
+void DetectorConstruction::SetAbsorberEnabled(G4bool enabled)
+{
+  fAbsorberEnabled = enabled;
+  G4RunManager::GetRunManager()->GeometryHasBeenModified();
+
+  G4cout << "Steel absorber enabled set to "
+         << (fAbsorberEnabled ? "true" : "false") << G4endl;
+}
+
+void DetectorConstruction::SetAbsorberSize(const G4ThreeVector& fullSize)
+{
+  if (fullSize.x() <= 0. || fullSize.y() <= 0. || fullSize.z() <= 0.) {
+    G4ExceptionDescription msg;
+    msg << "Invalid absorber full size: " << fullSize / mm
+        << " mm. All dimensions must be positive.";
+    G4Exception("DetectorConstruction::SetAbsorberSize",
+                "OpNovice2_Absorber_001",
+                FatalException,
+                msg);
+  }
+
+  fAbsorber_x = 0.5 * fullSize.x();
+  fAbsorber_y = 0.5 * fullSize.y();
+  fAbsorber_z = 0.5 * fullSize.z();
+  G4RunManager::GetRunManager()->GeometryHasBeenModified();
+
+  G4cout << "Steel absorber full size set to "
+         << 2. * fAbsorber_x / mm << " x "
+         << 2. * fAbsorber_y / mm << " x "
+         << 2. * fAbsorber_z / mm << " mm" << G4endl;
+}
+
 void DetectorConstruction::SetBottomCavityEnabled(G4bool enabled)
 {
   fBottomCavityEnabled = enabled;
@@ -666,6 +748,47 @@ G4double DetectorConstruction::GetSiPMFootprintCornerRadius(G4double u,
     rMax = std::max(rMax, cornerRadii[i]);
   }
   return rMax;
+}
+
+void DetectorConstruction::ValidateAbsorberConfiguration() const
+{
+  if (fAbsorber_x < fTank_x || fAbsorber_y < fTank_y) {
+    G4ExceptionDescription msg;
+    msg << "The steel absorber must cover the tile transversely. "
+        << "absorber full size=" << 2. * fAbsorber_x / mm << " x "
+        << 2. * fAbsorber_y / mm << " mm, tile full size="
+        << 2. * fTank_x / mm << " x " << 2. * fTank_y / mm << " mm.";
+    G4Exception("DetectorConstruction::ValidateAbsorberConfiguration",
+                "OpNovice2_Absorber_002",
+                FatalException,
+                msg);
+  }
+
+  if (fAbsorber_x >= fExpHall_x || fAbsorber_y >= fExpHall_y ||
+      GetAbsorberUpstreamFaceZ() >= fExpHall_z) {
+    G4ExceptionDescription msg;
+    msg << "The steel absorber does not fit strictly inside the world. "
+        << "absorber half transverse size=" << fAbsorber_x / mm << " x "
+        << fAbsorber_y / mm << " mm, upstream face z="
+        << GetAbsorberUpstreamFaceZ() / mm << " mm; world half size="
+        << fExpHall_x / mm << " x " << fExpHall_y / mm << " x "
+        << fExpHall_z / mm << " mm.";
+    G4Exception("DetectorConstruction::ValidateAbsorberConfiguration",
+                "OpNovice2_Absorber_003",
+                FatalException,
+                msg);
+  }
+
+  if (fSiPMFace == "+Z" || fSiPMFace == "top") {
+    G4ExceptionDescription msg;
+    msg << "A +Z SiPM would overlap the zero-gap steel absorber. "
+        << "Attach the SiPM to another tile face; the realistic-neutron-v1 "
+        << "preset uses the centered -Z face.";
+    G4Exception("DetectorConstruction::ValidateAbsorberConfiguration",
+                "OpNovice2_Absorber_004",
+                FatalException,
+                msg);
+  }
 }
 
 void DetectorConstruction::ValidateDimpleConfiguration() const
