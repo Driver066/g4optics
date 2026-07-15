@@ -56,6 +56,7 @@ REPORT_FIELDS = (
 )
 
 SACCT_FIELDS = (
+    "JobID",
     "JobIDRaw",
     "State",
     "ExitCode",
@@ -63,6 +64,8 @@ SACCT_FIELDS = (
     "MaxRSS",
     "MaxVMSize",
 )
+
+LEGACY_SACCT_FIELDS = tuple(field for field in SACCT_FIELDS if field != "JobID")
 
 
 def parse_args() -> argparse.Namespace:
@@ -112,6 +115,7 @@ def query_sacct(command: str, job_ids: list[str], cwd: Path) -> str:
             command,
             "--noheader",
             "--parsable2",
+            "--array",
             "--jobs",
             ",".join(job_ids),
             "--format=" + ",".join(SACCT_FIELDS),
@@ -133,24 +137,63 @@ def parse_sacct(raw: str) -> list[dict[str, str]]:
     for line in raw.splitlines():
         if not line.strip():
             continue
-        values = line.rstrip("|").split("|")
-        if values == list(SACCT_FIELDS):
+        values = line.split("|")
+        if values == [*SACCT_FIELDS, ""] or values == [*LEGACY_SACCT_FIELDS, ""]:
             continue
-        if len(values) != len(SACCT_FIELDS):
+        if len(values) == len(SACCT_FIELDS) + 1 and values[-1] == "":
+            values.pop()
+        elif (
+            len(values) == len(LEGACY_SACCT_FIELDS) + 1
+            and values[-1] == ""
+            and re.fullmatch(r"\d+:\d+", values[2].strip())
+        ):
+            values.pop()
+        if values == list(SACCT_FIELDS) or values == list(LEGACY_SACCT_FIELDS):
+            continue
+        if len(values) == len(SACCT_FIELDS):
+            rows.append(dict(zip(SACCT_FIELDS, values)))
+        elif len(values) == len(LEGACY_SACCT_FIELDS):
+            legacy = dict(zip(LEGACY_SACCT_FIELDS, values))
+            rows.append({"JobID": "", **legacy})
+        else:
             raise ValueError(f"invalid sacct row: {line!r}")
-        rows.append(dict(zip(SACCT_FIELDS, values)))
     if not rows:
         raise ValueError("sacct accounting input has no data rows")
     return rows
 
 
 def accounting_for_task(
-    rows: list[dict[str, str]], job_id: str, array_index: str
+    rows: list[dict[str, str]],
+    job_id: str,
+    array_index: str,
+    element_job_id: str,
 ) -> dict[str, int | str | None]:
     base = f"{job_id}_{array_index}"
-    parent = [row for row in rows if row["JobIDRaw"] == base]
+    parent = [row for row in rows if row["JobID"] == base]
+    identity_field = "JobID"
+    identity = base
+    if not parent:
+        raw_identities = {base, element_job_id}
+        parent = [
+            row
+            for row in rows
+            if not row["JobID"] and row["JobIDRaw"] in raw_identities
+        ]
+        identity_field = "JobIDRaw"
+        identity = parent[0]["JobIDRaw"] if len(parent) == 1 else element_job_id
     if len(parent) != 1:
-        raise ValueError(f"expected one sacct parent row for {base}, found {len(parent)}")
+        available = sorted(
+            {
+                row["JobID"] or row["JobIDRaw"]
+                for row in rows
+                if row["JobID"] or row["JobIDRaw"]
+            }
+        )
+        raise ValueError(
+            f"expected one sacct parent row for {base} "
+            f"(element job {element_job_id}), found {len(parent)}; "
+            f"available IDs: {available}"
+        )
     parent_row = parent[0]
     state = normalize_state(parent_row["State"])
     exit_code = parent_row["ExitCode"].strip()
@@ -166,7 +209,8 @@ def accounting_for_task(
     related = [
         row
         for row in rows
-        if row["JobIDRaw"] == base or row["JobIDRaw"].startswith(base + ".")
+        if row[identity_field] == identity
+        or row[identity_field].startswith(identity + ".")
     ]
     rss_values = [
         value
@@ -282,15 +326,6 @@ def main() -> int:
 
         report_rows: list[dict[str, object]] = []
         for row in task_rows:
-            accounting = accounting_for_task(
-                sacct_rows, row["slurm_job_id"], row["slurm_array_index"]
-            )
-            events = int(row["events"])
-            summary_path = resolve_campaign_path(campaign_dir, row["summary"])
-            summary = read_single_csv_row(summary_path)
-            if int(summary["events"]) != events:
-                raise ValueError(f"summary event mismatch for {row['logical_task_id']}")
-            root_path = resolve_campaign_path(campaign_dir, row["root"])
             marker_path = (
                 campaign_dir
                 / "attempts"
@@ -300,6 +335,34 @@ def main() -> int:
                 / "task_result.json"
             )
             marker = load_json(marker_path)
+            slurm = marker.get("slurm")
+            if not isinstance(slurm, dict):
+                raise ValueError(f"task result has no Slurm identity: {row['logical_task_id']}")
+            if (
+                slurm.get("array_job_id") != row["slurm_job_id"]
+                or slurm.get("array_task_id") != row["slurm_array_index"]
+            ):
+                raise ValueError(
+                    f"task result has mismatched Slurm array identity: "
+                    f"{row['logical_task_id']}"
+                )
+            element_job_id = str(slurm.get("job_id") or "")
+            if not element_job_id:
+                raise ValueError(
+                    f"task result has no Slurm element job ID: {row['logical_task_id']}"
+                )
+            accounting = accounting_for_task(
+                sacct_rows,
+                row["slurm_job_id"],
+                row["slurm_array_index"],
+                element_job_id,
+            )
+            events = int(row["events"])
+            summary_path = resolve_campaign_path(campaign_dir, row["summary"])
+            summary = read_single_csv_row(summary_path)
+            if int(summary["events"]) != events:
+                raise ValueError(f"summary event mismatch for {row['logical_task_id']}")
+            root_path = resolve_campaign_path(campaign_dir, row["root"])
             artifacts = marker.get("artifacts")
             if not isinstance(artifacts, dict):
                 raise ValueError(f"task result has no artifacts: {row['logical_task_id']}")

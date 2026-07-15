@@ -652,7 +652,7 @@ def prepare_fake_results(
                 ),
                 "SLURM_ARRAY_JOB_ID": "12345",
                 "SLURM_ARRAY_TASK_ID": str(array_index),
-                "SLURM_JOB_ID": f"12345_{array_index}",
+                "SLURM_JOB_ID": str(12345 + array_index),
             }
         )
         run(
@@ -921,10 +921,11 @@ def validate_benchmark_summary(repo_root: Path, temp_root: Path) -> None:
     )
     sacct = temp_root / "benchmark-sacct.psv"
     sacct.write_text(
-        "12345_1|COMPLETED|0:0|100| | |\n"
-        "12345_1.batch|COMPLETED|0:0|100|256M|512M|\n"
-        "12345_2|COMPLETED|0:0|200| | |\n"
-        "12345_2.batch|COMPLETED|0:0|200|384M|768M|\n",
+        "12345|12345|COMPLETED|0:0|200||\n"
+        "12345_1|12346|COMPLETED|0:0|100||\n"
+        "12345_1.batch|12346.batch|COMPLETED|0:0|100|256M|512M\n"
+        "12345_2|12347|COMPLETED|0:0|200||\n"
+        "12345_2.batch|12347.batch|COMPLETED|0:0|200|384M|768M\n",
         encoding="utf-8",
     )
     output_dir = finalized_dir / "benchmark"
@@ -957,6 +958,38 @@ def validate_benchmark_summary(repo_root: Path, temp_root: Path) -> None:
     assert recommendation["recommended_blocks_per_configuration"] == 4
     assert recommendation["recommended_block_within_target"] is True
     assert recommendation["target_feasible_at_one_event"] is True
+
+    legacy_sacct = temp_root / "benchmark-sacct-jobidraw-only.psv"
+    legacy_sacct.write_text(
+        "12345|COMPLETED|0:0|200||\n"
+        "12346|COMPLETED|0:0|100||\n"
+        "12346.batch|COMPLETED|0:0|100|256M|512M\n"
+        "12347|COMPLETED|0:0|200||\n"
+        "12347.batch|COMPLETED|0:0|200|384M|768M\n",
+        encoding="utf-8",
+    )
+    legacy_output_dir = finalized_dir / "benchmark-jobidraw-only"
+    run(
+        [
+            sys.executable,
+            "hpc/osc/summarize_realistic_neutron_benchmark.py",
+            "--campaign-dir",
+            str(campaign_dir),
+            "--finalized-dir",
+            str(finalized_dir),
+            "--output-dir",
+            str(legacy_output_dir),
+            "--sacct-input",
+            str(legacy_sacct),
+        ],
+        cwd=repo_root,
+    )
+    legacy_rows = read_csv_rows(legacy_output_dir / "benchmark_report.csv")
+    assert len(legacy_rows) == 2
+    assert {int(row["max_rss_bytes"]) for row in legacy_rows} == {
+        256 * 1024 * 1024,
+        384 * 1024 * 1024,
+    }
 
 
 def read_csv_rows(path: Path) -> list[dict[str, str]]:
