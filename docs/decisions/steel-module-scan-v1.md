@@ -1,8 +1,8 @@
 # Steel Module Scan v1 — Decision Record and Implementation Contract
 
-Status: accepted for implementation; production statistics not yet frozen
+Status: validated through benchmark; convergence-pilot plan frozen; production statistics not yet frozen
 Study preset: `steel-module-scan-v1`
-Last updated: 2026-07-15
+Last updated: 2026-07-16
 
 ## Purpose and relationship to the earlier neutron study
 
@@ -269,7 +269,7 @@ The minimum acceptance sequence is:
 4. run at least one full-optical event for every geometry and audit the complete
    event schema, including per-sensor sums;
 5. visually inspect representative `back-center`, `edge-center`, and
-   `back-four` geometries at the thin and thick endpoints;
+   `back-four` geometries, including the steel placement and each SiPM face;
 6. run a new full-optical resource benchmark that includes the likely cost
    envelope, at minimum the `4 mm back-center`, `24 mm back-center`,
    `24 mm edge-center`, and `24 mm back-four` configurations;
@@ -278,9 +278,25 @@ The minimum acceptance sequence is:
 8. run a new independent statistical/convergence pilot; freeze production N
    only after bootstrap precision and absorber-size convergence are reviewed.
 
-The exact benchmark event count and pilot task shape remain engineering
-decisions until the new geometry smoke passes. They must not be copied blindly
-from the old benchmark.
+The accepted benchmark used `100` events in each of the four envelope
+configurations. Its slowest task was `24 mm back-four` at `279 s` for 100
+events, so a linear estimate places a `250`-event block at `697.5 s`
+(`11.625 min`), comfortably below the one-hour task target.
+
+The convergence pilot is now frozen as follows:
+
+- `500 mm` absorber for all six thicknesses and all three layouts: 18 nominal
+  configurations;
+- `200` and `300 mm` absorber checks only at the `4` and `24 mm` thickness
+  endpoints for all three layouts: 12 additional configurations;
+- 30 configurations total, each split into four independent seed blocks of
+  250 events;
+- 1,000 events per configuration, 120 logical tasks, and 30,000 events total.
+
+The canonical ordered selection is
+`hpc/osc/configurations/steel-module-convergence-pilot-v1.tsv`. This pilot is
+an independent statistical and absorber-convergence study; it does not freeze
+the later production event count.
 
 ### SMS-013 — Primary analysis
 
@@ -295,31 +311,57 @@ For each SiPM layout, report thickness-dependent curves for:
 Compare thicknesses within the same layout, then compare layouts at the same
 thickness. Production, collection, and net-response effects must remain
 separate. The pilot will determine which ratios or curve contrasts can meet the
-accepted precision target without pathological behavior from the large
+candidate precision scenarios without pathological behavior from the large
 zero-response component.
+
+The scan-specific analyzer must preserve that separation and write:
+
+- configuration-level thickness curves and Wilson intervals for interaction
+  and all three zero-light definitions;
+- per-sensor response intervals;
+- thickness ratios relative to `4 mm` within one layout and absorber size;
+- layout ratios relative to `back-center` at one thickness and absorber size;
+- `200/500` and `300/500` absorber-convergence ratios at the two thickness
+  endpoints;
+- production-`N` projections for 5% and 10% relative 95% CI half-width
+  scenarios.
+
+The projection model applies a fixed `1.25` safety factor and rounds upward to
+complete 250-event execution blocks. The 5% and 10% projections are review
+aids only. Neither precision scenario is an accepted target, and the analyzer
+must not auto-approve a production event count or absorber size.
 
 ## Current engineering state
 
-The local runner contract, the three detector layout identities, and the
-independent `steel-module-campaign-v1` manifest/task/result chain are now
-defined. The generator encodes an 18-task geometry smoke and the four-point
-benchmark cost envelope; submission retains the established frozen-source and
-append-only retry journal, while the scan-specific finalizer integrates the
-complete ROOT event audit and per-SiPM sum checks.
+The runner contract, three detector-layout identities, and independent
+`steel-module-campaign-v1` manifest/task/result chain are implemented. The
+accepted frozen source is commit
+`88f15eace17137475310913d585a96908a493c72` with Geant4 `11.4.2`. The
+absorber-disabled fixed-seed electron differential regression against
+`practice@50ec06d4` passed.
 
-Local acceptance currently includes the deterministic 18-configuration
-contract audit, user visual acceptance of all three layouts at `16 mm`, and
-real one-event full-optical smoke runs for `4 mm back-center` plus all three
-`24 mm` layouts. The frozen Geant4 `11.4.2` electron regression and formal
-18-task OSC geometry-smoke campaign remain the next gates.
+The user visually accepted all three layouts at `16 mm`. The formal 18-task
+OSC geometry smoke, campaign `sm-v1-geometry-smoke-d77d801b947c`, completed and
+passed the integrated event audit and finalized checksum verification.
 
-Benchmark resource aggregation and scan-specific bootstrap curve analysis are
-intentionally deferred until the geometry smoke and new benchmark exist. They
-must use this new campaign identity rather than changing hashes or task rows
-belonging to `realistic-neutron-v1`.
+The four-configuration, 100-event-per-task benchmark, campaign
+`sm-v1-benchmark-378e088c618d`, also completed and passed finalization. Its
+recorded envelope was:
 
-No professor-level scientific input remains open. Remaining decisions are
-engineering decisions driven by the new build, geometry smoke, and benchmark.
+| Configuration | Wall time | MaxRSS | Interaction fraction | Generated optical / event | SiPM / event | Collection | SiPM zero fraction |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `4 mm back-center` | `23 s` | `173416 K` | `0.340` | `2790.30` | `17.54` | `0.00629` | `0.890` |
+| `24 mm back-center` | `217 s` | `227640 K` | `0.390` | `41415.77` | `186.20` | `0.00450` | `0.790` |
+| `24 mm edge-center` | `222 s` | `223116 K` | `0.370` | `42595.82` | `184.17` | `0.00432` | `0.740` |
+| `24 mm back-four` | `279 s` | `232324 K` | `0.320` | `46074.89` | `627.94` | `0.01363` | `0.770` |
+
+These results support the accepted `250 events x 4 blocks` convergence pilot.
+They are not yet sufficient to freeze production statistics. The pilot must be
+finalized and analyzed before selecting production `N` or accepting the
+`500 mm` absorber as converged.
+
+No professor-level scientific input remains open. The remaining choices are
+the review-driven production event count and absorber-convergence conclusion.
 
 ## Interactive geometry review
 
@@ -353,7 +395,7 @@ Use one or more repeated `--sipm-layout` options to prepare a subset, or
   zero-gap EJ-550 coupling proxy.
 - Aggregate SiPM count equals the sum of the four fixed per-sensor fields.
 - Old 432.58 MeV data never enter this scan's statistical evidence.
-- Production starts only after a new benchmark, pilot, and convergence review.
+- Production starts only after pilot finalization and convergence review.
 
 ## Requirement sources retained with scope
 

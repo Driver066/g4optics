@@ -132,15 +132,17 @@ python3 hpc/osc/finalize_steel_module_campaign.py \
   --campaign-dir /path/to/campaigns/steel-module-geometry-smoke
 ```
 
-Finalization requires Python 3, NumPy, and uproot on the login node. The next
-stage is deliberately not frozen yet. After reviewing the smoke, create the
-four-configuration cost-envelope benchmark with an explicit event count:
+Finalization requires Python 3, NumPy, and uproot on the login node. The
+accepted frozen commit `88f15eace17137475310913d585a96908a493c72` passed the
+electron differential regression and the formal 18-task geometry smoke
+(`sm-v1-geometry-smoke-d77d801b947c`). The four-configuration cost-envelope
+benchmark is fixed at 100 events per task:
 
 ```bash
 python3 hpc/osc/generate_steel_module_campaign.py \
   --out-dir /path/to/campaigns/steel-module-benchmark \
   --stage benchmark \
-  --events N \
+  --events 100 \
   --campaign-seed 20260715 \
   --environment-mode osc-production \
   --geant4-version 11.4.2 \
@@ -150,17 +152,74 @@ python3 hpc/osc/generate_steel_module_campaign.py \
 ```
 
 The benchmark envelope is exactly `4 mm back-center`, `24 mm back-center`,
-`24 mm edge-center`, and `24 mm back-four`. Convergence-pilot and production
-generation require explicit `--events` and at least four `--blocks`; those
-values must come from the new benchmark rather than the old 50 mm-tile study.
-The pilot shape is not preselected: `convergence-pilot` also requires
-`--configurations-tsv` from the post-benchmark review, with this exact header:
+`24 mm edge-center`, and `24 mm back-four`. Campaign
+`sm-v1-benchmark-378e088c618d` passed finalization. Its four task times were
+`23`, `217`, `222`, and `279 s`; the slowest task was `24 mm back-four`, whose
+linear 250-event projection is `697.5 s` (`11.625 min`). This supports the
+accepted convergence-pilot execution block of 250 events.
+
+The checked-in pilot selection is
+`hpc/osc/configurations/steel-module-convergence-pilot-v1.tsv`. It contains the
+18 nominal `500 mm` configurations plus `200/300 mm` absorber checks at the
+`4/24 mm` thickness endpoints for every layout: 30 configurations total. Four
+independent 250-event seed blocks produce 1,000 events per configuration, 120
+logical tasks, and 30,000 events. The TSV has this exact header:
 
 ```text
 tile_thickness_mm\tsipm_layout\tabsorber_transverse_mm
 ```
 
 The normalized selection is copied into the immutable campaign and checksummed.
+Generate and validate the accepted pilot from the repository root:
+
+```bash
+python3 hpc/osc/generate_steel_module_campaign.py \
+  --out-dir /path/to/campaigns/steel-module-convergence-pilot \
+  --stage convergence-pilot \
+  --events 250 \
+  --blocks 4 \
+  --configurations-tsv hpc/osc/configurations/steel-module-convergence-pilot-v1.tsv \
+  --campaign-seed 20260715 \
+  --environment-mode osc-production \
+  --geant4-version 11.4.2 \
+  --image /path/to/geant4-11.4.2.sif \
+  --g4-data-manifest /path/to/g4-data-manifest.json \
+  --build-artifact /path/to/frozen/OpNovice2
+
+python3 hpc/osc/submit_steel_module_campaign.py \
+  --campaign-dir /path/to/campaigns/steel-module-convergence-pilot \
+  --check-only
+```
+
+After the check-only report shows exactly 120 tasks, submit through the wrapper:
+
+```bash
+python3 hpc/osc/submit_steel_module_campaign.py \
+  --campaign-dir /path/to/campaigns/steel-module-convergence-pilot \
+  --account PAS2524 \
+  --g4-data-root /path/to/geant4-data/11.4.2 \
+  --frozen-root /path/to/frozen-campaign-sources
+```
+
+When every task has one valid result, finalize and run the steel-module-specific
+event-level analysis:
+
+```bash
+python3 hpc/osc/finalize_steel_module_campaign.py \
+  --campaign-dir /path/to/campaigns/steel-module-convergence-pilot
+
+python3 hpc/osc/analyze_steel_module_campaign.py \
+  --campaign-dir /path/to/campaigns/steel-module-convergence-pilot \
+  --production-block-events 250
+```
+
+The analyzer writes `configuration_intervals.csv`, `per_sensor_intervals.csv`,
+`thickness_ratios.csv`, `layout_ratios.csv`, `absorber_convergence.csv`, and
+`production_statistics.json` under `finalized/analysis`, together with pinned
+provenance and checksums. Its 5% and 10% relative 95% CI half-width projections
+use a fixed `1.25` safety factor and round upward to complete 250-event blocks.
+They are review aids only: no precision target, production `N`, or absorber
+size is automatically accepted.
 
 ### Electron differential regression
 
