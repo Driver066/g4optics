@@ -221,6 +221,13 @@ use a fixed `1.25` safety factor and round upward to complete 250-event blocks.
 They are review aids only: no precision target, production `N`, or absorber
 size is automatically accepted.
 
+The accepted 120-task pilot subsequently completed and passed finalization,
+the integrated event audit, and finalized/analysis checksum verification. Its
+preliminary interpretation and the required analysis-v2 gate are recorded in
+`docs/decisions/steel-module-convergence-pilot-review-v1.md`. Production is not
+yet authorized: v1 did not establish absorber equivalence, and its universal
+event-count projections are not accepted production sizes.
+
 ### Electron differential regression
 
 Before statistical interpretation, build one `OpNovice2` executable from the

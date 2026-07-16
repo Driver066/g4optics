@@ -1,6 +1,6 @@
 # Steel Module Scan v1 — Decision Record and Implementation Contract
 
-Status: validated through benchmark; convergence-pilot plan frozen; production statistics not yet frozen
+Status: convergence pilot completed and reviewed; analysis-v2 required before production; production statistics not yet frozen
 Study preset: `steel-module-scan-v1`
 Last updated: 2026-07-16
 
@@ -331,6 +331,46 @@ complete 250-event execution blocks. The 5% and 10% projections are review
 aids only. Neither precision scenario is an accepted target, and the analyzer
 must not auto-approve a production event count or absorber size.
 
+### SMS-014 — Pilot review and analysis-v2 gate
+
+The 30-configuration convergence pilot completed all 120 logical tasks and
+passed finalization, the integrated event audit, and finalized/analysis
+checksum verification. Its v1 interpretation is frozen in
+`docs/decisions/steel-module-convergence-pilot-review-v1.md`.
+
+The accepted preliminary result is that `24 mm` tiles produce approximately
+five times the scintillation light of `4 mm` tiles, while the net SiPM response
+depends on readout geometry. At `500 mm` absorber transverse size, the 24/4 net
+ratios are `0.742 [0.461, 1.303]` for `back-center`,
+`2.148 [1.621, 2.860]` for `edge-center`, and
+`3.424 [2.553, 4.666]` for aggregate `back-four`. The latter uses four times
+the active SiPM area of a single-SiPM layout.
+
+The v1 absorber evidence does not establish 5% equivalence: production and net
+intervals for every `200/500` and `300/500` check include unity, but none lies
+wholly inside `[0.95, 1.05]`. Retain `500 mm` as the conservative analysis
+reference without calling it converged.
+
+The v1 universal production-size projections are not accepted because the
+limiting `back-center 8/4` net ratio is a secondary, unresolved cancellation
+and is not yet the agreed production estimand. Before any new simulation or
+production campaign, analysis-v2 must use the existing audited ROOT events to:
+
+- diagnose zero inflation, heavy tails, and seed-block stability;
+- pool layout-invariant production at fixed thickness and absorber size;
+- report labeled standardized-response decompositions while preserving direct
+  net response as the primary empirical quantity;
+- make `24/4` endpoint production and per-layout net response the primary
+  sizing contrasts;
+- revisit absorber equivalence with pooled production and separate 5%/10%
+  review windows;
+- produce contrast-specific, non-automatic event-count projections in a new
+  checksummed output directory without overwriting v1.
+
+Production remains blocked until the analysis-v2 outputs are reviewed and an
+explicit precision target, primary contrast set, absorber conclusion, and
+event count are accepted.
+
 ## Current engineering state
 
 The runner contract, three detector-layout identities, and independent
@@ -356,12 +396,22 @@ recorded envelope was:
 | `24 mm back-four` | `279 s` | `232324 K` | `0.320` | `46074.89` | `627.94` | `0.01363` | `0.770` |
 
 These results support the accepted `250 events x 4 blocks` convergence pilot.
-They are not yet sufficient to freeze production statistics. The pilot must be
-finalized and analyzed before selecting production `N` or accepting the
-`500 mm` absorber as converged.
+The resulting campaign used source commit
+`cfd7d974af2c5f40f7d76948172fc87ee70bfa3c`, ran as Slurm array `50477293`,
+and produced 30,000 accepted events. All 120 logical tasks were selected by the
+finalizer; the integrated event audit, accepted-statistical-evidence flag, and
+finalized/analysis checksum checks passed.
 
-No professor-level scientific input remains open. The remaining choices are
-the review-driven production event count and absorber-convergence conclusion.
+The v1 scientific review is now complete and recorded in
+`docs/decisions/steel-module-convergence-pilot-review-v1.md`. It supports a
+preliminary, layout-dependent thick-tile conclusion, but it does not freeze
+production statistics or establish absorber equivalence. Analysis-v2 is the
+next gate and must operate on the existing audited events before a focused
+additional pilot or production campaign is considered.
+
+No geometry or source-model input remains open. The remaining choices are the
+analysis-v2 primary-contrast review, production event count, and
+absorber-equivalence conclusion.
 
 ## Interactive geometry review
 
@@ -395,7 +445,8 @@ Use one or more repeated `--sipm-layout` options to prepare a subset, or
   zero-gap EJ-550 coupling proxy.
 - Aggregate SiPM count equals the sum of the four fixed per-sensor fields.
 - Old 432.58 MeV data never enter this scan's statistical evidence.
-- Production starts only after pilot finalization and convergence review.
+- Production starts only after the pilot review, analysis-v2, and an explicit
+  production-statistics and absorber decision.
 
 ## Requirement sources retained with scope
 
