@@ -525,6 +525,10 @@ def validate_electron_regression_orchestration(
     assert report["valid"] is True
     assert (output_dir / "baseline.root").is_file()
     assert (output_dir / "candidate.root").is_file()
+    baseline_macro = (output_dir / "baseline.mac").read_text(encoding="utf-8")
+    candidate_macro = (output_dir / "candidate.mac").read_text(encoding="utf-8")
+    assert "/opnovice2/sipm/layout" not in baseline_macro
+    assert "/opnovice2/sipm/layout single" in candidate_macro
 
     changed = temp_root / "regression-candidate-changed"
     write_executable(changed, regression_fixture_executable(generated=2))
@@ -548,6 +552,30 @@ def validate_electron_regression_orchestration(
     )
     assert failed_report["valid"] is False
     assert failed_report["failed_fields"] == ["generated_optical_photons"]
+
+    no_root = temp_root / "regression-no-root"
+    write_executable(no_root, "#!/usr/bin/env bash\nset -euo pipefail\n")
+    missing_root_dir = temp_root / "electron-regression-no-root"
+    run(
+        [
+            sys.executable,
+            "hpc/osc/run_realistic_neutron_electron_regression.py",
+            "--baseline-executable",
+            str(no_root),
+            "--candidate-executable",
+            str(candidate),
+            "--output-dir",
+            str(missing_root_dir),
+        ],
+        cwd=repo_root,
+        expect_success=False,
+    )
+    preserved_failures = list(
+        temp_root.glob("electron-regression-no-root.failed-*")
+    )
+    assert len(preserved_failures) == 1
+    assert (preserved_failures[0] / "baseline.log").is_file()
+    assert not missing_root_dir.exists()
 
 
 def promote_campaign_to_production(

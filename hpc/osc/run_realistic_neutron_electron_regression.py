@@ -135,27 +135,37 @@ def compare_summaries(
 
 
 def patch_output_macro(
-    generator: Path, template: Path, output: Path, output_base: str, cwd: Path
+    generator: Path,
+    template: Path,
+    output: Path,
+    output_base: str,
+    cwd: Path,
+    *,
+    remove_commands: tuple[str, ...] = (),
 ) -> None:
-    run_command(
-        [
-            sys.executable,
-            str(generator),
-            "--template",
-            str(template),
-            "--out",
-            str(output),
-            "--set",
-            f"/analysis/setFileName={output_base}",
+    command = [
+        sys.executable,
+        str(generator),
+        "--template",
+        str(template),
+        "--out",
+        str(output),
+        "--set",
+        f"/analysis/setFileName={output_base}",
+    ]
+    for macro_command in remove_commands:
+        command.extend(("--remove", macro_command))
+    command.extend(
+        (
             "--require",
             "/analysis/setFileName",
             "--require",
             "/random/setSeeds",
             "--require",
             "/run/beamOn",
-        ],
-        cwd=cwd,
+        )
     )
+    run_command(command, cwd=cwd)
 
 
 def write_checksums(directory: Path) -> None:
@@ -306,6 +316,12 @@ def main() -> int:
                     temp_dir / "baseline.mac",
                     "baseline",
                     opnovice_dir,
+                    # This command was introduced after practice@50ec06d4. The
+                    # candidate default is already the equivalent single-SiPM
+                    # layout, so omitting the candidate-only no-op keeps the
+                    # differential macro semantically identical and executable
+                    # by the frozen baseline.
+                    remove_commands=("/opnovice2/sipm/layout",),
                 )
                 patch_output_macro(
                     opnovice_dir / "generate_scan_macro.py",
@@ -381,7 +397,15 @@ def main() -> int:
                 raise ValueError(f"electron regression failed fields: {failed_names}")
         finally:
             if temp_dir.exists():
-                shutil.rmtree(temp_dir)
+                timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                failure_dir = output_dir.with_name(
+                    f"{output_dir.name}.failed-{timestamp}-{os.getpid()}"
+                )
+                os.replace(temp_dir, failure_dir)
+                print(
+                    f"Electron regression failure artifacts: {failure_dir}",
+                    file=sys.stderr,
+                )
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         print(f"Cannot run electron regression: {exc}", file=sys.stderr)
         return 1

@@ -186,6 +186,12 @@ both executable hashes, summaries, ROOT files, logs, comparison tolerances, and
 checksums. A failed comparison is preserved as evidence and blocks statistical
 interpretation.
 
+The current runner's explicit `/opnovice2/sipm/layout single` command is omitted
+only from the baseline macro because `practice@50ec06d4` predates that messenger;
+`single` is already the candidate default, so the two detector configurations
+remain equivalent. Execution failures also preserve their macros and logs in a
+timestamped `.failed-*` evidence directory instead of deleting the diagnosis.
+
 ### Generate, submit, and finalize one stage
 
 Generate one stage only after its preceding gate has passed. For example:
