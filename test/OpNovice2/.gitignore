@@ -3,9 +3,7 @@
 __pycache__/
 *.pyc
 build/
-build-osc/
-build-osc-sr90/
-build-osc-week10-divergence/
+build-osc*/
 build-gui/
 build-wsl/
 output/
