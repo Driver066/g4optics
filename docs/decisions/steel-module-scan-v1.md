@@ -300,10 +300,23 @@ zero-response component.
 
 ## Current engineering state
 
-The local runner contract and the three detector layout identities are now
-defined. Production campaign manifests, finalization, benchmark aggregation,
-and scan-specific curve analysis must use a new campaign schema rather than
-changing hashes or task rows belonging to `realistic-neutron-v1`.
+The local runner contract, the three detector layout identities, and the
+independent `steel-module-campaign-v1` manifest/task/result chain are now
+defined. The generator encodes an 18-task geometry smoke and the four-point
+benchmark cost envelope; submission retains the established frozen-source and
+append-only retry journal, while the scan-specific finalizer integrates the
+complete ROOT event audit and per-SiPM sum checks.
+
+Local acceptance currently includes the deterministic 18-configuration
+contract audit, user visual acceptance of all three layouts at `16 mm`, and
+real one-event full-optical smoke runs for `4 mm back-center` plus all three
+`24 mm` layouts. The frozen Geant4 `11.4.2` electron regression and formal
+18-task OSC geometry-smoke campaign remain the next gates.
+
+Benchmark resource aggregation and scan-specific bootstrap curve analysis are
+intentionally deferred until the geometry smoke and new benchmark exist. They
+must use this new campaign identity rather than changing hashes or task rows
+belonging to `realistic-neutron-v1`.
 
 No professor-level scientific input remains open. Remaining decisions are
 engineering decisions driven by the new build, geometry smoke, and benchmark.

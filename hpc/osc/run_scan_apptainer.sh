@@ -31,9 +31,9 @@ Environment:
   G4RUN_MANAGER_TYPE=Serial
   PLOT_WITH_ROOT=0
 
-Formal realistic-neutron tasks additionally set RN_CAMPAIGN_HOST_DIR and the
-RN_* identity variables through submit_realistic_neutron_campaign.py. They use
-the frozen prebuilt executable and isolated per-attempt task output directories.
+Formal neutron-study tasks additionally set RN_CAMPAIGN_HOST_DIR and the RN_*
+identity variables through their campaign submission wrapper. They use the
+frozen prebuilt executable and isolated per-attempt task output directories.
 
 If no scan args are supplied, a 1-event 1-point GPS smoke scan is run.
 USAGE
@@ -75,13 +75,22 @@ if [[ -n "${RN_CAMPAIGN_HOST_DIR:-}" ]]; then
   for required_name in \
     RN_ATTEMPT_ID RN_LOGICAL_TASK_ID RN_LOGICAL_TASK_INDEX RN_PLAN_HASH \
     RN_GIT_COMMIT RN_ENVIRONMENT_MODE RN_ENVIRONMENT_IDENTITY \
-    RN_IMAGE_SHA256 RN_G4_DATA_MANIFEST_SHA256 RN_EXECUTABLE_SHA256; do
+    RN_IMAGE_SHA256 RN_G4_DATA_MANIFEST_SHA256 RN_EXECUTABLE_SHA256 \
+    RN_TASK_RESULT_RECORDER; do
     if [[ -z "${!required_name:-}" ]]; then
       echo "Missing formal campaign environment variable: ${required_name}" >&2
       exit 1
     fi
   done
   campaign_host_dir="$(cd "${RN_CAMPAIGN_HOST_DIR}" && pwd -P)"
+  case "${RN_TASK_RESULT_RECORDER}" in
+    record_realistic_neutron_task_result.py|record_steel_module_task_result.py)
+      ;;
+    *)
+      echo "Unsupported formal task-result recorder: ${RN_TASK_RESULT_RECORDER}" >&2
+      exit 1
+      ;;
+  esac
   APPTAINER_BIND_ARGS+=(--bind "${campaign_host_dir}:${CONTAINER_CAMPAIGN_ROOT}")
   CONTAINER_CAMPAIGN_DIR="${CONTAINER_CAMPAIGN_ROOT}"
 fi
@@ -177,7 +186,7 @@ apptainer exec \
       ./run_sipm_cavity_scan.sh "$@"
 
     if [[ -n "${task_root}" ]]; then
-      python3 "${opnovice_dir}/../../hpc/osc/record_realistic_neutron_task_result.py" \
+      python3 "${opnovice_dir}/../../hpc/osc/${RN_TASK_RESULT_RECORDER}" \
         --campaign-dir "${campaign_dir}" \
         --attempt-id "${RN_ATTEMPT_ID}" \
         --logical-task-id "${RN_LOGICAL_TASK_ID}" \

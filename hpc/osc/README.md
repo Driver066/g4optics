@@ -78,6 +78,90 @@ python3 visualize_steel_module_scan_geometry.py --tile-thickness-mm 16
 The visual macro leaves `/run/beamOn 0` and provides both a close SiPM
 detail and a wider steel overview. Use `--prepare-only` on a non-GUI host.
 
+### Steel-module campaign workflow
+
+`steel-module-scan-v1` has an independent campaign schema and must not be
+generated or finalized with the historical `realistic-neutron-v1` tools. Run
+the deterministic preset and campaign checks before freezing a build:
+
+```bash
+python3 hpc/osc/check_steel_module_scan_preset.py
+python3 hpc/osc/check_steel_module_campaign_infrastructure.py
+```
+
+After the candidate build and the electron differential regression below pass,
+the first formal stage is a fixed 18-task geometry smoke: six thicknesses times
+three SiPM layouts, one full-optical event each, with the `500 mm` absorber.
+Generate it only from the clean candidate commit and the frozen OSC Geant4
+`11.4.2` artifacts:
+
+```bash
+python3 hpc/osc/generate_steel_module_campaign.py \
+  --out-dir /path/to/campaigns/steel-module-geometry-smoke \
+  --stage geometry-smoke \
+  --campaign-seed 20260715 \
+  --environment-mode osc-production \
+  --geant4-version 11.4.2 \
+  --image /path/to/geant4-11.4.2.sif \
+  --g4-data-manifest /path/to/g4-data-manifest.json \
+  --build-artifact /path/to/frozen/OpNovice2
+
+python3 hpc/osc/submit_steel_module_campaign.py \
+  --campaign-dir /path/to/campaigns/steel-module-geometry-smoke \
+  --check-only
+```
+
+Submit through the steel-module wrapper so the immutable attempt journal and
+the scan-specific result recorder are selected automatically:
+
+```bash
+python3 hpc/osc/submit_steel_module_campaign.py \
+  --campaign-dir /path/to/campaigns/steel-module-geometry-smoke \
+  --account PAS2524 \
+  --g4-data-root /path/to/geant4-data/11.4.2 \
+  --frozen-root /path/to/frozen-campaign-sources
+```
+
+After all tasks complete, one finalizer command verifies artifact identities,
+the v4 run-config contract, all ROOT event-level causal invariants, the four
+per-SiPM fields, and the Geant aggregate summaries. It writes both the
+configuration summary and `event_audit.json` atomically:
+
+```bash
+python3 hpc/osc/finalize_steel_module_campaign.py \
+  --campaign-dir /path/to/campaigns/steel-module-geometry-smoke
+```
+
+Finalization requires Python 3, NumPy, and uproot on the login node. The next
+stage is deliberately not frozen yet. After reviewing the smoke, create the
+four-configuration cost-envelope benchmark with an explicit event count:
+
+```bash
+python3 hpc/osc/generate_steel_module_campaign.py \
+  --out-dir /path/to/campaigns/steel-module-benchmark \
+  --stage benchmark \
+  --events N \
+  --campaign-seed 20260715 \
+  --environment-mode osc-production \
+  --geant4-version 11.4.2 \
+  --image /path/to/geant4-11.4.2.sif \
+  --g4-data-manifest /path/to/g4-data-manifest.json \
+  --build-artifact /path/to/frozen/OpNovice2
+```
+
+The benchmark envelope is exactly `4 mm back-center`, `24 mm back-center`,
+`24 mm edge-center`, and `24 mm back-four`. Convergence-pilot and production
+generation require explicit `--events` and at least four `--blocks`; those
+values must come from the new benchmark rather than the old 50 mm-tile study.
+The pilot shape is not preselected: `convergence-pilot` also requires
+`--configurations-tsv` from the post-benchmark review, with this exact header:
+
+```text
+tile_thickness_mm\tsipm_layout\tabsorber_transverse_mm
+```
+
+The normalized selection is copied into the immutable campaign and checksummed.
+
 ### Electron differential regression
 
 Before statistical interpretation, build one `OpNovice2` executable from the

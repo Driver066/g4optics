@@ -200,8 +200,13 @@ def prepare_frozen_source(
     bundle_root = base / f"{bundle.campaign_id}-{bundle.git_commit[:12]}"
     source = bundle_root / "source"
     identity_path = bundle_root / "source-identity.json"
+    schema_prefix = (
+        "steel-module"
+        if bundle.manifest.get("study_preset") == "steel-module-scan-v1"
+        else "realistic-neutron"
+    )
     base_identity = {
-        "schema_version": "realistic-neutron-frozen-source-v1",
+        "schema_version": f"{schema_prefix}-frozen-source-v1",
         "campaign_id": bundle.campaign_id,
         "plan_hash": bundle.plan_hash,
         "git_commit": bundle.git_commit,
@@ -518,10 +523,15 @@ def write_attempt_files(
         rows.append({"array_index": array_index, **asdict(task)})
     fields = ["array_index", *CampaignTask.__dataclass_fields__]
     write_tsv(task_map, fields, rows)
+    schema_prefix = (
+        "steel-module"
+        if bundle.manifest.get("study_preset") == "steel-module-scan-v1"
+        else "realistic-neutron"
+    )
     scan_args.write_text(
         "\n".join(
             [
-                "# schema_version=realistic-neutron-attempt-plan-v1",
+                f"# schema_version={schema_prefix}-attempt-plan-v1",
                 f"# campaign_id={bundle.campaign_id}",
                 f"# attempt_id={attempt_id}",
                 *[bundle.scan_args[task.task_index - 1] for task in tasks],
@@ -534,7 +544,7 @@ def write_attempt_files(
     atomic_write_json(
         attempt_json,
         {
-            "schema_version": "realistic-neutron-submission-attempt-v1",
+            "schema_version": f"{schema_prefix}-submission-attempt-v1",
             "attempt_id": attempt_id,
             "campaign_id": bundle.campaign_id,
             "plan_hash": bundle.plan_hash,
@@ -599,6 +609,11 @@ def submit_attempt(
     attempt_id, attempt_dir, task_map, scan_args = write_attempt_files(
         bundle, tasks, mode, frozen_source
     )
+    task_result_recorder = (
+        "record_steel_module_task_result.py"
+        if bundle.manifest.get("study_preset") == "steel-module-scan-v1"
+        else "record_realistic_neutron_task_result.py"
+    )
     exports = {
         "SCAN_ARGS_FILE": str(scan_args),
         "RN_CAMPAIGN_HOST_DIR": str(bundle.directory),
@@ -611,6 +626,7 @@ def submit_attempt(
         "RN_IMAGE_SHA256": image_sha,
         "RN_G4_DATA_MANIFEST_SHA256": data_sha,
         "RN_EXECUTABLE_SHA256": executable_sha,
+        "RN_TASK_RESULT_RECORDER": task_result_recorder,
         "G4_PROJECT_ROOT": str(frozen_source),
         "G4_DATA_ROOT": str(args.g4_data_root.expanduser().resolve()),
         "G4_APPTAINER_IMAGE": str(image),
