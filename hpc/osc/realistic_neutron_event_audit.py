@@ -55,6 +55,13 @@ EVENT_SCHEMA_FIELDS = (
     "neutral_tile_edep_mev",
 )
 
+SIPM_SENSOR_FIELDS = (
+    "sipm_sensor_0_detected_photons",
+    "sipm_sensor_1_detected_photons",
+    "sipm_sensor_2_detected_photons",
+    "sipm_sensor_3_detected_photons",
+)
+
 COUNT_FIELDS = (
     "generated_optical_photons",
     "scintillation_photons",
@@ -168,7 +175,17 @@ def audit_event_arrays(
     if missing:
         _fail(context, None, f"ROOT scan tree is missing fields: {', '.join(missing)}")
 
-    lengths = {len(arrays[field]) for field in EVENT_SCHEMA_FIELDS}
+    present_sensor_fields = [field for field in SIPM_SENSOR_FIELDS if field in arrays]
+    if present_sensor_fields and len(present_sensor_fields) != len(SIPM_SENSOR_FIELDS):
+        _fail(
+            context,
+            None,
+            "ROOT scan tree must contain either all four per-SiPM fields or none",
+        )
+    audited_fields = EVENT_SCHEMA_FIELDS + (
+        SIPM_SENSOR_FIELDS if present_sensor_fields else ()
+    )
+    lengths = {len(arrays[field]) for field in audited_fields}
     if len(lengths) != 1:
         _fail(context, None, "ROOT scan columns have inconsistent lengths")
     event_count = lengths.pop()
@@ -221,6 +238,9 @@ def audit_event_arrays(
         "scintillation_zero_events": 0,
         "sipm_detected_zero_events": 0,
     }
+    if present_sensor_fields:
+        for field in SIPM_SENSOR_FIELDS:
+            totals[field] = 0
     observed_ids: list[int] = []
 
     for index in range(event_count):
@@ -229,6 +249,11 @@ def audit_event_arrays(
 
         values: dict[str, int | float] = {"event_id": event_id}
         for field in COUNT_FIELDS:
+            value = _integer(arrays[field][index], field, context, event_id)
+            if value < 0:
+                _fail(context, event_id, f"{field} must be non-negative: {value}")
+            values[field] = value
+        for field in present_sensor_fields:
             value = _integer(arrays[field][index], field, context, event_id)
             if value < 0:
                 _fail(context, event_id, f"{field} must be non-negative: {value}")
@@ -277,6 +302,14 @@ def audit_event_arrays(
             )
         if sipm > generated:
             _fail(context, event_id, "SiPM photon count exceeds generated optical light")
+        if present_sensor_fields:
+            per_sensor_sum = sum(int(values[field]) for field in SIPM_SENSOR_FIELDS)
+            if sipm != per_sensor_sum:
+                _fail(
+                    context,
+                    event_id,
+                    "aggregate SiPM photon count must equal the four sensor counts",
+                )
 
         collection_valid = int(values["collection_efficiency_valid"])
         try:
@@ -385,6 +418,8 @@ def audit_event_arrays(
         totals["generated_optical_photons"] += generated
         totals["scintillation_photons"] += scintillation
         totals["sipm_detected_photons"] += sipm
+        for field in present_sensor_fields:
+            totals[field] += int(values[field])
         totals["cerenkov_photons"] += cerenkov
         steel_edep = float(values["steel_edep_mev"])
         totals["steel_edep_sum_mev"] += steel_edep
@@ -457,7 +492,13 @@ def read_and_audit_root(
     try:
         with uproot.open(path) as root_file:
             tree = root_file["scan"]
-            arrays = tree.arrays(list(EVENT_SCHEMA_FIELDS), library="np", how=dict)
+            available = set(tree.keys())
+            sensor_fields = [
+                field for field in SIPM_SENSOR_FIELDS if field in available
+            ]
+            arrays = tree.arrays(
+                [*EVENT_SCHEMA_FIELDS, *sensor_fields], library="np", how=dict
+            )
     except Exception as exc:
         raise ValueError(f"cannot read complete scan tree from {path}: {exc}") from exc
     report = audit_event_arrays(

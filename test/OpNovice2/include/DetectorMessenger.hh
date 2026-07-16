@@ -91,6 +91,7 @@ class DetectorMessenger : public G4UImessenger
     G4UIcmdWithAString* fWorldMaterialCmd = nullptr;
 
     // SiPM geometry
+    G4UIcmdWithAString* fSiPMLayoutCmd = nullptr;
     G4UIcmdWithAString* fSiPMFaceCmd = nullptr;
     G4UIcmdWithAString* fSiPMCavityModeCmd = nullptr;
     G4UIcmdWith3VectorAndUnit* fSiPMLocalPositionCmd = nullptr;

@@ -20,7 +20,11 @@ from realistic_neutron_campaign_lib import (
     environment_identity,
     sha256_file,
 )
-from realistic_neutron_event_audit import EVENT_SCHEMA_FIELDS, audit_event_arrays
+from realistic_neutron_event_audit import (
+    EVENT_SCHEMA_FIELDS,
+    SIPM_SENSOR_FIELDS,
+    audit_event_arrays,
+)
 from analyze_realistic_neutron_campaign import production_statistics_recommendation
 from run_realistic_neutron_electron_regression import (
     FLOAT_FIELDS as FLOAT_FIELDS_FOR_REGRESSION,
@@ -74,6 +78,10 @@ EXPECTED_SCAN_COLUMNS = [
     "proton_tile_edep_mev",
     "other_charged_tile_edep_mev",
     "neutral_tile_edep_mev",
+    "sipm_sensor_0_detected_photons",
+    "sipm_sensor_1_detected_photons",
+    "sipm_sensor_2_detected_photons",
+    "sipm_sensor_3_detected_photons",
 ]
 
 
@@ -137,7 +145,9 @@ def validate_event_schema(opnovice_dir: Path) -> None:
     scan_booking = histo_source[start:end]
     columns = re.findall(r'CreateNtuple[IDS]Column\("([^"]+)"\)', scan_booking)
     assert columns == EXPECTED_SCAN_COLUMNS, (columns, EXPECTED_SCAN_COLUMNS)
-    assert columns == list(EVENT_SCHEMA_FIELDS)
+    legacy_count = len(EVENT_SCHEMA_FIELDS)
+    assert columns[:legacy_count] == list(EVENT_SCHEMA_FIELDS)
+    assert columns[legacy_count:] == list(SIPM_SENSOR_FIELDS)
 
     event_source = (opnovice_dir / "src/EventAction.cc").read_text(encoding="utf-8")
     filled_ids = [
@@ -195,10 +205,23 @@ def validate_event_causal_audit() -> None:
         "other_charged_tile_edep_mev": 0.4,
         "neutral_tile_edep_mev": 0.1,
     }
-    arrays = {field: [row[field]] for field in EVENT_SCHEMA_FIELDS}
-    report = audit_event_arrays(arrays, expected_events=1, context="fixture")
+    legacy_arrays = {field: [row[field]] for field in EVENT_SCHEMA_FIELDS}
+    report = audit_event_arrays(
+        legacy_arrays, expected_events=1, context="legacy-fixture"
+    )
     assert report["events"] == 1
     assert report["primary_neutron_interaction_events"] == 1
+
+    arrays = {
+        **legacy_arrays,
+        "sipm_sensor_0_detected_photons": [1],
+        "sipm_sensor_1_detected_photons": [0],
+        "sipm_sensor_2_detected_photons": [1],
+        "sipm_sensor_3_detected_photons": [0],
+    }
+    report = audit_event_arrays(arrays, expected_events=1, context="sensor-fixture")
+    assert report["sipm_sensor_0_detected_photons"] == 1
+    assert report["sipm_sensor_2_detected_photons"] == 1
 
     invalid = {field: list(values) for field, values in arrays.items()}
     invalid["primary_neutron_any_interaction_flag"][0] = 0
@@ -208,6 +231,19 @@ def validate_event_causal_audit() -> None:
         assert "any_interaction_flag" in str(exc)
     else:
         raise AssertionError("causal audit accepted an invalid any-interaction flag")
+
+    invalid_sensor_sum = {field: list(values) for field, values in arrays.items()}
+    invalid_sensor_sum["sipm_sensor_3_detected_photons"][0] = 1
+    try:
+        audit_event_arrays(
+            invalid_sensor_sum,
+            expected_events=1,
+            context="invalid-sensor-fixture",
+        )
+    except ValueError as exc:
+        assert "four sensor counts" in str(exc)
+    else:
+        raise AssertionError("causal audit accepted an invalid per-SiPM sum")
 
     recommendation = production_statistics_recommendation(
         [

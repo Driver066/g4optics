@@ -25,10 +25,15 @@ SOURCE_MODE_SET="0"
 STUDY_PRESET=""
 TILE_THICKNESS_MM=""
 ABSORBER_TRANSVERSE_MM=""
+SIPM_STUDY_LAYOUT=""
+DETECTOR_SIPM_LAYOUT="single"
 ABSORBER_THICKNESS_MM="40"
 NEUTRON_MOMENTUM_GEV_C="1"
 NEUTRON_KINETIC_ENERGY_MEV="432.58"
 NEUTRON_TOTAL_ENERGY_GEV="1.372145"
+STEEL_MODULE_NEUTRON_KINETIC_ENERGY_MEV="1000"
+STEEL_MODULE_NEUTRON_TOTAL_ENERGY_GEV="1.939565421"
+STEEL_MODULE_NEUTRON_MOMENTUM_GEV_C="1.696800177"
 SOURCE_CLEARANCE_MM="1.5"
 RANDOM_SEED_1=""
 RANDOM_SEED_2=""
@@ -195,9 +200,11 @@ Grid / beam options:
 
 Output / execution options:
   --study-preset PRESET              locked scientific preset;
-                                      currently realistic-neutron-v1
-  --tile-thickness-mm VALUE          realistic-neutron-v1: 4 or 16
-  --absorber-transverse-mm VALUE     realistic-neutron-v1: 200, 300, or 500
+                                      realistic-neutron-v1 or steel-module-scan-v1
+  --tile-thickness-mm VALUE          preset-controlled tile thickness
+  --sipm-layout LAYOUT               steel-module-scan-v1: back-center,
+                                      edge-center, or back-four
+  --absorber-transverse-mm VALUE     neutron presets: 200, 300, or 500
   --seed1 N                          first explicit Geant4 random seed
   --seed2 N                          second explicit Geant4 random seed
   --campaign-id ID                   campaign provenance identifier
@@ -283,6 +290,18 @@ while [[ $# -gt 0 ]]; do
       ;;
     --absorber-transverse-mm=*)
       ABSORBER_TRANSVERSE_MM="${1#*=}"
+      shift
+      ;;
+    --sipm-layout)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --sipm-layout" >&2
+        exit 1
+      fi
+      SIPM_STUDY_LAYOUT="$2"
+      shift 2
+      ;;
+    --sipm-layout=*)
+      SIPM_STUDY_LAYOUT="${1#*=}"
       shift
       ;;
     --seed1)
@@ -881,22 +900,23 @@ if [[ "${#POSITIONAL[@]}" -ge 2 ]]; then
 fi
 
 if [[ -z "${STUDY_PRESET}" ]]; then
-  if [[ -n "${TILE_THICKNESS_MM}" || -n "${ABSORBER_TRANSVERSE_MM}" ]]; then
-    echo "--tile-thickness-mm and --absorber-transverse-mm require --study-preset realistic-neutron-v1." >&2
+  if [[ -n "${TILE_THICKNESS_MM}" || -n "${ABSORBER_TRANSVERSE_MM}" ||
+        -n "${SIPM_STUDY_LAYOUT}" ]]; then
+    echo "--tile-thickness-mm, --absorber-transverse-mm, and --sipm-layout require a neutron --study-preset." >&2
     exit 1
   fi
 else
   case "${STUDY_PRESET}" in
-    realistic-neutron-v1)
+    realistic-neutron-v1|steel-module-scan-v1)
       ;;
     *)
-      echo "Unknown --study-preset: ${STUDY_PRESET}. Use realistic-neutron-v1." >&2
+      echo "Unknown --study-preset: ${STUDY_PRESET}. Use realistic-neutron-v1 or steel-module-scan-v1." >&2
       exit 1
       ;;
   esac
 
   if [[ "${MODE}" != "full" || "${GRID}" != "custom" ]]; then
-    echo "--study-preset realistic-neutron-v1 requires MODE=full and GRID=custom." >&2
+    echo "--study-preset ${STUDY_PRESET} requires MODE=full and GRID=custom." >&2
     exit 1
   fi
 
@@ -935,22 +955,53 @@ else
   [[ -n "${CUSTOM_BEAM_DIVERGENCE_MRAD}" ]] && locked_conflicts+=(--beam-divergence-mrad)
 
   if [[ "${#locked_conflicts[@]}" -gt 0 ]]; then
-    echo "The realistic-neutron-v1 preset locks these options: ${locked_conflicts[*]}" >&2
+    echo "The ${STUDY_PRESET} preset locks these options: ${locked_conflicts[*]}" >&2
     exit 1
   fi
 
-  case "${TILE_THICKNESS_MM}" in
-    4|16)
-      ;;
-    "")
-      echo "--study-preset realistic-neutron-v1 requires --tile-thickness-mm 4 or 16." >&2
+  if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
+    if [[ -n "${SIPM_STUDY_LAYOUT}" ]]; then
+      echo "--sipm-layout is an axis only for --study-preset steel-module-scan-v1." >&2
       exit 1
-      ;;
-    *)
-      echo "Invalid --tile-thickness-mm: ${TILE_THICKNESS_MM}. Use 4 or 16." >&2
-      exit 1
-      ;;
-  esac
+    fi
+    case "${TILE_THICKNESS_MM}" in
+      4|16)
+        ;;
+      "")
+        echo "--study-preset realistic-neutron-v1 requires --tile-thickness-mm 4 or 16." >&2
+        exit 1
+        ;;
+      *)
+        echo "Invalid --tile-thickness-mm: ${TILE_THICKNESS_MM}. Use 4 or 16." >&2
+        exit 1
+        ;;
+    esac
+  else
+    case "${TILE_THICKNESS_MM}" in
+      4|8|12|16|20|24)
+        ;;
+      "")
+        echo "--study-preset steel-module-scan-v1 requires --tile-thickness-mm 4, 8, 12, 16, 20, or 24." >&2
+        exit 1
+        ;;
+      *)
+        echo "Invalid --tile-thickness-mm: ${TILE_THICKNESS_MM}. Use 4, 8, 12, 16, 20, or 24." >&2
+        exit 1
+        ;;
+    esac
+    case "${SIPM_STUDY_LAYOUT}" in
+      back-center|edge-center|back-four)
+        ;;
+      "")
+        echo "--study-preset steel-module-scan-v1 requires --sipm-layout back-center, edge-center, or back-four." >&2
+        exit 1
+        ;;
+      *)
+        echo "Invalid --sipm-layout: ${SIPM_STUDY_LAYOUT}. Use back-center, edge-center, or back-four." >&2
+        exit 1
+        ;;
+    esac
+  fi
 
   if [[ -z "${ABSORBER_TRANSVERSE_MM}" ]]; then
     ABSORBER_TRANSVERSE_MM="500"
@@ -965,15 +1016,50 @@ else
   esac
 
   SOURCE_MODE="gps"
-  SOURCE_MODEL_OVERRIDE="realistic-neutron-v1"
-  SIPM_FACE_OVERRIDE="-Z"
-  SIPM_LOCAL_POSITION_OVERRIDE="0 0 0 mm"
+  SOURCE_MODEL_OVERRIDE="${STUDY_PRESET}"
   SIPM_SIZE_OVERRIDE="2.4 2.4 0.5 mm"
-  TANK_SIZE_OVERRIDE="50 50 ${TILE_THICKNESS_MM} mm"
   SURFACE_PRESET_OVERRIDE="polishedfrontpainted"
   SURFACE_REFLECTIVITY_MODEL_OVERRIDE="ej510-empirical"
   OPTICAL_COUPLING="none"
-  CUSTOM_BEAM_DIVERGENCE_MRAD="55"
+  if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
+    SIPM_FACE_OVERRIDE="-Z"
+    SIPM_LOCAL_POSITION_OVERRIDE="0 0 0 mm"
+    DETECTOR_SIPM_LAYOUT="single"
+    TANK_SIZE_OVERRIDE="50 50 ${TILE_THICKNESS_MM} mm"
+    CUSTOM_BEAM_DIVERGENCE_MRAD="55"
+  else
+    TANK_SIZE_OVERRIDE="100 100 ${TILE_THICKNESS_MM} mm"
+    CUSTOM_BEAM_DIVERGENCE_MRAD=""
+    case "${SIPM_STUDY_LAYOUT}" in
+      back-center)
+        DETECTOR_SIPM_LAYOUT="single"
+        SIPM_FACE_OVERRIDE="-Z"
+        SIPM_LOCAL_POSITION_OVERRIDE="0 0 0 mm"
+        ;;
+      edge-center)
+        DETECTOR_SIPM_LAYOUT="single"
+        SIPM_FACE_OVERRIDE="+X"
+        SIPM_LOCAL_POSITION_OVERRIDE="0 0 0 mm"
+        ;;
+      back-four)
+        DETECTOR_SIPM_LAYOUT="back-four"
+        SIPM_FACE_OVERRIDE="-Z"
+        SIPM_LOCAL_POSITION_OVERRIDE="0 0 0 mm"
+        ;;
+    esac
+  fi
+fi
+
+IS_NEUTRON_STUDY_PRESET="false"
+RUN_CONFIG_SCHEMA_VERSION="opnovice2-run-config-v3"
+EVENT_SCHEMA_VERSION="opnovice2-scan-event-v2"
+if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ||
+      "${STUDY_PRESET}" == "steel-module-scan-v1" ]]; then
+  IS_NEUTRON_STUDY_PRESET="true"
+fi
+if [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ]]; then
+  RUN_CONFIG_SCHEMA_VERSION="opnovice2-run-config-v4"
+  EVENT_SCHEMA_VERSION="opnovice2-scan-event-v3"
 fi
 
 if [[ -n "${RANDOM_SEED_1}" || -n "${RANDOM_SEED_2}" ]]; then
@@ -993,7 +1079,7 @@ if [[ -n "${RANDOM_SEED_1}" || -n "${RANDOM_SEED_2}" ]]; then
     exit 1
   fi
 elif [[ -n "${STUDY_PRESET}" ]]; then
-  echo "--study-preset realistic-neutron-v1 requires explicit --seed1 and --seed2." >&2
+  echo "--study-preset ${STUDY_PRESET} requires explicit --seed1 and --seed2." >&2
   exit 1
 fi
 
@@ -1004,8 +1090,9 @@ for campaign_value in \
   [[ -n "${campaign_value}" ]] && campaign_metadata_count=$((campaign_metadata_count + 1))
 done
 if [[ "${campaign_metadata_count}" -ne 0 ]]; then
-  if [[ "${STUDY_PRESET}" != "realistic-neutron-v1" ]]; then
-    echo "Campaign provenance options require --study-preset realistic-neutron-v1." >&2
+  if [[ "${STUDY_PRESET}" != "realistic-neutron-v1" &&
+        "${STUDY_PRESET}" != "steel-module-scan-v1" ]]; then
+    echo "Campaign provenance options require a supported neutron --study-preset." >&2
     exit 1
   fi
   if [[ "${campaign_metadata_count}" -ne 5 ]]; then
@@ -1153,17 +1240,18 @@ esac
 
 if [[ -n "${SOURCE_MODEL_OVERRIDE}" ]]; then
   case "${SOURCE_MODEL_OVERRIDE}" in
-    fixed-electron|sr90-spectrum|sr90-empirical|sr90-decay|realistic-neutron-v1)
+    fixed-electron|sr90-spectrum|sr90-empirical|sr90-decay|realistic-neutron-v1|steel-module-scan-v1)
       ;;
     *)
-      echo "Invalid --source-model: ${SOURCE_MODEL_OVERRIDE}. Use fixed-electron, sr90-spectrum, sr90-empirical, sr90-decay, or realistic-neutron-v1." >&2
+      echo "Invalid --source-model: ${SOURCE_MODEL_OVERRIDE}. Use fixed-electron, sr90-spectrum, sr90-empirical, sr90-decay, realistic-neutron-v1, or steel-module-scan-v1." >&2
       exit 1
       ;;
   esac
 fi
-if [[ "${SOURCE_MODEL_OVERRIDE}" == "realistic-neutron-v1" &&
-      "${STUDY_PRESET}" != "realistic-neutron-v1" ]]; then
-  echo "The realistic-neutron-v1 source model is available only through --study-preset realistic-neutron-v1." >&2
+if [[ ( "${SOURCE_MODEL_OVERRIDE}" == "realistic-neutron-v1" ||
+        "${SOURCE_MODEL_OVERRIDE}" == "steel-module-scan-v1" ) &&
+      "${STUDY_PRESET}" != "${SOURCE_MODEL_OVERRIDE}" ]]; then
+  echo "The ${SOURCE_MODEL_OVERRIDE} source model is available only through its matching --study-preset." >&2
   exit 1
 fi
 
@@ -1948,7 +2036,7 @@ infer_custom_beam_z() {
   fi
 
   thickness_grid="$(length_to_unit "${thickness_value}" "${thickness_unit}" "${GRID_UNIT}")"
-  if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
+  if [[ "${IS_NEUTRON_STUDY_PRESET}" == "true" ]]; then
     offset_grid="$(length_to_unit "${ABSORBER_THICKNESS_MM}" "mm" "${GRID_UNIT}")"
     offset_grid="$(awk -v steel="${offset_grid}" -v clearance="$(length_to_unit "${SOURCE_CLEARANCE_MM}" "mm" "${GRID_UNIT}")" 'BEGIN { printf "%.10g", steel + clearance }')"
   else
@@ -2088,9 +2176,9 @@ Y_MIN_VALUE="${YS[0]}"
 Y_MAX_VALUE="${YS[$((${#YS[@]} - 1))]}"
 POINT_COUNT=$(( ${#XS[@]} * ${#YS[@]} ))
 
-if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
+if [[ "${IS_NEUTRON_STUDY_PRESET}" == "true" ]]; then
   if [[ "${POINT_COUNT}" -ne 1 ]]; then
-    echo "--study-preset realistic-neutron-v1 requires exactly one scan point per invocation so each physical point has its own explicit random stream." >&2
+    echo "--study-preset ${STUDY_PRESET} requires exactly one scan point per invocation so each physical point has its own explicit random stream." >&2
     exit 1
   fi
 
@@ -2098,6 +2186,13 @@ if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
   x_max_mm="$(length_to_unit "${X_MAX_VALUE}" "${GRID_UNIT}" "mm")"
   y_min_mm="$(length_to_unit "${Y_MIN_VALUE}" "${GRID_UNIT}" "mm")"
   y_max_mm="$(length_to_unit "${Y_MAX_VALUE}" "${GRID_UNIT}" "mm")"
+  if [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ]] &&
+      ! awk -v xmin="${x_min_mm}" -v xmax="${x_max_mm}" \
+        -v ymin="${y_min_mm}" -v ymax="${y_max_mm}" \
+        'BEGIN { exit(xmin == 0 && xmax == 0 && ymin == 0 && ymax == 0 ? 0 : 1) }'; then
+    echo "--study-preset steel-module-scan-v1 currently locks the source to tile center x=0, y=0." >&2
+    exit 1
+  fi
   max_abs_coordinate_mm="$(awk \
     -v xmin="${x_min_mm}" -v xmax="${x_max_mm}" \
     -v ymin="${y_min_mm}" -v ymax="${y_max_mm}" '
@@ -2180,7 +2275,7 @@ fi
 if [[ -n "${SOURCE_MODEL_OVERRIDE}" ]]; then
   source_model="${SOURCE_MODEL_OVERRIDE}"
   case "${source_model}" in
-    fixed-electron|sr90-spectrum|sr90-decay|realistic-neutron-v1)
+    fixed-electron|sr90-spectrum|sr90-decay|realistic-neutron-v1|steel-module-scan-v1)
       electron_energy_mode="fixed"
       ;;
     sr90-empirical)
@@ -2261,13 +2356,18 @@ if [[ "${source_model}" == "sr90-decay" ]]; then
   primary_particle="ion"
   primary_energy="${SR90_DECAY_PRIMARY_ION} ion at rest"
 fi
-if [[ "${source_model}" == "realistic-neutron-v1" ]]; then
+if [[ "${source_model}" == "realistic-neutron-v1" ||
+      "${source_model}" == "steel-module-scan-v1" ]]; then
   if [[ "${SOURCE_MODE}" != "gps" ]]; then
-    echo "--study-preset realistic-neutron-v1 requires the GPS source." >&2
+    echo "--study-preset ${STUDY_PRESET} requires the GPS source." >&2
     exit 1
   fi
   primary_particle="neutron"
-  primary_energy="${NEUTRON_KINETIC_ENERGY_MEV} MeV"
+  if [[ "${source_model}" == "realistic-neutron-v1" ]]; then
+    primary_energy="${NEUTRON_KINETIC_ENERGY_MEV} MeV"
+  else
+    primary_energy="${STEEL_MODULE_NEUTRON_KINETIC_ENERGY_MEV} MeV"
+  fi
   electron_energy_mode="fixed"
 fi
 if [[ -n "${PRIMARY_ENERGY_OVERRIDE}" ]]; then
@@ -2473,6 +2573,11 @@ grease_transmission_csv=""
 grease_transmission_source=""
 grease_transmission_reference_thickness_mm=""
 grease_abs_length_derivation=""
+if [[ "${STUDY_PRESET}" == "steel-module-scan-v1" &&
+      "${OPTICAL_COUPLING}" == "none" ]]; then
+  grease_geometry_model="undimpled-zero-gap-ej550-proxy"
+  grease_geometry_caveat="No explicit grease solid; this intentionally reproduces the previous lab-optimization coupling proxy because the physical EJ-550 layer thickness is not fixed."
+fi
 if [[ "${OPTICAL_COUPLING}" == "ej550-grease" ]]; then
   grease_enabled=true
   grease_absorption_model_resolved="${grease_absorption_model}"
@@ -2745,8 +2850,8 @@ mkdir -p "${MACRO_DIR}" "${ROOT_DIR}" "${LOG_DIR}"
 write_run_config() {
   {
     printf '{\n'
-    printf '  "schema_version": "opnovice2-run-config-v3",\n'
-    printf '  "event_schema_version": "opnovice2-scan-event-v2",\n'
+    printf '  "schema_version": "%s",\n' "${RUN_CONFIG_SCHEMA_VERSION}"
+    printf '  "event_schema_version": "%s",\n' "${EVENT_SCHEMA_VERSION}"
     printf '  "study_preset": '
     if [[ -n "${STUDY_PRESET}" ]]; then
       printf '"%s"' "$(json_string "${STUDY_PRESET}")"
@@ -2828,6 +2933,7 @@ write_run_config() {
     printf '  "run_dir": "%s",\n' "$(json_string "${RUN_DIR}")"
     printf '  "dry_run": %s,\n' "$(if [[ "${DRY_RUN}" == "1" ]]; then echo true; else echo false; fi)"
     printf '  "overrides": {\n'
+    printf '    "sipm_study_layout": %s,\n' "$(if [[ -n "${SIPM_STUDY_LAYOUT}" ]]; then echo true; else echo false; fi)"
     printf '    "sipm_face": %s,\n' "$(if [[ -n "${SIPM_FACE_OVERRIDE}" ]]; then echo true; else echo false; fi)"
     printf '    "sipm_cavity_mode": %s,\n' "$(if [[ -n "${SIPM_CAVITY_MODE_OVERRIDE}" ]]; then echo true; else echo false; fi)"
     printf '    "sipm_local_position": %s,\n' "$(if [[ -n "${SIPM_LOCAL_POSITION_OVERRIDE}" ]]; then echo true; else echo false; fi)"
@@ -2853,6 +2959,15 @@ write_run_config() {
     printf '    "events_per_point": %s,\n' "${N_EVENTS}"
     printf '    "scintillation_yield_per_mev": %s,\n' "${scint_yield}"
     printf '    "source_model": "%s",\n' "$(json_string "${source_model}")"
+    printf '    "authoritative_source_quantity": '
+    if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
+      printf '"momentum"'
+    elif [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ]]; then
+      printf '"kinetic_energy"'
+    else
+      printf 'null'
+    fi
+    printf ',\n'
     printf '    "authoritative_momentum_gev_c": '
     if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
       printf '%s' "${NEUTRON_MOMENTUM_GEV_C}"
@@ -2860,9 +2975,34 @@ write_run_config() {
       printf 'null'
     fi
     printf ',\n'
+    printf '    "authoritative_kinetic_energy_mev": '
+    if [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ]]; then
+      printf '%s' "${STEEL_MODULE_NEUTRON_KINETIC_ENERGY_MEV}"
+    else
+      printf 'null'
+    fi
+    printf ',\n'
+    printf '    "derived_momentum_gev_c": '
+    if [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ]]; then
+      printf '%s' "${STEEL_MODULE_NEUTRON_MOMENTUM_GEV_C}"
+    else
+      printf 'null'
+    fi
+    printf ',\n'
     printf '    "derived_total_energy_gev": '
     if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
       printf '%s' "${NEUTRON_TOTAL_ENERGY_GEV}"
+    elif [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ]]; then
+      printf '%s' "${STEEL_MODULE_NEUTRON_TOTAL_ENERGY_GEV}"
+    else
+      printf 'null'
+    fi
+    printf ',\n'
+    printf '    "gps_kinetic_energy_mev": '
+    if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
+      printf '%s' "${NEUTRON_KINETIC_ENERGY_MEV}"
+    elif [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ]]; then
+      printf '%s' "${STEEL_MODULE_NEUTRON_KINETIC_ENERGY_MEV}"
     else
       printf 'null'
     fi
@@ -3024,6 +3164,29 @@ write_run_config() {
     printf '    "direction": "%s"\n' "$(json_string "${BEAM_DIRECTION}")"
     printf '  },\n'
     printf '  "sipm": {\n'
+    printf '    "study_layout": '
+    if [[ -n "${SIPM_STUDY_LAYOUT}" ]]; then
+      printf '"%s"' "$(json_string "${SIPM_STUDY_LAYOUT}")"
+    else
+      printf 'null'
+    fi
+    printf ',\n'
+    printf '    "detector_layout": "%s",\n' "$(json_string "${DETECTOR_SIPM_LAYOUT}")"
+    printf '    "sensor_count": %s,\n' "$(if [[ "${DETECTOR_SIPM_LAYOUT}" == "back-four" ]]; then echo 4; else echo 1; fi)"
+    printf '    "copy_number_order": '
+    if [[ "${DETECTOR_SIPM_LAYOUT}" == "back-four" ]]; then
+      printf '[0, 1, 2, 3]'
+    else
+      printf '[0]'
+    fi
+    printf ',\n'
+    printf '    "fixed_local_positions_mm": '
+    if [[ "${SIPM_STUDY_LAYOUT}" == "back-four" ]]; then
+      printf '[[-25, -25, 0], [-25, 25, 0], [25, -25, 0], [25, 25, 0]]'
+    else
+      printf '[[0, 0, 0]]'
+    fi
+    printf ',\n'
     printf '    "face": "%s",\n' "$(json_string "${sipm_face}")"
     printf '    "cavity_mode": '
     if [[ -n "${sipm_cavity_mode}" ]]; then
@@ -3034,6 +3197,7 @@ write_run_config() {
     printf ',\n'
     printf '    "local_position": "%s",\n' "$(json_string "${sipm_local}")"
     printf '    "size": "%s",\n' "$(json_string "${sipm_size}")"
+    printf '    "per_sensor_event_fields": ["sipm_sensor_0_detected_photons", "sipm_sensor_1_detected_photons", "sipm_sensor_2_detected_photons", "sipm_sensor_3_detected_photons"],\n'
     if [[ "${GRID}" == "near5" && -n "${GRID_STEP:-}" ]]; then
       printf '    "near_field_step": "%s %s"\n' "$(format_num "${GRID_STEP}")" "$(json_string "${GRID_UNIT}")"
     else
@@ -3211,7 +3375,7 @@ write_run_config() {
     printf '\n'
     printf '  },\n'
     printf '  "absorber": {\n'
-    printf '    "enabled": %s,\n' "$(if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then echo true; else echo false; fi)"
+    printf '    "enabled": %s,\n' "$(if [[ "${IS_NEUTRON_STUDY_PRESET}" == "true" ]]; then echo true; else echo false; fi)"
     printf '    "shape": "box",\n'
     printf '    "physical_volume_name": "SteelAbsorber",\n'
     printf '    "material": "StainlessSteelSAE304",\n'
@@ -3219,7 +3383,7 @@ write_run_config() {
     printf '    "mass_fractions": {"Fe": 0.74, "Cr": 0.18, "Ni": 0.08},\n'
     printf '    "epic_geometry_release_reference": "26.07.0",\n'
     printf '    "full_size_mm": '
-    if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
+    if [[ "${IS_NEUTRON_STUDY_PRESET}" == "true" ]]; then
       printf '[%s, %s, %s]' \
         "${ABSORBER_TRANSVERSE_MM}" "${ABSORBER_TRANSVERSE_MM}" "${ABSORBER_THICKNESS_MM}"
     else
@@ -3229,7 +3393,7 @@ write_run_config() {
     printf '    "tile_gap_mm": 0,\n'
     printf '    "tile_to_steel_surface": "shared_EJ510_polishedfrontpainted_proxy",\n'
     printf '    "source_clearance_upstream_mm": '
-    if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
+    if [[ "${IS_NEUTRON_STUDY_PRESET}" == "true" ]]; then
       printf '%s' "${SOURCE_CLEARANCE_MM}"
     else
       printf 'null'
@@ -3550,9 +3714,14 @@ fi
 if [[ -n "${tank_size_preset}" ]]; then
   echo "Tank size preset: ${tank_size_preset}"
 fi
-if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
+if [[ "${IS_NEUTRON_STUDY_PRESET}" == "true" ]]; then
   echo "Steel absorber: ${ABSORBER_TRANSVERSE_MM} x ${ABSORBER_TRANSVERSE_MM} x ${ABSORBER_THICKNESS_MM} mm SAE 304, zero tile gap"
-  echo "Neutron source: p=${NEUTRON_MOMENTUM_GEV_C} GeV/c, kinetic energy=${NEUTRON_KINETIC_ENERGY_MEV} MeV, clearance=${SOURCE_CLEARANCE_MM} mm"
+  if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
+    echo "Neutron source: authoritative p=${NEUTRON_MOMENTUM_GEV_C} GeV/c, derived kinetic energy=${NEUTRON_KINETIC_ENERGY_MEV} MeV, clearance=${SOURCE_CLEARANCE_MM} mm"
+  else
+    echo "Neutron source: authoritative kinetic energy=${STEEL_MODULE_NEUTRON_KINETIC_ENERGY_MEV} MeV, derived p=${STEEL_MODULE_NEUTRON_MOMENTUM_GEV_C} GeV/c, clearance=${SOURCE_CLEARANCE_MM} mm"
+    echo "SiPM study layout: ${SIPM_STUDY_LAYOUT} (detector layout=${DETECTOR_SIPM_LAYOUT}, face=${sipm_face})"
+  fi
   echo "Nominal minimum absorber-edge distance: ${MIN_ABSORBER_EDGE_DISTANCE_MM} mm"
 fi
 if [[ -n "${surface_preset}" ]]; then
@@ -3589,6 +3758,7 @@ tail -n +2 "${POINTS_CSV}" | while IFS=, read -r tag x y z unit macro root log; 
     --set "${position_cmd}=${x} ${y} ${z} ${unit}"
     --set "${direction_cmd}=${BEAM_DIRECTION}"
     --set "/run/beamOn=${N_EVENTS}"
+    --set "/opnovice2/sipm/layout=${DETECTOR_SIPM_LAYOUT}"
     --set "/opnovice2/sipm/face=${sipm_face}"
     --set "/opnovice2/sipm/localPosition=${sipm_local}"
     --set "/opnovice2/sipm/size=${sipm_size}"
@@ -3596,15 +3766,21 @@ tail -n +2 "${POINTS_CSV}" | while IFS=, read -r tag x y z unit macro root log; 
     --require "${position_cmd}"
     --require "${direction_cmd}"
     --require "/run/beamOn"
+    --require "/opnovice2/sipm/layout"
     --require "/opnovice2/sipm/face"
     --require "/opnovice2/sipm/localPosition"
     --require "/opnovice2/sipm/size"
   )
 
-  if [[ "${source_model}" == "realistic-neutron-v1" ]]; then
+  if [[ "${source_model}" == "realistic-neutron-v1" ||
+        "${source_model}" == "steel-module-scan-v1" ]]; then
+    neutron_energy_mev="${NEUTRON_KINETIC_ENERGY_MEV}"
+    if [[ "${source_model}" == "steel-module-scan-v1" ]]; then
+      neutron_energy_mev="${STEEL_MODULE_NEUTRON_KINETIC_ENERGY_MEV}"
+    fi
     macro_args+=(
       --set "${particle_cmd}=neutron"
-      --set "${energy_cmd}=${NEUTRON_KINETIC_ENERGY_MEV} MeV"
+      --set "${energy_cmd}=${neutron_energy_mev} MeV"
       --require "${particle_cmd}"
       --require "${energy_cmd}"
     )
@@ -3654,7 +3830,7 @@ tail -n +2 "${POINTS_CSV}" | while IFS=, read -r tag x y z unit macro root log; 
   if [[ "${MODE}" == "full" ]]; then
     macro_args+=(--set "/opnovice2/tank/bottomCavity=false")
   fi
-  if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
+  if [[ "${IS_NEUTRON_STUDY_PRESET}" == "true" ]]; then
     macro_args+=(
       --set "/opnovice2/absorber/enabled=true"
       --set "/opnovice2/absorber/size=${ABSORBER_TRANSVERSE_MM} ${ABSORBER_TRANSVERSE_MM} ${ABSORBER_THICKNESS_MM} mm"

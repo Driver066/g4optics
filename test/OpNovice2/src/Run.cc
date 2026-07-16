@@ -57,6 +57,7 @@ void Run::BeginEvent(G4int eventID)
   fEventCerenkovCount = 0;
   fEventScintCount = 0;
   fEventSiPMDetectionCount = 0;
+  fEventSiPMDetectionCounts.fill(0);
   fEventHitValid = false;
   fEventHitPosition = G4ThreeVector();
   fEventScintPositionSum = G4ThreeVector();
@@ -629,6 +630,9 @@ void Run::Merge(const G4Run* run)
 
   // SiPM count
   fSiPMDetectionCount += localRun->fSiPMDetectionCount;
+  for (std::size_t index = 0; index < fSiPMDetectionCounts.size(); ++index) {
+    fSiPMDetectionCounts[index] += localRun->fSiPMDetectionCounts[index];
+  }
 
   fShootPositionCount += localRun->fShootPositionCount;
   fShootPositionSum += localRun->fShootPositionSum;

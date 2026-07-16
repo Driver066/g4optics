@@ -198,6 +198,12 @@ DetectorMessenger::DetectorMessenger(DetectorConstruction* Det) : G4UImessenger(
   fWorldMaterialCmd->AvailableForStates(G4State_PreInit, G4State_Idle);
   fWorldMaterialCmd->SetToBeBroadcasted(false);
 
+  fSiPMLayoutCmd = new G4UIcmdWithAString("/opnovice2/sipm/layout", this);
+  fSiPMLayoutCmd->SetGuidance(
+    "Set SiPM layout: single or back-four (four -Z sensors at x,y=+/-25 mm).");
+  fSiPMLayoutCmd->AvailableForStates(G4State_PreInit);
+  fSiPMLayoutCmd->SetToBeBroadcasted(false);
+
   fSiPMFaceCmd = new G4UIcmdWithAString("/opnovice2/sipm/face", this);
   fSiPMFaceCmd->SetGuidance("Set SiPM attached face: +X, -X, +Y, -Y, +Z, -Z, bottomCavity.");
   fSiPMFaceCmd->AvailableForStates(G4State_PreInit);
@@ -293,6 +299,7 @@ DetectorMessenger::~DetectorMessenger()
   delete fWorldMatPropVectorCmd;
   delete fWorldMatPropConstCmd;
   delete fWorldMaterialCmd;
+  delete fSiPMLayoutCmd;
   delete fSiPMFaceCmd;
   delete fSiPMCavityModeCmd;
   delete fSiPMLocalPositionCmd;
@@ -661,6 +668,9 @@ void DetectorMessenger::SetNewValue(G4UIcommand* command, G4String newValue)
   }
 
   // --- SiPM commands ---
+  else if (command == fSiPMLayoutCmd) {
+    fDetector->SetSiPMLayout(newValue);
+  }
   else if (command == fSiPMFaceCmd) {
     fDetector->SetSiPMFace(newValue);
   }

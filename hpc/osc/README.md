@@ -66,6 +66,18 @@ python3 visualize_realistic_neutron_geometry.py --tile-thickness-mm 4
 python3 visualize_realistic_neutron_geometry.py --tile-thickness-mm 16
 ```
 
+For the independent `steel-module-scan-v1` study, use its separate
+visualizer. Omitting `--sipm-layout` prepares and opens all three accepted
+layouts in sequence:
+
+```bash
+cd test/OpNovice2
+python3 visualize_steel_module_scan_geometry.py --tile-thickness-mm 16
+```
+
+The visual macro leaves `/run/beamOn 0` and provides both a close SiPM
+detail and a wider steel overview. Use `--prepare-only` on a non-GUI host.
+
 ### Electron differential regression
 
 Before statistical interpretation, build one `OpNovice2` executable from the

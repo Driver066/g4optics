@@ -177,6 +177,10 @@ void HistoManager::Book()
   analysisMan->CreateNtupleDColumn("proton_tile_edep_mev");
   analysisMan->CreateNtupleDColumn("other_charged_tile_edep_mev");
   analysisMan->CreateNtupleDColumn("neutral_tile_edep_mev");
+  analysisMan->CreateNtupleIColumn("sipm_sensor_0_detected_photons");
+  analysisMan->CreateNtupleIColumn("sipm_sensor_1_detected_photons");
+  analysisMan->CreateNtupleIColumn("sipm_sensor_2_detected_photons");
+  analysisMan->CreateNtupleIColumn("sipm_sensor_3_detected_photons");
   // When all ntuple columns are created, the ntuple has to be closed using `FinishNtuple()` function.
   analysisMan->FinishNtuple();
 

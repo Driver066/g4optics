@@ -134,7 +134,7 @@ void SteppingAction::UserSteppingAction(const G4Step* step)
   if (particleDef == opticalphoton) {
     // SiPM detection
     if (prePV && prePV->GetName() == "SiPM") {
-      run->AddSiPMDetection();
+      run->AddSiPMDetection(prePV->GetCopyNo());
 
       G4double en = track->GetKineticEnergy();
       analysisMan->FillH1(27, en / eV);  // detected photon energy

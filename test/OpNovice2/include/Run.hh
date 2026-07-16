@@ -36,6 +36,7 @@
 #include "G4Run.hh"
 #include "G4ThreeVector.hh"
 
+#include <array>
 #include <limits>
 #include <unordered_set>
 
@@ -181,6 +182,12 @@ class Run : public G4Run
     G4int GetEventCerenkovCount() const { return fEventCerenkovCount; }
     G4int GetEventScintillationCount() const { return fEventScintCount; }
     G4int GetEventSiPMDetectionCount() const { return fEventSiPMDetectionCount; }
+    G4int GetEventSiPMDetectionCount(G4int sensorIndex) const
+    {
+      return sensorIndex >= 0 && sensorIndex < 4
+               ? fEventSiPMDetectionCounts[static_cast<std::size_t>(sensorIndex)]
+               : 0;
+    }
     G4bool HasEventHitPosition() const { return fEventHitValid; }
     G4ThreeVector GetEventHitPosition() const { return fEventHitPosition; }
     G4bool HasEventScintillationCentroid() const { return fEventScintCount > 0; }
@@ -312,10 +319,15 @@ class Run : public G4Run
     G4double GetDecayBetaEnergyMax() const { return fDecayBetaEnergyMax; }
 
     // SiPM Detection
-    void AddSiPMDetection()
+    void AddSiPMDetection(G4int sensorIndex = 0)
     {
       fSiPMDetectionCount += 1;
       fEventSiPMDetectionCount += 1;
+      if (sensorIndex >= 0 && sensorIndex < 4) {
+        const auto index = static_cast<std::size_t>(sensorIndex);
+        fSiPMDetectionCounts[index] += 1;
+        fEventSiPMDetectionCounts[index] += 1;
+      }
     }
 
   private:
@@ -356,6 +368,7 @@ class Run : public G4Run
 
     // SiPM counting
     G4long fSiPMDetectionCount = 0;
+    std::array<G4long, 4> fSiPMDetectionCounts = {0, 0, 0, 0};
 
     // Current event counts used for the Week 5.3 scan ntuple.
     G4int fCurrentEventID = -1;
@@ -363,6 +376,7 @@ class Run : public G4Run
     G4int fEventCerenkovCount = 0;
     G4int fEventScintCount = 0;
     G4int fEventSiPMDetectionCount = 0;
+    std::array<G4int, 4> fEventSiPMDetectionCounts = {0, 0, 0, 0};
     G4bool fEventHitValid = false;
     G4ThreeVector fEventHitPosition;
     G4ThreeVector fEventScintPositionSum;

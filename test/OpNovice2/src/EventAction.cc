@@ -130,6 +130,10 @@ void EventAction::EndOfEventAction(const G4Event* event)
     42, run->GetEventOtherChargedTileEnergyDeposit() / MeV);
   analysisMan->FillNtupleDColumn(
     43, run->GetEventNeutralTileEnergyDeposit() / MeV);
+  analysisMan->FillNtupleIColumn(44, run->GetEventSiPMDetectionCount(0));
+  analysisMan->FillNtupleIColumn(45, run->GetEventSiPMDetectionCount(1));
+  analysisMan->FillNtupleIColumn(46, run->GetEventSiPMDetectionCount(2));
+  analysisMan->FillNtupleIColumn(47, run->GetEventSiPMDetectionCount(3));
   analysisMan->AddNtupleRow();
 
   run->CommitEventStatistics();

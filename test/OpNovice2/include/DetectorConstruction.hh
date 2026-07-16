@@ -42,6 +42,8 @@
 
 #include <CLHEP/Units/SystemOfUnits.h>
 
+#include <vector>
+
 class DetectorMessenger;
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
@@ -133,6 +135,7 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     void SetDimpleSiPMMode(const G4String& mode);
 
     // setting SiPM
+    void SetSiPMLayout(const G4String& layout);
     void SetSiPMFace(const G4String& face);
     void SetSiPMCavityMode(const G4String& mode);
     void SetSiPMLocalPosition(const G4ThreeVector& pos);
@@ -179,6 +182,7 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     /// Adding SiPM
     // Physical Volume & Logical Volume
     G4VPhysicalVolume* fSiPM = nullptr;
+    std::vector<G4VPhysicalVolume*> fSiPMs;
     G4LogicalVolume* fSiPM_LV = nullptr;
 
     // Material & Properties Table
@@ -196,6 +200,10 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     G4double fGreaseActiveV = 0.0;
 
     // General SiPM placement.
+    // fSiPMLayout is "single" for the legacy one-SiPM geometry or
+    // "back-four" for the steel-module scan's four fixed -Z placements.
+    G4String fSiPMLayout = "single";
+
     // fSiPMFace controls which tile face the SiPM is attached to.
     // Accepted values: +X, -X, +Y, -Y, +Z, -Z, bottomCavity.
     G4String fSiPMFace = "+X";
@@ -221,6 +229,14 @@ class DetectorConstruction : public G4VUserDetectorConstruction
                               G4double& hy,
                               G4double& hz,
                               G4ThreeVector& pos) const;
+    void ComputeSiPMPlacementFor(const G4String& face,
+                                 const G4ThreeVector& localPosition,
+                                 G4double& hx,
+                                 G4double& hy,
+                                 G4double& hz,
+                                 G4ThreeVector& pos) const;
+    std::vector<G4ThreeVector> GetSiPMLocalPositions() const;
+    void ValidateSiPMLayout() const;
     G4double GetBottomCavityRadius() const;
     G4String GetEffectiveDimpleSiPMMode() const;
     G4double GetSiPMFootprintCornerRadius(G4double u,

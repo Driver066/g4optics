@@ -136,6 +136,8 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
 {
   fAbsorber = nullptr;
   fAbsorber_LV = nullptr;
+  fSiPM = nullptr;
+  fSiPMs.clear();
 
   fTankMaterial->SetMaterialPropertiesTable(fTankMPT);
   fTankMaterial->GetIonisation()->SetBirksConstant(0.126 * mm / MeV);
@@ -296,13 +298,20 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
                                 true);
   }
 
-  // The SiPM
+  // The SiPM or fixed four-SiPM steel-module layout.
+  ValidateSiPMLayout();
   G4double sipmHx = 0.0;
   G4double sipmHy = 0.0;
   G4double sipmHz = 0.0;
   G4ThreeVector sipmPos;
 
-  ComputeSiPMPlacement(sipmHx, sipmHy, sipmHz, sipmPos);
+  const auto sipmLocalPositions = GetSiPMLocalPositions();
+  ComputeSiPMPlacementFor(fSiPMFace,
+                          sipmLocalPositions.front(),
+                          sipmHx,
+                          sipmHy,
+                          sipmHz,
+                          sipmPos);
 
   auto sipm_box = new G4Box("SiPM_Box", sipmHx, sipmHy, sipmHz);
 
@@ -313,14 +322,36 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
   sipmVis->SetForceSolid(true);
   fSiPM_LV->SetVisAttributes(sipmVis);
 
-  fSiPM = new G4PVPlacement(nullptr,
-                            sipmPos,
-                            fSiPM_LV,
-                            "SiPM",
-                            fWorld_LV,
-                            false,
-                            0,
-                            true);        // overlap check
+  for (std::size_t index = 0; index < sipmLocalPositions.size(); ++index) {
+    G4double placementHx = 0.0;
+    G4double placementHy = 0.0;
+    G4double placementHz = 0.0;
+    G4ThreeVector placementPos;
+    ComputeSiPMPlacementFor(fSiPMFace,
+                            sipmLocalPositions[index],
+                            placementHx,
+                            placementHy,
+                            placementHz,
+                            placementPos);
+
+    auto placement = new G4PVPlacement(nullptr,
+                                       placementPos,
+                                       fSiPM_LV,
+                                       "SiPM",
+                                       fWorld_LV,
+                                       false,
+                                       static_cast<G4int>(index),
+                                       true);  // overlap check
+    fSiPMs.push_back(placement);
+    if (index == 0) {
+      fSiPM = placement;
+    }
+    G4cout << "SiPM placement: layout=" << fSiPMLayout
+           << ", copy=" << index
+           << ", face=" << fSiPMFace
+           << ", local=" << sipmLocalPositions[index] / mm
+           << " mm, world=" << placementPos / mm << " mm" << G4endl;
+  }
 
 
   // ------------- Surface --------------
@@ -782,8 +813,8 @@ void DetectorConstruction::ValidateAbsorberConfiguration() const
   if (fSiPMFace == "+Z" || fSiPMFace == "top") {
     G4ExceptionDescription msg;
     msg << "A +Z SiPM would overlap the zero-gap steel absorber. "
-        << "Attach the SiPM to another tile face; the realistic-neutron-v1 "
-        << "preset uses the centered -Z face.";
+        << "Attach the SiPM to another tile face; the neutron study presets "
+        << "use -Z or a lateral face.";
     G4Exception("DetectorConstruction::ValidateAbsorberConfiguration",
                 "OpNovice2_Absorber_004",
                 FatalException,
@@ -1044,44 +1075,55 @@ void DetectorConstruction::ComputeSiPMPlacement(G4double& hx,
                                                 G4double& hz,
                                                 G4ThreeVector& pos) const
 {
+  ComputeSiPMPlacementFor(fSiPMFace, fSiPMLocalPosition, hx, hy, hz, pos);
+}
+
+void DetectorConstruction::ComputeSiPMPlacementFor(
+  const G4String& face,
+  const G4ThreeVector& localPosition,
+  G4double& hx,
+  G4double& hy,
+  G4double& hz,
+  G4ThreeVector& pos) const
+{
   const G4double hu = 0.5 * fSiPMActiveU;
   const G4double hv = 0.5 * fSiPMActiveV;
   const G4double ht = 0.5 * fSiPMThickness;
 
-  const G4double u = fSiPMLocalPosition.x();
-  const G4double v = fSiPMLocalPosition.y();
+  const G4double u = localPosition.x();
+  const G4double v = localPosition.y();
 
-  if (fSiPMFace == "+X" || fSiPMFace == "right") {
+  if (face == "+X" || face == "right") {
     hx = ht;
     hy = hu;
     hz = hv;
     pos = G4ThreeVector(fTank_x + ht, u, v);
   }
-  else if (fSiPMFace == "-X" || fSiPMFace == "left") {
+  else if (face == "-X" || face == "left") {
     hx = ht;
     hy = hu;
     hz = hv;
     pos = G4ThreeVector(-fTank_x - ht, u, v);
   }
-  else if (fSiPMFace == "+Y" || fSiPMFace == "back") {
+  else if (face == "+Y" || face == "back") {
     hx = hu;
     hy = ht;
     hz = hv;
     pos = G4ThreeVector(u, fTank_y + ht, v);
   }
-  else if (fSiPMFace == "-Y" || fSiPMFace == "front") {
+  else if (face == "-Y" || face == "front") {
     hx = hu;
     hy = ht;
     hz = hv;
     pos = G4ThreeVector(u, -fTank_y - ht, v);
   }
-  else if (fSiPMFace == "+Z" || fSiPMFace == "top") {
+  else if (face == "+Z" || face == "top") {
     hx = hu;
     hy = hv;
     hz = ht;
     pos = G4ThreeVector(u, v, fTank_z + ht);
   }
-  else if (fSiPMFace == "-Z" || fSiPMFace == "bottom") {
+  else if (face == "-Z" || face == "bottom") {
     hx = hu;
     hy = hv;
     hz = ht;
@@ -1113,7 +1155,7 @@ void DetectorConstruction::ComputeSiPMPlacement(G4double& hx,
       pos = G4ThreeVector(u, v, -fTank_z - greaseOffset - ht);
     }
   }
-  else if (fSiPMFace == "bottomCavity") {
+  else if (face == "bottomCavity") {
     hx = hu;
     hy = hv;
     hz = ht;
@@ -1174,13 +1216,95 @@ void DetectorConstruction::ComputeSiPMPlacement(G4double& hx,
   }
   else {
     G4ExceptionDescription msg;
-    msg << "Unknown SiPM face: " << fSiPMFace
+    msg << "Unknown SiPM face: " << face
         << ". Use +X, -X, +Y, -Y, +Z, -Z, bottomCavity.";
     G4Exception("DetectorConstruction::ComputeSiPMPlacement",
                 "OpNovice2_SiPM_001",
                 FatalException,
                 msg);
   }
+}
+
+std::vector<G4ThreeVector> DetectorConstruction::GetSiPMLocalPositions() const
+{
+  if (fSiPMLayout == "back-four") {
+    const G4double offset = 25. * mm;
+    return {
+      G4ThreeVector(-offset, -offset, 0.),
+      G4ThreeVector(-offset, offset, 0.),
+      G4ThreeVector(offset, -offset, 0.),
+      G4ThreeVector(offset, offset, 0.)
+    };
+  }
+  return {fSiPMLocalPosition};
+}
+
+void DetectorConstruction::ValidateSiPMLayout() const
+{
+  if (fSiPMLayout == "single") {
+    return;
+  }
+  if (fSiPMLayout != "back-four") {
+    G4ExceptionDescription msg;
+    msg << "Unknown SiPM layout: " << fSiPMLayout
+        << ". Use single or back-four.";
+    G4Exception("DetectorConstruction::ValidateSiPMLayout",
+                "OpNovice2_SiPM_007",
+                FatalException,
+                msg);
+    return;
+  }
+
+  if (fSiPMFace != "-Z" && fSiPMFace != "bottom") {
+    G4ExceptionDescription msg;
+    msg << "The back-four SiPM layout requires face -Z; current face is "
+        << fSiPMFace << ".";
+    G4Exception("DetectorConstruction::ValidateSiPMLayout",
+                "OpNovice2_SiPM_008",
+                FatalException,
+                msg);
+  }
+  if (fBottomCavityEnabled || fDimpleEnabled || fGreaseEnabled) {
+    G4ExceptionDescription msg;
+    msg << "The back-four SiPM layout supports only the undimpled zero-gap "
+        << "coupling proxy; bottom cavity, dimple, and explicit grease must be disabled.";
+    G4Exception("DetectorConstruction::ValidateSiPMLayout",
+                "OpNovice2_SiPM_009",
+                FatalException,
+                msg);
+  }
+
+  const G4double offset = 25. * mm;
+  const G4double safety = 1.e-6 * mm;
+  if (offset + 0.5 * fSiPMActiveU >= fTank_x - safety ||
+      offset + 0.5 * fSiPMActiveV >= fTank_y - safety) {
+    G4ExceptionDescription msg;
+    msg << "The back-four SiPM footprints do not fit on the -Z tile face. "
+        << "tile full size=" << 2. * fTank_x / mm << " x "
+        << 2. * fTank_y / mm << " mm, SiPM active size="
+        << fSiPMActiveU / mm << " x " << fSiPMActiveV / mm
+        << " mm, center offset=25 mm.";
+    G4Exception("DetectorConstruction::ValidateSiPMLayout",
+                "OpNovice2_SiPM_010",
+                FatalException,
+                msg);
+  }
+}
+
+void DetectorConstruction::SetSiPMLayout(const G4String& layout)
+{
+  if (layout != "single" && layout != "back-four") {
+    G4ExceptionDescription msg;
+    msg << "Invalid SiPM layout: " << layout << ". Use single or back-four.";
+    G4Exception("DetectorConstruction::SetSiPMLayout",
+                "OpNovice2_SiPM_011",
+                FatalException,
+                msg);
+  }
+
+  fSiPMLayout = layout;
+  G4RunManager::GetRunManager()->GeometryHasBeenModified();
+  G4cout << "SiPM layout set to " << fSiPMLayout << G4endl;
 }
 
 void DetectorConstruction::SetSiPMFace(const G4String& face)
