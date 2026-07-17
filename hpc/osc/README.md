@@ -228,6 +228,42 @@ preliminary interpretation and the required analysis-v2 gate are recorded in
 yet authorized: v1 did not establish absorber equivalence, and its universal
 event-count projections are not accepted production sizes.
 
+The independent analysis-v2 implementation reuses the sealed ROOT events and
+does not run Geant4. Run it only from a clean analysis checkout with NumPy and
+uproot available:
+
+```bash
+python3 hpc/osc/check_steel_module_campaign_infrastructure.py
+
+python3 hpc/osc/analyze_steel_module_campaign_v2.py \
+  --campaign-dir /path/to/campaigns/steel-module-convergence-pilot \
+  --production-block-events 250
+```
+
+The analyzer refuses to overwrite `finalized/analysis-v2`, verifies the
+campaign/finalized/event-audit/ROOT identity chain, reconciles the v1 point
+estimates, and writes immutable configuration, distribution, response-pathway,
+seed-block, pooled-production, standardized-response, primary/secondary
+contrast, absorber-review, sizing, provenance, summary, and checksum outputs.
+Only four primary contrasts control the eight 5%/10% sizing projections:
+pooled scintillation production `24/4` and observed net `24/4` for each of the
+three layouts. The projections and 5%/10% absorber bands are review aids; they
+never authorize production automatically.
+
+Plotting is optional and separately checksum-bound. It requires matplotlib but
+does not change the core evidence:
+
+```bash
+python3 hpc/osc/plot_steel_module_analysis_v2.py \
+  --analysis-dir /path/to/campaigns/steel-module-convergence-pilot/finalized/analysis-v2
+```
+
+This writes the non-overwriting sibling directory
+`finalized/analysis-v2-figures` with five figures in both PNG and PDF formats,
+plot provenance, and an independent `SHA256SUMS`. Do not create a production
+campaign until the v2 summary, tail/block diagnostics, absorber statuses, and
+contrast-specific sizing have been reviewed explicitly.
+
 ### Electron differential regression
 
 Before statistical interpretation, build one `OpNovice2` executable from the

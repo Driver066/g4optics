@@ -917,9 +917,16 @@ def main() -> int:
         )
         assert "refusing to overwrite analysis directory" in overwrite.stdout
 
+    # Keep the heavier analysis-v2 contract in its own checker while making it
+    # part of the canonical steel-module infrastructure gate.
+    run(
+        [sys.executable, "hpc/osc/check_steel_module_analysis_v2.py"],
+        cwd=repo_root,
+    )
+
     print(
         "steel-module campaign infrastructure: PASS "
-        "(18-task smoke, 120-task frozen pilot, finalizer, event analyzer)"
+        "(18-task smoke, 120-task frozen pilot, finalizer, v1/v2 analyzers)"
     )
     return 0
 

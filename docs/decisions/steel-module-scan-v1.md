@@ -371,6 +371,14 @@ Production remains blocked until the analysis-v2 outputs are reviewed and an
 explicit precision target, primary contrast set, absorber conclusion, and
 event count are accepted.
 
+The implementation gate is now complete: the independent v2 analyzer,
+synthetic infrastructure checker, and headless plotter are present. They do not
+modify the v1 analyzer or launch Geant4. The real pilot must still be analyzed
+from a clean OSC checkout, checksum-verified, plotted, and reviewed before this
+decision can advance. The v2 contract fixes exactly four sizing contrasts and
+eight separate projections; it deliberately emits no universal recommendation
+and no automatic production acceptance.
+
 ## Current engineering state
 
 The runner contract, three detector-layout identities, and independent

@@ -1,6 +1,6 @@
 # Steel Module Convergence Pilot — v1 Review and Analysis-v2 Gate
 
-Status: pilot accepted as preliminary statistical evidence; production remains blocked on analysis-v2 review
+Status: pilot accepted as preliminary statistical evidence; analysis-v2 implementation ready; production remains blocked on the real-output review
 
 Study preset: `steel-module-scan-v1`
 
@@ -223,7 +223,13 @@ are explicit.
 
 ## Analysis-v2 is the next gate
 
-Analysis-v2 will consume the existing checksum-verified ROOT events. It must
+The analysis-v2 implementation is now available as
+`hpc/osc/analyze_steel_module_campaign_v2.py`, with an independent plotter and
+synthetic infrastructure checker. It has not yet produced or reviewed the
+real pilot's `finalized/analysis-v2`; implementation readiness is not a
+scientific result or production authorization.
+
+Analysis-v2 consumes the existing checksum-verified ROOT events. It must
 not launch or imply authorization for a new Geant4 campaign. It must write to a
 new immutable output directory such as `finalized/analysis-v2` and leave the v1
 analysis unchanged.
@@ -265,11 +271,19 @@ The required analysis-v2 work is:
    unconditional estimates exactly against finalized totals and v1 within
    printed precision.
 
-Suggested outputs are `distribution_diagnostics.csv`,
+The fixed output contract is `configuration_estimates.csv`,
+`distribution_diagnostics.csv`, `response_pathway.csv`,
 `seed_block_stability.csv`, `pooled_production.csv`,
 `standardized_response.csv`, `primary_contrasts.csv`,
-`absorber_equivalence.csv`, `production_sizing_v2.json`, a concise Markdown
-summary, provenance JSON, and `SHA256SUMS`.
+`secondary_contrasts.csv`, `absorber_equivalence.csv`,
+`production_sizing_v2.json`, `summary.md`, `analysis_config.json`, and
+`SHA256SUMS`. `secondary_contrasts.csv` is explicit so the six-point and
+standardized ratios remain available without controlling production sizing.
+
+The independent plotter reads only a checksum-valid completed analysis-v2 and
+writes a non-overwriting `analysis-v2-figures` sibling with five PNG/PDF figure
+pairs, provenance, and its own checksums. Matplotlib is optional for the core
+evidence.
 
 ## Decision state after this review
 
