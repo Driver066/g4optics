@@ -290,6 +290,54 @@ sizing formula, rounding arithmetic, stage totals, and stopping rules are in
 staged generator and cumulative evidence workflow are implemented and
 validated.
 
+The accepted execution topology is one non-submittable 914-task parent
+production program plus five upfront-frozen incremental child campaigns:
+`FIXED` (`592` tasks / `148,000` events), `BC-S1` (`32` / `8,000`),
+`BC-S2` (`48` / `12,000`), `BC-S3` (`80` / `20,000`), and `BC-S4`
+(`162` / `40,500`). The back-center children use configuration-scoped,
+stage-continuous block ranges `0-15`, `16-39`, `40-79`, and `80-160` for each
+of the `4/24 mm` endpoint configurations. `FIXED + BC-S1` is the first
+complete four-contrast checkpoint (`624` tasks / `156,000` events); `BC-S1`
+alone is only the 32-task back-center diagnostic.
+
+The parent program allocates and audits all seeds across the maximum plan,
+binds all five child hashes and the pilot-exclusion identity, and is never sent
+to Slurm. Generic campaign submission must reject managed children. Submit one
+child through the production-stage gate and finalize that whole child with the
+existing child-local attempt journal. Program-level cumulative evidence may
+use a checksum-valid contiguous `BC-S1...BC-Sn` prefix for back-center-only
+diagnosis, or that prefix plus `FIXED` for complete four-contrast evidence.
+
+The accepted initial gate submits `BC-S1` alone (`32` tasks / `8,000` events).
+`FIXED` and all later BC children remain locked until BC-S1 is finalized,
+audited, checksum-verified, analyzed, and explicitly reviewed. `stop-success`
+unlocks only `FIXED`; `continue` unlocks `FIXED` and makes `BC-S2` eligible for
+a later scheduling decision; `pause-review` unlocks nothing. If `continue` is
+recorded, parallel versus sequential execution of `FIXED` and `BC-S2` remains
+open. No analysis output authorizes or submits a child automatically.
+
+LOO in this policy means leave-one-250-event-block-out: recompute the endpoint
+`24/4` ratio after omitting each contributing block and report the largest
+relative shift. It is a block-sensitivity diagnostic, not a confidence
+interval or a request to remove data. The cumulative analyzer outputs only a
+provisional numeric eligibility subset of `stop-success`, `continue`, and
+`pause-review`. Invalid evidence fails closed, a material adverse-tail human
+finding forces `pause-review`, and the `BC-S4` hard ceiling always suppresses
+`continue`. A separate append-only human decision record binds the
+finalized/audit/analysis checksums, numeric eligibility, and tail disposition,
+and is validated by the managed submitter. Neither component submits a child
+automatically.
+
+Each cumulative checkpoint must also have a non-overwriting, self-contained
+offline review report generated from checksum-valid analysis. It includes
+`index.html`, a print-equivalent PDF, PNG/PDF plots, machine-readable review
+data, provenance, and independent checksums. At minimum it visualizes precision
+versus event count and the 10% target, all LOO shifts and the 10%/20% bands,
+heavy-tail/zero diagnostics, and the endpoint ratio interval. The report may
+provide a copyable decision-recorder command, but cannot write a decision,
+unlock work, or invoke Slurm. See SMS-019 in
+`docs/decisions/steel-module-scan-v1.md` for the full contract.
+
 The production analyzer must keep pooled scintillation production equally
 weighted across the three layout strata even though their final event counts
 differ. Bootstrap within each stratum at its available sample size and average

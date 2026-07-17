@@ -1,7 +1,8 @@
 # Steel Module Scan v1 — Decision Record and Implementation Contract
 
-Status: analysis-v2 reviewed; fixed-reference absorber and 10% staged
-production policies accepted; execution infrastructure pending
+Status: analysis-v2 reviewed; fixed-reference absorber, 10% staged production,
+production-program topology, BC-S1-first gate, and human progression-review
+contract accepted; execution infrastructure pending
 Study preset: `steel-module-scan-v1`
 Last updated: 2026-07-17
 
@@ -520,6 +521,160 @@ authorizes production-infrastructure preparation; actual submission remains
 blocked until immutable stage generation, fresh-seed identity, cumulative
 audit/analysis, and non-overwrite behavior are implemented and validated.
 
+### SMS-017 — Parent production program and five incremental children
+
+Represent the accepted maximum design as one non-executable, checksum-bound
+parent production program with a complete 914-task registry. Do not represent
+it as one directly submittable 914-task campaign: the existing generic
+submit/resume path operates on all tasks in a campaign, which would make an
+accidental submission capable of bypassing the manual checkpoints.
+
+Generate five immutable child campaigns atomically with the parent:
+
+| Child | Exact incremental allocation | Tasks | Events |
+| --- | --- | ---: | ---: |
+| `FIXED` | `4 x 16` intermediate-back-center blocks + `6 x 40` edge-center blocks + `6 x 48` back-four blocks | `592` | `148,000` |
+| `BC-S1` | two endpoint configurations x blocks `0-15` | `32` | `8,000` |
+| `BC-S2` | two endpoint configurations x blocks `16-39` | `48` | `12,000` |
+| `BC-S3` | two endpoint configurations x blocks `40-79` | `80` | `20,000` |
+| `BC-S4` | two endpoint configurations x blocks `80-160` | `162` | `40,500` |
+
+The block ranges are configuration-scoped and continuous across children.
+They apply independently to `4 mm back-center` and `24 mm back-center`; the
+same block number at different thicknesses identifies different series tasks.
+Every task receives a program-level series identity, and the parent allocates
+all production seeds once across all five children. Production seeds must be
+globally unique and disjoint from the sealed pilot; retrying one task preserves
+its original seed pair.
+
+The parent program hash binds the full registry, policy identities, simulation
+commit, environment and executable identities, pilot exclusion identity, all
+five child plan/task-set hashes, their roles, the ordered `BC-S1...BC-S4`
+prefix, and the allowed cumulative state graph. All children are frozen upfront
+so later evidence cannot influence task or seed generation. Each child remains
+an independently complete campaign with its own attempt journal, whole-child
+finalization, event audit, and checksum manifest.
+
+Generic submission must reject a program-managed child. A dedicated staged
+wrapper authorizes one exact child; `BC-S2+` also requires an immutable
+progression decision tied to the prior cumulative-analysis checksum. A
+program-level cumulative finalizer/analyzer accepts either a contiguous,
+checksum-valid `BC-S1...BC-Sn` prefix for back-center diagnosis or that prefix
+plus `FIXED` for complete four-contrast evidence, and writes non-overwriting
+evidence directories.
+
+`BC-S1` child alone is a `32-task`, 8,000-event back-center diagnostic. The
+complete four-primary-contrast checkpoints are:
+
+| Checkpoint | Children included | Tasks | Events |
+| --- | --- | ---: | ---: |
+| `BC-S1` | `FIXED + BC-S1` | `624` | `156,000` |
+| `BC-S2` | `FIXED + BC-S1 + BC-S2` | `672` | `168,000` |
+| `BC-S3` | `FIXED + BC-S1 + BC-S2 + BC-S3` | `752` | `188,000` |
+| `BC-S4` | all five children | `914` | `228,500` |
+
+Back-center-only evidence may be used for the staged tail/precision review
+before `FIXED` completes, but it is not a complete production checkpoint for
+all four primary contrasts. SMS-018 resolves the initial scheduling gate.
+
+### SMS-018 — Run BC-S1 alone before authorizing FIXED
+
+The first production submission contains only the `BC-S1` child:
+
+- `4 mm back-center`, blocks `0-15`;
+- `24 mm back-center`, blocks `0-15`; and
+- `32` logical tasks x `250` events = `8,000` new events total.
+
+Do not submit `FIXED` in parallel with this first diagnostic. `FIXED` and all
+later BC children remain locked until `BC-S1` has passed whole-child
+finalization, event/seed audit, checksum verification, BC-only production
+analysis, and explicit human review. This exposes only `3.5%` of the maximum
+program before the heavy-tail scaling check, rather than the
+`FIXED + BC-S1 = 156,000` events (`68.3%`) that form the first complete
+four-contrast checkpoint.
+
+The expected `BC-S1` relative half-width remains approximately `28.4%`, so the
+first child is a scaling and stability diagnostic rather than an expectation
+of immediately reaching the 10% target. Its outcome has these authorization
+effects:
+
+| Review decision | Authorization effect |
+| --- | --- |
+| `stop-success` | unlock `FIXED`; keep `BC-S2...BC-S4` locked |
+| `continue` | unlock `FIXED`; make `BC-S2` eligible for a separate scheduling decision |
+| `pause-review` | keep `FIXED` and every later BC child locked |
+
+No analyzer may submit or unlock a child automatically. A human progression
+record must bind the BC-S1 finalized and analysis checksums. If the outcome is
+`continue`, whether eligible `FIXED` and `BC-S2` run in parallel or
+sequentially remains the next scheduling decision.
+
+### SMS-019 — Human-readable checkpoint review and immutable progression decision
+
+LOO means **leave one out**; in this production workflow it specifically means
+**leave one 250-event block out**. For each block contributing to the two
+back-center endpoint samples, recompute the `24/4` ratio without that block and
+measure `abs(R[-b] / R[full] - 1)`. Report the maximum across all omissions.
+The `BC-S1...BC-S4` cumulative endpoint samples require `32/80/160/322`
+omissions. This maximum LOO shift diagnoses sensitivity to a single block; it
+is not the confidence interval, the physical effect size, permission to delete
+the block, or a substitute for the event bootstrap.
+
+The cumulative analyzer reports, but never selects, a provisional
+`numeric_eligible_decisions` set. Apply this fail-closed precedence:
+
+1. Invalid identity, checksum, audit, or required metric evidence fails before
+   a checksum-valid report or recordable decision exists; all children stay
+   locked.
+2. The reviewer must record whether a new extreme event or tail concentration
+   materially worsens the diagnostic. If yes, only `pause-review` is allowed.
+3. At `BC-S4`, never allow `continue`; allow `stop-success` plus `pause-review`
+   only when `h <= 10%` and maximum LOO shift `<= 10%`, otherwise pause only.
+4. At a valid non-ceiling checkpoint, those same two success conditions allow
+   `stop-success` or `pause-review`.
+5. Otherwise, `h > 10%`, maximum LOO shift `<= 20%`, and interval narrowing
+   allow `continue` or `pause-review` at a valid non-ceiling checkpoint.
+6. Every other valid state allows only `pause-review`.
+
+`pause-review` is always available for valid evidence. Effect direction, unity
+crossing, and unity exclusion never change the allowed set. The recorder
+combines numeric eligibility with the mandatory human tail disposition to
+derive the final `allowed_decisions`.
+
+A separate non-overwriting recorder performs a check-only validation before it
+writes the human decision. Its append-only record binds the parent program,
+checkpoint and exact task set; finalized/audit/analysis checksum identities;
+simulation and analysis code identities; task/event counts and all gating
+diagnostics; numeric eligibility, human tail disposition, final allowed and
+selected decisions; derived child authorization; reviewer, UTC time, rationale,
+and previous decision hash. Once a child
+submission references that record hash, the decision cannot be amended
+retroactively. The managed submitter validates the exact decision and child;
+neither analyzer nor recorder submits work.
+
+Each checkpoint also receives a non-overwriting, self-contained static review
+directory generated only from checksum-valid cumulative analysis. Its required
+human-facing artifacts are an offline `index.html`, print-equivalent
+`review_report.pdf`, PNG/PDF figures, `review_data.json`, provenance, and an
+independent `SHA256SUMS`. The report presents:
+
+- checkpoint/program identity, task/event totals, and checksum/evidence state;
+- provisional numerically eligible choices plus the mandatory human tail
+  disposition, without selecting a decision;
+- relative-half-width versus event count with the 10% target and
+  `1/sqrt(N)` projection;
+- all block-omission shifts with visible 10%/20% review bands and the maximum
+  block identified;
+- zero/positive counts and top-tail/maximum-event diagnostics;
+- the observed endpoint `24/4` ratio with 95% interval and unity line; and
+- a plain-language checklist, definitions, and expandable provenance.
+
+The UI spells out **Maximum leave-one-block-out shift (LOO)**, supplements
+color with text/marker shape, and may only offer a copyable recorder command.
+It cannot write a decision, unlock a child, or invoke Slurm. The report is a
+derived review aid; sealed finalized/audit/analysis artifacts remain the
+accepted statistical evidence.
+
 ## Current engineering state
 
 The runner contract, three detector-layout identities, and independent
@@ -559,9 +714,13 @@ policies are recorded in
 a layout-dependent thick-tile conclusion while preserving the fixed-proxy and
 heavy-tail caveats.
 
-No geometry, source-model, absorber, or statistical-design input remains open.
-The remaining gate is implementation and validation of the accepted staged
-production workflow before its first Slurm submission.
+No geometry, source-model, absorber, statistical-design, production-program
+topology, initial-submission, or progression-review contract remains open. If
+BC-S1 later returns `continue`, the remaining scheduling choice is parallel
+versus sequential execution of eligible `FIXED` and `BC-S2`. Implementation
+and validation of the accepted managed-child, cumulative-analysis, static
+review-report, and decision-recorder workflow remain mandatory before the
+first Slurm submission.
 
 ## Interactive geometry review
 

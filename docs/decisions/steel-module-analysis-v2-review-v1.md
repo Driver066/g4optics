@@ -1,7 +1,8 @@
 # Steel Module Analysis-v2 Review, Absorber, and Production Policy
 
-Status: analysis-v2 evidence reviewed; fixed-reference absorber policy and
-10% staged production policy accepted; execution infrastructure pending
+Status: analysis-v2 evidence reviewed; fixed-reference absorber, 10% staged
+production, production-program topology, BC-S1-first gate, and human
+progression-review contract accepted; execution infrastructure pending
 
 Study preset: `steel-module-scan-v1`
 
@@ -305,6 +306,16 @@ contrast plus tail/block diagnostics. Review at least:
 - observed interval-width change relative to the prior checkpoint and the
   `1/sqrt(N)` projection.
 
+Here LOO means **leave one out**, and this workflow applies it at block level:
+**leave one 250-event block out**. For every contributing endpoint block `b`,
+recompute the `24/4` ratio as `R[-b]` and record
+`abs(R[-b] / R[full] - 1)`. The maximum over all blocks is the maximum LOO
+shift. `BC-S1...BC-S4` therefore have `32/80/160/322` endpoint-block
+omissions, respectively. This is a sensitivity diagnostic for whether one
+block dominates the estimate; it is not a confidence interval, a physical
+effect size, a reason to remove that block from the reported sample, or a
+replacement for the bootstrap interval.
+
 The predeclared decision rules are:
 
 1. **Precision success:** stop extending `back-center` if `h <= 10%` and the
@@ -340,6 +351,192 @@ estimate rather than a strict confirmatory sequential guarantee. A request for
 strict sequential coverage or an independent confirmatory sample would reopen
 the statistical design.
 
+## Accepted production-program topology
+
+The maximum production design is frozen as one non-executable parent program
+containing the complete 914-task registry, but execution is partitioned into
+five immutable incremental child campaigns:
+
+| Child campaign | Included configurations or block increments | Tasks | New events |
+| --- | --- | ---: | ---: |
+| `FIXED` | four intermediate `back-center` thicknesses at 16 blocks each; all six `edge-center` at 40 blocks each; all six `back-four` at 48 blocks each | `592` | `148,000` |
+| `BC-S1` | two `back-center` endpoints, blocks `0-15` per configuration | `32` | `8,000` |
+| `BC-S2` | two `back-center` endpoints, blocks `16-39` per configuration | `48` | `12,000` |
+| `BC-S3` | two `back-center` endpoints, blocks `40-79` per configuration | `80` | `20,000` |
+| `BC-S4` | two `back-center` endpoints, blocks `80-160` per configuration | `162` | `40,500` |
+| **Maximum program** | all five children | **914** | **228,500** |
+
+The ranges above are stage-continuous block indices **within each of the two
+endpoint configurations**, not one shared block pool. For example,
+`4 mm back-center, block 16` and `24 mm back-center, block 16` are distinct
+series tasks with distinct seed pairs. A new child never resets an endpoint's
+block index to zero. This makes missing, overlapping, or duplicated increments
+auditable.
+
+The parent program is an identity and authorization object, not a Slurm
+campaign. It must be generated atomically from one clean checkout and bind at
+least:
+
+- the full 914-task registry and a full program-plan hash;
+- the SMS-016 sizing/stopping policy and this topology decision;
+- simulation commit, environment identity, executable, image, and Geant4 data
+  identities;
+- the sealed pilot identity and seed registry used only for exclusion;
+- all five child plan hashes, their roles, the `BC-S1` through `BC-S4` prefix
+  order, the allowed cumulative state graph, and exact task-set hashes; and
+- one globally audited production seed allocation.
+
+All five children are generated and frozen with the parent so future stages
+cannot change code, choose new seeds after seeing data, or drift from the
+accepted maximum plan. Each child contains only its new tasks and remains a
+complete ordinary campaign for retry, finalization, event audit, and checksum
+purposes. The 1,828 Geant4 seed integers are allocated and collision-checked
+once across the full parent registry, and must also be disjoint from every
+sealed pilot seed. A failed-task retry reuses its task's original seeds;
+"fresh" means a newly authorized production block, not a retry with changed
+random state.
+
+Program-managed children must fail closed when passed directly to the generic
+campaign submitter. A production-specific wrapper authorizes exactly one
+child, while each child continues to use its existing child-local immutable
+attempt journal and whole-child finalizer. `BC-S2`, `BC-S3`, and `BC-S4`
+cannot be submitted without a non-overwriting progression decision bound to
+the preceding cumulative analysis checksum.
+
+An incremental child and a cumulative checkpoint are different objects.
+`BC-S1` alone is an 8,000-event back-center diagnostic. A complete
+four-primary-contrast checkpoint requires `FIXED` plus the contiguous
+back-center prefix:
+
+| Full evidence checkpoint | Required children | Cumulative tasks | Cumulative events |
+| --- | --- | ---: | ---: |
+| `BC-S1` | `FIXED + BC-S1` | `624` | `156,000` |
+| `BC-S2` | `FIXED + BC-S1 + BC-S2` | `672` | `168,000` |
+| `BC-S3` | `FIXED + BC-S1 + BC-S2 + BC-S3` | `752` | `188,000` |
+| `BC-S4` | `FIXED + BC-S1 + BC-S2 + BC-S3 + BC-S4` | `914` | `228,500` |
+
+The program-level cumulative finalizer/analyzer accepts either a checksum-valid
+contiguous `BC-S1...BC-Sn` prefix for a back-center-only diagnostic, or that
+same prefix plus `FIXED` for a complete four-contrast checkpoint. It refuses
+gaps, duplicate series tasks, and overlapping block identities, and writes a
+new non-overwriting checkpoint directory. Back-center-only diagnostics may
+govern progression before `FIXED` completes, but they are not reported as
+complete four-contrast production evidence. Once `FIXED` is included, pooled
+production uses all available events with the fixed equal `1/3` layout-stratum
+weights defined above.
+
+## Accepted BC-S1-first submission gate
+
+The first production submission contains only the `BC-S1` child: 16 new
+250-event blocks for each of the two back-center endpoint configurations,
+for `32` tasks and `8,000` events total. `FIXED`, `BC-S2`, `BC-S3`, and
+`BC-S4` remain unauthorized while `BC-S1` is running and until its whole-child
+finalization, event/seed audit, checksum verification, and BC-only analysis
+have been reviewed.
+
+This gate limits the initial exposure to approximately `3.5%` of the maximum
+228,500-event program instead of submitting `FIXED + BC-S1`, which would expose
+156,000 events (`68.3%`) before the heavy-tail scaling check. It is a method
+and resource gate; it does not change the accepted target, design, or estimand,
+and it is not an effect-direction test.
+The expected `BC-S1` relative half-width is still about `28.4%`; failure to
+reach the final 10% target in this first child review is not by itself a
+failure.
+
+The review outcome controls authorization as follows:
+
+- `stop-success`: authorize `FIXED`; keep `BC-S2...BC-S4` locked because no
+  additional back-center endpoint events are needed;
+- `continue`: authorize `FIXED` and make `BC-S2` eligible for the next explicit
+  scheduling decision; and
+- `pause-review`: keep `FIXED` and every later BC child locked while the method
+  is reviewed.
+
+The BC-S1 review uses the already accepted width, leave-one-block-out, zero and
+positive count, tail-share, maximum-event, and `1/sqrt(N)` trend diagnostics.
+Neither the parent program nor the analyzer may convert a diagnostic outcome
+into an automatic child submission. Whether an eligible `FIXED` and `BC-S2`
+should run in parallel or sequentially after a `continue` outcome remains the
+next scheduling decision.
+
+## Accepted human-readable review and progression record
+
+The cumulative analyzer remains the evidence-producing layer. It computes a
+provisional `numeric_eligible_decisions` set, but it must not choose a decision,
+mutate program authorization, or submit a child. Eligibility is evaluated in
+this fail-closed precedence order:
+
+1. Invalid identity, checksum, audit, or required metric evidence makes the
+   analyzer fail before it emits a checksum-valid review report or recordable
+   decision. With no valid decision, every child remains locked.
+2. The human tail review must explicitly record whether a new extreme event or
+   tail concentration materially worsens the diagnostic. If it does, the final
+   allowed set is `pause-review` only, regardless of numerical eligibility.
+3. At the `BC-S4` hard ceiling, `continue` is never allowed. If `h <= 10%` and
+   maximum LOO shift `<= 10%`, the final choices are `stop-success` and
+   `pause-review`; otherwise only `pause-review` is allowed.
+4. At a valid non-ceiling checkpoint, `h <= 10%` plus maximum LOO shift
+   `<= 10%` permits `stop-success` or `pause-review`.
+5. Otherwise, at a valid non-ceiling checkpoint, `h > 10%`, maximum LOO shift
+   `<= 20%`, and a narrowing interval permit `continue` or `pause-review`.
+6. Every other valid state permits `pause-review` only.
+
+`pause-review` is therefore always available for valid evidence. Ratio
+direction, crossing unity, and excluding unity never alter eligibility. The
+recorder derives the final `allowed_decisions` only after combining numerical
+eligibility with the mandatory human tail disposition.
+
+A separate, non-overwriting progression recorder captures the selected human
+decision. It must support a check-only pass before writing and bind at least:
+
+- parent program hash, checkpoint identity, exact task-set hash, task/event
+  counts, and previous decision hash when one exists;
+- finalized, audit, and cumulative-analysis checksum identities;
+- simulation and analysis commits plus analyzer identity;
+- observed `h`, width trend, maximum LOO shift, tail/zero diagnostics, the
+  analyzer's numeric eligibility, and the human tail disposition; and
+- selected decision, derived child authorization, reviewer, UTC time, and a
+  human rationale.
+
+The record is append-only. Once a downstream submission references its hash,
+it cannot be amended retroactively. A managed submitter validates the exact
+decision hash and authorized child; recording a decision still does not submit
+anything. If `continue` makes both `FIXED` and `BC-S2` eligible, their eventual
+invocation records the separate parallel-versus-sequential scheduling choice.
+
+Human review must not require reading raw CSV or JSON. A presentation renderer
+reads only checksum-valid cumulative analysis and creates a non-overwriting,
+self-contained static review directory that can be downloaded from OSC and
+opened locally without a server or network access. It contains at least:
+
+- `index.html`, with all required styles and review data available offline;
+- a print-equivalent `review_report.pdf`;
+- the underlying review plots in both PNG and PDF form;
+- a machine-readable `review_data.json`, provenance manifest, and independent
+  `SHA256SUMS`.
+
+The first screen shows checkpoint/program identity, task and event counts,
+evidence/checksum status, the provisional numerically eligible choices, and
+the required human tail disposition. The report then shows:
+
+1. observed relative-half-width trajectory against event count, the `10%`
+   target, and the declared `1/sqrt(N)` projection;
+2. every block's leave-one-block-out shift with visible `10%` and `20%` review
+   bands, identifying the maximum block and endpoint thickness;
+3. zero/positive counts, top-1% and top-5% shares, and maximum-event heavy-tail
+   diagnostics;
+4. the observed endpoint `24/4` ratio with 95% interval and unity reference;
+   and
+5. a plain-language decision checklist and expandable provenance.
+
+The interface must label the diagnostic as **Maximum leave-one-block-out shift
+(LOO)** and include the definition above; acronym-only labels are not
+sufficient. Color is supplemented by text and marker shape. The report may
+offer a copyable recorder command, but it has no control that writes a decision,
+unlocks a child, or invokes Slurm. These presentation artifacts are derived
+review aids, not a replacement for the sealed core evidence or an independent
+source of `accepted_statistical_evidence`.
+
 ## Claim boundary and next gate
 
 The evidence supports the following statements:
@@ -363,7 +560,10 @@ The evidence does not support:
   confidence procedure; or
 - detector-model systematic, photoelectron, or electronics-response claims.
 
-The statistical production design is now frozen. The next gate is engineering:
-implement and validate immutable fresh-seed stages, exact cumulative task
-selection, cross-stage checksum/audit provenance, and a non-overwriting
-cumulative analyzer before submitting the first production stage.
+The statistical production design, parent/child topology, and initial
+BC-S1-only gate are now frozen. If BC-S1 later returns `continue`, the remaining
+scheduling decision is whether the newly eligible `FIXED` and `BC-S2` run in
+parallel or sequentially. No production child may be submitted until the
+parent generator, managed-child submission gate, whole-child finalization,
+cumulative audit/analyzer, and non-overwrite contracts are implemented and
+validated.
