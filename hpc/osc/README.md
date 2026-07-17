@@ -223,10 +223,10 @@ size is automatically accepted.
 
 The accepted 120-task pilot subsequently completed and passed finalization,
 the integrated event audit, and finalized/analysis checksum verification. Its
-preliminary interpretation and the required analysis-v2 gate are recorded in
-`docs/decisions/steel-module-convergence-pilot-review-v1.md`. Production is not
-yet authorized: v1 did not establish absorber equivalence, and its universal
-event-count projections are not accepted production sizes.
+historical v1 interpretation and the required analysis-v2 gate are recorded in
+`docs/decisions/steel-module-convergence-pilot-review-v1.md`. The completed v2
+review and current production boundary are recorded in
+`docs/decisions/steel-module-analysis-v2-review-v1.md`.
 
 The independent analysis-v2 implementation reuses the sealed ROOT events and
 does not run Geant4. Run it only from a clean analysis checkout with NumPy and
@@ -263,6 +263,14 @@ This writes the non-overwriting sibling directory
 plot provenance, and an independent `SHA256SUMS`. Do not create a production
 campaign until the v2 summary, tail/block diagnostics, absorber statuses, and
 contrast-specific sizing have been reviewed explicitly.
+
+The accepted v2 absorber policy fixes `500 x 500 x 40 mm` as the v1 production
+model reference without claiming transverse convergence or equivalence to the
+full official ePIC absorber geometry. The `200/300 mm` configurations remain
+pilot-only diagnostics. No further absorber-convergence run is required for
+v1, but every interpretation must be scoped to the fixed `500 mm` slab proxy.
+Production remains unauthorized until the precision target, staged
+`back-center` treatment, and exact per-layout event counts are accepted.
 
 ### Electron differential regression
 

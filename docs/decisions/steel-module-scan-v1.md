@@ -1,8 +1,9 @@
 # Steel Module Scan v1 — Decision Record and Implementation Contract
 
-Status: convergence pilot completed and reviewed; analysis-v2 required before production; production statistics not yet frozen
+Status: analysis-v2 reviewed; fixed-reference absorber policy accepted;
+production precision and event counts not yet frozen
 Study preset: `steel-module-scan-v1`
-Last updated: 2026-07-16
+Last updated: 2026-07-17
 
 ## Purpose and relationship to the earlier neutron study
 
@@ -92,12 +93,14 @@ Retain the accepted backward-ePIC local absorber proxy:
 - density: `7.9 g/cm3`;
 - mass fractions: 74% Fe, 18% Cr, 8% Ni;
 - beam-axis thickness: `40 mm`;
-- production-size candidate: `500 x 500 x 40 mm`;
-- engineering convergence candidates: `200`, `300`, and `500 mm` transverse.
+- fixed v1 production reference: `500 x 500 x 40 mm`;
+- pilot-only transverse diagnostics: `200` and `300 mm`.
 
 The official ePIC absorber is continuous rather than one plate per readout
-tile. The rectangular slab remains a local proxy whose transverse convergence
-must be established before production interpretation.
+tile. The rectangular slab remains a local proxy, and every v1 interpretation
+is conditional on its fixed `500 mm` transverse extent. SMS-015 records the
+accepted policy and the conditions that would reopen a larger-size study or an
+official-geometry study; v1 does not claim transverse convergence.
 
 Keep the tile centered at the origin. With tile thickness `t`, derive:
 
@@ -331,7 +334,11 @@ complete 250-event execution blocks. The 5% and 10% projections are review
 aids only. Neither precision scenario is an accepted target, and the analyzer
 must not auto-approve a production event count or absorber size.
 
-### SMS-014 — Pilot review and analysis-v2 gate
+### SMS-014 — Historical pilot review and analysis-v2 gate (closed)
+
+This section preserves the gate as defined after the v1 review. Its required
+analysis was subsequently completed; SMS-015 is authoritative for the current
+absorber and production boundary.
 
 The 30-configuration convergence pilot completed all 120 logical tasks and
 passed finalization, the integrated event audit, and finalized/analysis
@@ -351,10 +358,10 @@ intervals for every `200/500` and `300/500` check include unity, but none lies
 wholly inside `[0.95, 1.05]`. Retain `500 mm` as the conservative analysis
 reference without calling it converged.
 
-The v1 universal production-size projections are not accepted because the
+The v1 universal production-size projections were not accepted because the
 limiting `back-center 8/4` net ratio is a secondary, unresolved cancellation
-and is not yet the agreed production estimand. Before any new simulation or
-production campaign, analysis-v2 must use the existing audited ROOT events to:
+and was not the agreed production estimand. The gate required analysis-v2 to
+use the existing audited ROOT events to:
 
 - diagnose zero inflation, heavy tails, and seed-block stability;
 - pool layout-invariant production at fixed thickness and absorber size;
@@ -367,17 +374,70 @@ production campaign, analysis-v2 must use the existing audited ROOT events to:
 - produce contrast-specific, non-automatic event-count projections in a new
   checksummed output directory without overwriting v1.
 
-Production remains blocked until the analysis-v2 outputs are reviewed and an
-explicit precision target, primary contrast set, absorber conclusion, and
-event count are accepted.
+At that checkpoint, production remained blocked until the analysis-v2 outputs
+were reviewed and an explicit precision target, primary contrast set, absorber
+conclusion, and event count were accepted.
 
-The implementation gate is now complete: the independent v2 analyzer,
-synthetic infrastructure checker, and headless plotter are present. They do not
-modify the v1 analyzer or launch Geant4. The real pilot must still be analyzed
-from a clean OSC checkout, checksum-verified, plotted, and reviewed before this
-decision can advance. The v2 contract fixes exactly four sizing contrasts and
-eight separate projections; it deliberately emits no universal recommendation
-and no automatic production acceptance.
+The implementation gate was complete at that checkpoint: the independent v2
+analyzer, synthetic infrastructure checker, and headless plotter were present.
+They did not modify the v1 analyzer or launch Geant4. The real pilot still had
+to be analyzed from a clean OSC checkout, checksum-verified, plotted, and
+reviewed. The v2 contract fixed exactly four sizing contrasts and eight
+separate projections, with no universal recommendation or automatic production
+acceptance.
+
+### SMS-015 — Analysis-v2 review and fixed-reference absorber policy
+
+The real analysis-v2 run completed from the sealed 30,000-event pilot and
+passed its core and figure checksum verification. Its accepted review is
+recorded in
+`docs/decisions/steel-module-analysis-v2-review-v1.md`. The analysis used
+simulation commit `cfd7d974af2c5f40f7d76948172fc87ee70bfa3c` and clean analysis
+commit `ad680deecc7ae6f25ff68e7a0a3b052158a21eb3`, reconciled all 30 v1
+configuration estimates and three v1 endpoint ratios, and retained exactly the
+four accepted primary sizing contrasts.
+
+At the `500 mm` transverse reference, the pooled scintillation-production
+`24/4` ratio is `4.836 [4.064, 5.759]`. The direct observed-net ratios are
+`0.742 [0.465, 1.307]` for `back-center`,
+`2.148 [1.626, 2.840]` for `edge-center`, and
+`3.424 [2.546, 4.649]` for aggregate `back-four`. The corresponding maximum
+leave-one-block-out shifts are `19.22%`, `7.74%`, and `5.29%`; pooled
+production shifts by at most `4.01%`. The `back-center` point estimate remains
+an unresolved, heavy-tail-sensitive cancellation rather than a resolved
+decrease.
+
+Analysis-v2 does not establish absorber equivalence at either the 5% or 10%
+review band. In particular, pooled production for `4 mm` gives
+`200/500 = 0.816 [0.667, 0.993]`, while the other pooled endpoint comparisons
+remain inconclusive. The candidate-size evidence therefore cannot justify
+substituting `200` or `300 mm`, but comparisons only below the reference also
+cannot prove that `500 mm` has reached a large-size plateau.
+
+For this v1 scan, accept `500 x 500 x 40 mm` as a **fixed model reference**:
+
+- every production configuration retains this exact centered slab;
+- `200/300 mm` remain pilot-only engineering diagnostics and are excluded from
+  the primary production curves;
+- `500 mm` must not be described as converged, infinite, or equivalent to the
+  full official ePIC absorber geometry;
+- every interpretation is explicitly conditional on the fixed `500 mm`
+  transverse steel-slab proxy; and
+- no additional absorber-convergence run is required before the v1 production
+  decision.
+
+This is a scope decision, not a statistical equivalence finding. Reopen the
+absorber question if the study must predict official ePIC geometry, use a
+smaller slab, or claim absorber-size-independent thickness/layout effects. A
+reopened study must compare `500 mm` with a larger extent or implement the
+relevant official continuous geometry; adding only more `200/300 mm` events
+cannot demonstrate convergence above the current reference.
+
+The absorber-policy gate is now closed for v1. Production remains blocked only
+on an explicit precision target, staged treatment of the heavy-tailed
+`back-center` response, and exact per-layout event counts. The analysis-v2 5%
+and 10% projections remain unaccepted review aids and do not authorize a new
+campaign.
 
 ## Current engineering state
 
@@ -410,16 +470,16 @@ and produced 30,000 accepted events. All 120 logical tasks were selected by the
 finalizer; the integrated event audit, accepted-statistical-evidence flag, and
 finalized/analysis checksum checks passed.
 
-The v1 scientific review is now complete and recorded in
-`docs/decisions/steel-module-convergence-pilot-review-v1.md`. It supports a
-preliminary, layout-dependent thick-tile conclusion, but it does not freeze
-production statistics or establish absorber equivalence. Analysis-v2 is the
-next gate and must operate on the existing audited events before a focused
-additional pilot or production campaign is considered.
+The historical v1 scientific review is recorded in
+`docs/decisions/steel-module-convergence-pilot-review-v1.md`. The completed
+analysis-v2 interpretation and accepted absorber policy are recorded in
+`docs/decisions/steel-module-analysis-v2-review-v1.md`. Together they support
+a layout-dependent thick-tile conclusion while preserving the fixed-proxy and
+heavy-tail caveats.
 
 No geometry or source-model input remains open. The remaining choices are the
-analysis-v2 primary-contrast review, production event count, and
-absorber-equivalence conclusion.
+production precision target, staged `back-center` policy, and exact per-layout
+event counts.
 
 ## Interactive geometry review
 

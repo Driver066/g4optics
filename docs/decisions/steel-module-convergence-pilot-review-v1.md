@@ -1,10 +1,17 @@
 # Steel Module Convergence Pilot — v1 Review and Analysis-v2 Gate
 
-Status: pilot accepted as preliminary statistical evidence; analysis-v2 implementation ready; production remains blocked on the real-output review
+Status: historical v1 review; analysis-v2 gate subsequently completed and
+superseded for current decisions by
+`docs/decisions/steel-module-analysis-v2-review-v1.md`
 
 Study preset: `steel-module-scan-v1`
 
 Reviewed: 2026-07-16
+
+> This record preserves the v1 evidence and the gate as it stood on the review
+> date. Statements below describing analysis-v2 as future work are historical;
+> the completed v2 review and accepted fixed-reference absorber policy are in
+> `docs/decisions/steel-module-analysis-v2-review-v1.md`.
 
 ## Technical summary
 
