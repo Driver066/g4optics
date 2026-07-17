@@ -97,6 +97,53 @@ def load_json(path: Path) -> dict[str, Any]:
     return value
 
 
+def task_configuration_hash(
+    *,
+    stage: str,
+    tile_thickness_mm: int,
+    sipm_layout: str,
+    absorber_transverse_mm: int,
+    x_mm: int,
+    y_mm: int,
+    events: int,
+    seed_block: int,
+    seed1: int,
+    seed2: int,
+    geant4_version: str,
+) -> str:
+    """Return the runner-bound identity for one steel-module task."""
+
+    resolved = {
+        "schema_version": CAMPAIGN_SCHEMA_VERSION,
+        "study_preset": STUDY_PRESET,
+        "stage": stage,
+        "tile_full_size_mm": [100, 100, tile_thickness_mm],
+        "tile_thickness_mm": tile_thickness_mm,
+        "sipm_layout": sipm_layout,
+        "sipm_active_size_mm": [2.4, 2.4, 0.5],
+        "absorber_material": "StainlessSteelSAE304",
+        "absorber_transverse_mm": absorber_transverse_mm,
+        "absorber_thickness_mm": 40,
+        "absorber_tile_gap_mm": 0,
+        "x_mm": x_mm,
+        "y_mm": y_mm,
+        "events": events,
+        "seed_block": seed_block,
+        "seed1": seed1,
+        "seed2": seed2,
+        "authoritative_source_quantity": "kinetic_energy",
+        "gps_kinetic_energy_mev": 1000,
+        "beam_profile": "point",
+        "beam_direction": [0, 0, -1],
+        "beam_angular_model": "pencil",
+        "surface_preset": "polishedfrontpainted",
+        "surface_reflectivity_model": "ej510-empirical",
+        "optical_coupling_geometry_model": "undimpled-zero-gap-ej550-proxy",
+        "geant4_version": geant4_version,
+    }
+    return sha256_bytes(canonical_json(resolved))
+
+
 def parse_campaign_tasks(path: Path) -> tuple[CampaignTask, ...]:
     with path.open(encoding="utf-8", newline="") as stream:
         reader = csv.DictReader(stream, delimiter="\t")
@@ -330,6 +377,7 @@ __all__ = [
     "sha256_bytes",
     "sha256_file",
     "task_by_logical_id",
+    "task_configuration_hash",
     "verify_finalized_checksums",
     "write_tsv",
 ]

@@ -338,6 +338,49 @@ provide a copyable decision-recorder command, but cannot write a decision,
 unlock work, or invoke Slurm. See SMS-019 in
 `docs/decisions/steel-module-scan-v1.md` for the full contract.
 
+Phase 1 materializes only the immutable, non-submittable production program.
+It writes `production_program.json`, the canonical 914-task registry, global
+seed and sealed-pilot exclusion registries, and five child task-set plans. It
+intentionally writes no `campaign.json`; the existing campaign submitter must
+therefore reject both the parent and every child directory. Generate the clean
+OSC evidence object with:
+
+```bash
+python3 hpc/osc/generate_steel_module_production_program.py \
+  --out-dir /path/to/campaigns/steel-module-production-program \
+  --program-seed 20260717 \
+  --sealed-pilot-dir /path/to/campaigns/steel-module-convergence-pilot-cfd7d974 \
+  --executable-build-source-commit 88f15eace17137475310913d585a96908a493c72 \
+  --environment-mode osc-production \
+  --image /path/to/geant4.sif \
+  --g4-data-manifest /path/to/g4-data-manifest.sha256 \
+  --build-artifact /path/to/candidate-88f15eac/OpNovice2 \
+  --build-provenance /path/to/build-environment.txt
+```
+
+The generator requires the accepted, checksum-valid 120-task pilot and
+cross-checks its `tasks.tsv` against finalized `task_index.tsv`. It initializes
+the production seed allocator with all 240 pilot seed integers, derives all
+1,828 production seed integers in one global registry, and refuses any overlap.
+It writes through a sibling temporary tree, validates the complete program,
+and performs one atomic rename; an existing target is never overwritten.
+
+Validate an archived program, including the currently recorded runtime files,
+with:
+
+```bash
+python3 hpc/osc/validate_steel_module_production_program.py \
+  --program-dir /path/to/campaigns/steel-module-production-program \
+  --verify-runtime-artifacts
+```
+
+For a local development dry run, use `--environment-mode local-dev
+--allow-dirty` and omit the four runtime artifact paths. Such output is always
+marked `accepted_statistical_evidence=false`. Phase 1 is complete only after
+`check_steel_module_production_program.py` passes; it still does not authorize
+or submit `BC-S1`. Managed child materialization and submission belong to
+Phase 2.
+
 The production analyzer must keep pooled scintillation production equally
 weighted across the three layout strata even though their final event counts
 differ. Bootstrap within each stratum at its available sample size and average

@@ -25,6 +25,7 @@ from steel_module_campaign_lib import (
     environment_identity,
     sha256_bytes,
     sha256_file,
+    task_configuration_hash,
 )
 
 
@@ -236,37 +237,19 @@ def build_tasks(
                 slot=2,
                 used=used_seeds,
             )
-            resolved = {
-                "schema_version": CAMPAIGN_SCHEMA_VERSION,
-                "study_preset": STUDY_PRESET,
-                "stage": stage,
-                "tile_full_size_mm": [100, 100, thickness],
-                "tile_thickness_mm": thickness,
-                "sipm_layout": layout,
-                "sipm_active_size_mm": [2.4, 2.4, 0.5],
-                "absorber_material": "StainlessSteelSAE304",
-                "absorber_transverse_mm": absorber,
-                "absorber_thickness_mm": 40,
-                "absorber_tile_gap_mm": 0,
-                "x_mm": 0,
-                "y_mm": 0,
-                "events": events,
-                "seed_block": block,
-                "seed1": seed1,
-                "seed2": seed2,
-                "authoritative_source_quantity": "kinetic_energy",
-                "gps_kinetic_energy_mev": 1000,
-                "beam_profile": "point",
-                "beam_direction": [0, 0, -1],
-                "beam_angular_model": "pencil",
-                "surface_preset": "polishedfrontpainted",
-                "surface_reflectivity_model": "ej510-empirical",
-                "optical_coupling_geometry_model": (
-                    "undimpled-zero-gap-ej550-proxy"
-                ),
-                "geant4_version": geant4_version,
-            }
-            configuration_hash = sha256_bytes(canonical_json(resolved))
+            configuration_hash = task_configuration_hash(
+                stage=stage,
+                tile_thickness_mm=thickness,
+                sipm_layout=layout,
+                absorber_transverse_mm=absorber,
+                x_mm=0,
+                y_mm=0,
+                events=events,
+                seed_block=block,
+                seed1=seed1,
+                seed2=seed2,
+                geant4_version=geant4_version,
+            )
             tasks.append(
                 CampaignTask(
                     task_index=task_index,
