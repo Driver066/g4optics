@@ -264,13 +264,37 @@ plot provenance, and an independent `SHA256SUMS`. Do not create a production
 campaign until the v2 summary, tail/block diagnostics, absorber statuses, and
 contrast-specific sizing have been reviewed explicitly.
 
-The accepted v2 absorber policy fixes `500 x 500 x 40 mm` as the v1 production
-model reference without claiming transverse convergence or equivalence to the
-full official ePIC absorber geometry. The `200/300 mm` configurations remain
+The accepted v2 policy fixes `500 x 500 x 40 mm` as the v1 production model
+reference without claiming transverse convergence or equivalence to the full
+official ePIC absorber geometry. The `200/300 mm` configurations remain
 pilot-only diagnostics. No further absorber-convergence run is required for
 v1, but every interpretation must be scoped to the fixed `500 mm` slab proxy.
-Production remains unauthorized until the precision target, staged
-`back-center` treatment, and exact per-layout event counts are accepted.
+
+The accepted production precision target is a 10% event-bootstrap 95%
+relative half-width for four and only four `24/4` primary contrasts. The
+six-thickness allocation is `4,000` events for the four intermediate
+`back-center` configurations, up to `40,250` cumulative events for each
+`4/24 mm back-center` endpoint, `10,000` for each `edge-center`
+configuration, and `12,000` for each `back-four` configuration. The maximum
+new sample is
+`4 x 4,000 + 2 x 40,250 + 6 x 10,000 + 6 x 12,000 = 228,500` events, or
+`914` complete 250-event blocks. The 30,000-event pilot is not counted.
+
+The `back-center` endpoints must be reviewed cumulatively at
+`4,000/10,000/20,000/40,250` events per configuration. Each stage requires
+fresh seeds, an immutable manifest, finalization/audit, cumulative analysis,
+and an explicit continue decision; `40,250` is a hard ceiling. The complete
+sizing formula, rounding arithmetic, stage totals, and stopping rules are in
+`docs/decisions/steel-module-analysis-v2-review-v1.md` and SMS-016 of
+`docs/decisions/steel-module-scan-v1.md`. Do not submit production until the
+staged generator and cumulative evidence workflow are implemented and
+validated.
+
+The production analyzer must keep pooled scintillation production equally
+weighted across the three layout strata even though their final event counts
+differ. Bootstrap within each stratum at its available sample size and average
+the three means with `1/3` weights; concatenating all events would silently
+overweight the staged `back-center` endpoint sample.
 
 ### Electron differential regression
 

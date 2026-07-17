@@ -10,7 +10,8 @@ Reviewed: 2026-07-16
 
 > This record preserves the v1 evidence and the gate as it stood on the review
 > date. Statements below describing analysis-v2 as future work are historical;
-> the completed v2 review and accepted fixed-reference absorber policy are in
+> the completed v2 review and accepted fixed-reference absorber and 10% staged
+> production policies are in
 > `docs/decisions/steel-module-analysis-v2-review-v1.md`.
 
 ## Technical summary

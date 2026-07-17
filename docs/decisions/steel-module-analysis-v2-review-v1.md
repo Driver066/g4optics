@@ -1,7 +1,7 @@
-# Steel Module Analysis-v2 Review and Absorber Policy
+# Steel Module Analysis-v2 Review, Absorber, and Production Policy
 
-Status: analysis-v2 evidence reviewed; fixed-reference absorber policy accepted;
-production precision and event counts remain open
+Status: analysis-v2 evidence reviewed; fixed-reference absorber policy and
+10% staged production policy accepted; execution infrastructure pending
 
 Study preset: `steel-module-scan-v1`
 
@@ -23,9 +23,14 @@ absorber. No additional absorber-convergence simulation is required before the
 v1 production decision, provided every interpretation remains explicitly
 conditional on this fixed slab proxy.
 
-This decision closes the v1 absorber-policy gate. It does not authorize a
-production campaign: the precision target, staged treatment of the
-heavy-tailed `back-center` response, and final event counts remain open.
+This decision closes the v1 absorber-policy and statistical-design gates. The
+accepted target is a 10% relative half-width for the bootstrap 95% interval of
+each of the four primary `24/4` contrasts. The heavy-tailed `back-center`
+endpoint configurations use predeclared cumulative checkpoints rather than a
+single unconditional submission. The policy authorizes preparation of the
+production infrastructure; Slurm submission remains blocked until that
+infrastructure preserves the fresh-seed, immutable-stage, cumulative-audit,
+and non-overwrite requirements below and passes its dry-run validation.
 
 ## Evidence identity
 
@@ -170,24 +175,170 @@ model baseline and require proportionate geometry validation, regression,
 benchmark, and statistical-pilot review. It is not silently folded into this
 v1 production campaign.
 
-## Precision projections remain unaccepted
+## Accepted 10% precision target and sizing derivation
 
-Analysis-v2 produces separate 5% and 10% review projections for the four
-primary contrasts:
+The production target applies to four and only four primary `24/4` contrasts:
+pooled scintillation production and direct observed net response for each of
+the three SiPM layouts. For each contrast, the target is
 
-| Primary contrast | 10% events/configuration | 5% events/configuration |
+\[
+h = \frac{U-L}{2\hat R} \leq 0.10,
+\]
+
+where `L` and `U` are the event-bootstrap 95% interval bounds and `R-hat` is
+the point ratio. Reaching this precision target does not require the interval
+to exclude unity and is not an effect-direction stopping rule. Secondary
+curve ratios, standardized response, collection, and absorber comparisons do
+not control production sizing.
+
+Analysis-v2 projected the required sample from the sealed pilot using
+
+\[
+N_{raw}=\left\lceil N_{pilot}\left(\frac{h_{observed}}{0.10}\right)^2\right\rceil,
+\qquad
+N_{buffered}=\left\lceil1.25N_{raw}\right\rceil.
+\]
+
+The buffered count is then rounded upward to complete 250-event blocks. For a
+single-layout net contrast this is
+`ceil(N_buffered / 250)` blocks per endpoint configuration. For pooled
+production, `N_pilot = 3,000` events per endpoint is the sum of three
+1,000-event layout strata; its buffered count is divided equally across those
+three strata before block rounding. The exact accepted 10% arithmetic is:
+
+| Primary contrast | Observed `h` | Pilot events per endpoint | `N_raw` | `N_buffered` | Block calculation | Accepted events/configuration |
+| --- | ---: | ---: | ---: | ---: | --- | ---: |
+| Pooled scintillation production | `0.175253` | `3,000` total (`1,000 x 3`) | `9,215` total | `11,519` total | `ceil(11,519 / (3 x 250)) = 16` | `16 x 250 = 4,000` per layout stratum |
+| Observed net, `back-center` | `0.567095` | `1,000` | `32,160` | `40,200` | `ceil(40,200 / 250) = 161` | `40,250` |
+| Observed net, `edge-center` | `0.282524` | `1,000` | `7,983` | `9,979` | `ceil(9,979 / 250) = 40` | `10,000` |
+| Observed net, `back-four` | `0.307109` | `1,000` | `9,432` | `11,790` | `ceil(11,790 / 250) = 48` | `12,000` |
+
+Here, `events/configuration` means one thickness-layout configuration, not the
+sum of both endpoints. The pooled-production sizing floor is therefore
+`3 x 4,000 = 12,000` events per endpoint, or `24,000` across its two endpoints.
+The actual production endpoint samples are larger because the three layouts
+receive their direct-net allocations; the equal-stratum estimator below uses
+all of those available events without changing the `1/3` weights. The
+corresponding maximum two-endpoint totals for the three direct-net contrasts
+are `80,500`, `20,000`, and `24,000` events.
+
+The 5% projections remain preserved in the analysis-v2 evidence but are not
+selected for v1. They would require approximately four times the 10% samples
+under the same `1/sqrt(N)` assumption and would still omit detector-model,
+photoelectron, and electronics systematics.
+
+## Six-thickness allocation
+
+The accepted production allocation uses only the fixed `500 mm` absorber and
+the six thicknesses `4, 8, 12, 16, 20, 24 mm`:
+
+| Layout and thickness group | Configurations | Events/configuration | Blocks/configuration | Group events | Group blocks |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `back-center`, intermediate `8/12/16/20 mm` | `4` | `4,000` | `16` | `16,000` | `64` |
+| `back-center`, primary endpoints `4/24 mm`, maximum | `2` | `40,250` | `161` | `80,500` | `322` |
+| `edge-center`, all six thicknesses | `6` | `10,000` | `40` | `60,000` | `240` |
+| `back-four`, all six thicknesses | `6` | `12,000` | `48` | `72,000` | `288` |
+| **Maximum new production sample** | **18** | -- | -- | **228,500** | **914** |
+
+All six `back-center` thicknesses receive the `4,000`-event pooled-production
+minimum. Only its `4` and `24 mm` primary endpoints are eligible for staged
+extension toward `40,250`; the four intermediate net points are secondary and
+do not inherit the endpoint heavy-tail projection. `edge-center` and
+`back-four` use their layout-specific endpoint allocation at all six
+thicknesses to keep each full curve on a uniform within-layout sample design.
+These choices do not promise 10% precision for every secondary intermediate
+ratio.
+
+The pooled-production estimand retains equal `1/3` layout-stratum weights even
+when the net-response allocations make the production sample sizes unequal.
+At production analysis time, bootstrap each layout at its available event
+count, calculate its production mean, and average the three stratum means with
+equal weights. Do not concatenate all production events into an
+event-count-weighted mean, because that would make the staged `back-center`
+extension silently redefine the pooled estimand. This equal-weight rule and
+the v2 event-count-weighted pilot rule are numerically identical for the
+sealed pilot because all three pilot strata contain 1,000 events.
+
+The 30,000-event pilot is sizing evidence and is not counted in any production
+total. Production uses new seed blocks and new immutable manifests. This keeps
+the exploratory pilot separate from the sample on which the final production
+intervals will be reported. Therefore `228,500` means the maximum number of
+**new** events; it must not be reduced to `198,500` by subtracting or pooling
+the pilot.
+
+## `back-center` cumulative checkpoints
+
+The two `back-center` primary endpoint configurations use the same new
+production sample cumulatively across four predeclared checkpoints:
+
+| Checkpoint | Cumulative events per endpoint configuration | Cumulative blocks/configuration | Added blocks/configuration | Added events across both endpoints | Projected `h` from pilot scaling |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `BC-S1` | `4,000` | `16` | `16` | `8,000` | `28.4%` |
+| `BC-S2` | `10,000` | `40` | `24` | `12,000` | `17.9%` |
+| `BC-S3` | `20,000` | `80` | `40` | `20,000` | `12.7%` |
+| `BC-S4` | `40,250` | `161` | `81` | `40,500` | `8.9%` |
+
+The projected column is diagnostic only:
+`0.567095 x sqrt(1,000 / N)`. It shows why early stages test heavy-tail scaling
+rather than being expected to meet the target immediately.
+
+If all non-staged allocations and `BC-S1` are complete, the new sample is
+`156,000` events in `624` blocks. Continuing the two endpoints to `BC-S2`,
+`BC-S3`, and `BC-S4` adds, respectively, `12,000/48`, `20,000/80`, and
+`40,500/162` events/blocks. The cumulative campaign ceilings are therefore:
+
+| Last completed checkpoint | New production events | 250-event blocks |
 | --- | ---: | ---: |
-| Pooled production, per layout stratum | `4,000` | `15,500` |
-| Observed net, `back-center` | `40,250` | `161,000` |
-| Observed net, `edge-center` | `10,000` | `40,000` |
-| Observed net, `back-four` | `12,000` | `47,250` |
+| `BC-S1` | `156,000` | `624` |
+| `BC-S2` | `168,000` | `672` |
+| `BC-S3` | `188,000` | `752` |
+| `BC-S4` | `228,500` | `914` |
 
-These values assume the observed 95% relative half-width scales as
-`1/sqrt(N)`, apply a `1.25` safety factor, and round upward to complete
-250-event blocks. They are internally reconciled review aids, not accepted
-production sizes. In particular, `back-center` should be staged and rechecked
-rather than committed in one step because its finite-sample behavior differs
-most from a smooth normal approximation.
+At every checkpoint, finalize and checksum the new stage, audit event and seed
+identity, form the cumulative production sample, and rerun the primary
+contrast plus tail/block diagnostics. Review at least:
+
+- the bootstrap 95% relative half-width of `back-center 24/4`;
+- maximum leave-one-250-event-block-out ratio shift;
+- zero fraction and positive-event count;
+- top-1% and top-5% response shares and the maximum event; and
+- observed interval-width change relative to the prior checkpoint and the
+  `1/sqrt(N)` projection.
+
+The predeclared decision rules are:
+
+1. **Precision success:** stop extending `back-center` if `h <= 10%` and the
+   maximum leave-one-block-out shift is `<= 10%`.
+2. **Continue to the next checkpoint:** the precision target is unmet, the
+   block shift is `<= 20%`, and the interval width still decreases relative to
+   the prior checkpoint. Progression always requires explicit review; no stage
+   automatically submits the next one.
+3. **Pause for method review:** the block shift exceeds `20%`, the interval
+   fails to narrow, or a newly sampled extreme event materially worsens the
+   top-tail diagnostics. Tail shares are review signals, not stand-alone
+   pass/fail thresholds.
+4. **Hard ceiling:** `BC-S4` is the maximum authorized sample. If the two
+   success conditions are still unmet, do not add events automatically; reopen
+   the statistical design.
+
+For `BC-S1`, the sealed 1,000-event pilot interval is the comparison baseline
+for the width-trend diagnostic only; its events are not merged into the
+production estimate. Later stages compare against the immediately preceding
+cumulative production checkpoint.
+
+After the fixed allocations complete, the pooled-production, `edge-center`,
+and `back-four` primary intervals must also be checked against `h <= 10%`.
+Their sample sizes are not adaptive stages: if any one misses the target, do
+not extrapolate and submit more events automatically; reopen the sizing
+decision with its observed tail and block diagnostics.
+
+Stopping is never based on whether the point ratio appears favorable, crosses
+unity, or excludes unity. Because the cumulative percentile-bootstrap
+interval is inspected repeatedly and is not adjusted as a formal sequential
+confidence procedure, its nominal 95% coverage remains a pragmatic production
+estimate rather than a strict confirmatory sequential guarantee. A request for
+strict sequential coverage or an independent confirmatory sample would reopen
+the statistical design.
 
 ## Claim boundary and next gate
 
@@ -207,9 +358,12 @@ The evidence does not support:
 - substitution of `200` or `300 mm` on equivalence grounds;
 - absorber-size-independent thickness or layout conclusions;
 - a universal production event count;
-- automatic acceptance of a 5% or 10% precision target; or
+- a guarantee that every secondary ratio will reach 10% precision;
+- a claim that checkpoint reuse constitutes a formal sequential 95%
+  confidence procedure; or
 - detector-model systematic, photoelectron, or electronics-response claims.
 
-The next decision is the precision and staged-event policy. No production
-campaign is authorized until that policy and its exact per-layout event counts
-are accepted and recorded.
+The statistical production design is now frozen. The next gate is engineering:
+implement and validate immutable fresh-seed stages, exact cumulative task
+selection, cross-stage checksum/audit provenance, and a non-overwriting
+cumulative analyzer before submitting the first production stage.

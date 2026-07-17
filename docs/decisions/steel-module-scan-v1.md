@@ -1,7 +1,7 @@
 # Steel Module Scan v1 — Decision Record and Implementation Contract
 
-Status: analysis-v2 reviewed; fixed-reference absorber policy accepted;
-production precision and event counts not yet frozen
+Status: analysis-v2 reviewed; fixed-reference absorber and 10% staged
+production policies accepted; execution infrastructure pending
 Study preset: `steel-module-scan-v1`
 Last updated: 2026-07-17
 
@@ -433,11 +433,92 @@ reopened study must compare `500 mm` with a larger extent or implement the
 relevant official continuous geometry; adding only more `200/300 mm` events
 cannot demonstrate convergence above the current reference.
 
-The absorber-policy gate is now closed for v1. Production remains blocked only
-on an explicit precision target, staged treatment of the heavy-tailed
-`back-center` response, and exact per-layout event counts. The analysis-v2 5%
-and 10% projections remain unaccepted review aids and do not authorize a new
-campaign.
+At the SMS-015 checkpoint, the absorber-policy gate was closed for v1 and
+production remained blocked on an explicit precision target, staged treatment
+of the heavy-tailed `back-center` response, and exact per-layout event counts.
+SMS-016 resolves those statistical-design choices.
+
+### SMS-016 — Accepted 10% precision and staged production policy
+
+Accept a 10% event-bootstrap 95% relative-half-width target for exactly four
+primary `24/4` contrasts: pooled scintillation production and direct observed
+net response for `back-center`, `edge-center`, and aggregate `back-four`.
+Excluding unity is not a stopping requirement, and secondary curve,
+standardized-response, collection, and absorber ratios do not control sample
+size.
+
+The accepted sizing calculation is
+
+`N_raw = ceil(N_pilot x (h_observed / 0.10)^2)`, followed by
+`N_buffered = ceil(1.25 x N_raw)` and upward rounding to complete 250-event
+blocks. The sealed pilot gives:
+
+| Primary contrast | `h_observed` | `N_pilot` per endpoint | Accepted events/configuration | Blocks/configuration |
+| --- | ---: | ---: | ---: | ---: |
+| Pooled production, per layout stratum | `0.175253` | `3,000` total | `4,000` | `16` |
+| `back-center` observed net | `0.567095` | `1,000` | `40,250` | `161` |
+| `edge-center` observed net | `0.282524` | `1,000` | `10,000` | `40` |
+| `back-four` observed net | `0.307109` | `1,000` | `12,000` | `48` |
+
+The exact raw, buffered, stratum-distribution, and block-rounding arithmetic is
+preserved in `docs/decisions/steel-module-analysis-v2-review-v1.md` and the
+checksum-sealed `production_sizing_v2.json`.
+
+Apply those counts to the six-thickness curve as follows:
+
+- all six `back-center` configurations start with `4,000` new events;
+- only the `4` and `24 mm back-center` primary endpoints may extend
+  cumulatively through `4,000`, `10,000`, `20,000`, and `40,250` events;
+- all six `edge-center` configurations receive `10,000` events; and
+- all six `back-four` configurations receive `12,000` events.
+
+The existing 30,000-event pilot is not pooled into production. Every
+production block uses a fresh seed and immutable stage manifest. At the
+maximum checkpoint the new-event accounting is
+
+`4 x 4,000 + 2 x 40,250 + 6 x 10,000 + 6 x 12,000 = 228,500 events`,
+
+or
+
+`4 x 16 + 2 x 161 + 6 x 40 + 6 x 48 = 914` complete 250-event blocks.
+
+Because the final endpoint samples are unequal across layouts, pooled
+production retains equal `1/3` layout-stratum weights: bootstrap within each
+layout at its available sample size, then average the three layout means.
+Do not concatenate all events into an event-count-weighted mean that would
+silently overweight the staged `back-center` sample. This equals the v2 pilot
+calculation when all three strata have the same event count.
+
+For the two `back-center` endpoints, the cumulative stages add `8,000`,
+`12,000`, `20,000`, and `40,500` events across the endpoint pair. Including
+the fixed allocations, the corresponding whole-production ceilings are
+`156,000/624`, `168,000/672`, `188,000/752`, and `228,500/914`
+events/blocks.
+
+At each checkpoint, require finalized checksums, event/seed audit, cumulative
+analysis, and review of relative half-width, maximum leave-one-block-out
+shift, zero/positive counts, top-tail shares, maximum event, and CI-width
+scaling. Stop successfully only when the `back-center 24/4` relative
+half-width and maximum block-omission shift are both `<= 10%`. Continue only
+after explicit review when the target is unmet, the block shift is `<= 20%`,
+and the interval is narrowing. Pause for method review if those diagnostics
+deteriorate. `40,250` events/configuration is a hard ceiling, not permission
+for automatic extension.
+
+For `BC-S1`, compare interval-width trend against the sealed 1,000-event pilot
+as a diagnostic only, without pooling pilot events. Later stages compare to
+the immediately preceding cumulative production checkpoint.
+
+The fixed pooled-production, `edge-center`, and `back-four` allocations must
+also be checked against the accepted 10% target. If any misses it, do not add
+events automatically; reopen that contrast-specific sizing decision.
+
+This cumulative repeated-look policy is a pragmatic precision design, not a
+formally adjusted sequential-confidence procedure. Stopping must never depend
+on the effect direction, crossing unity, or excluding unity. The policy
+authorizes production-infrastructure preparation; actual submission remains
+blocked until immutable stage generation, fresh-seed identity, cumulative
+audit/analysis, and non-overwrite behavior are implemented and validated.
 
 ## Current engineering state
 
@@ -472,14 +553,15 @@ finalized/analysis checksum checks passed.
 
 The historical v1 scientific review is recorded in
 `docs/decisions/steel-module-convergence-pilot-review-v1.md`. The completed
-analysis-v2 interpretation and accepted absorber policy are recorded in
+analysis-v2 interpretation and accepted absorber and staged-production
+policies are recorded in
 `docs/decisions/steel-module-analysis-v2-review-v1.md`. Together they support
 a layout-dependent thick-tile conclusion while preserving the fixed-proxy and
 heavy-tail caveats.
 
-No geometry or source-model input remains open. The remaining choices are the
-production precision target, staged `back-center` policy, and exact per-layout
-event counts.
+No geometry, source-model, absorber, or statistical-design input remains open.
+The remaining gate is implementation and validation of the accepted staged
+production workflow before its first Slurm submission.
 
 ## Interactive geometry review
 
@@ -513,8 +595,9 @@ Use one or more repeated `--sipm-layout` options to prepare a subset, or
   zero-gap EJ-550 coupling proxy.
 - Aggregate SiPM count equals the sum of the four fixed per-sensor fields.
 - Old 432.58 MeV data never enter this scan's statistical evidence.
-- Production starts only after the pilot review, analysis-v2, and an explicit
-  production-statistics and absorber decision.
+- Production submission starts only after the accepted pilot, analysis-v2,
+  absorber, and SMS-016 statistical decisions are embodied in a validated
+  immutable staged-production workflow.
 
 ## Requirement sources retained with scope
 
