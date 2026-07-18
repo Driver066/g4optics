@@ -18,6 +18,7 @@ from steel_module_production_phase2b_lib import (
     execution_task_by_id,
     load_attempt_intent,
     load_execution_companion,
+    require_production_execution_open,
 )
 
 
@@ -81,6 +82,7 @@ def run_task(args: argparse.Namespace) -> Path:
         execution_dir, repo_root=control_root, require_readiness=False,
         verify_phase2a_control_plane=False,
     )
+    require_production_execution_open(execution)
     intent = load_attempt_intent(execution, args.attempt_id)
     if intent.get("intent_sha256") != args.intent_sha256:
         raise ValueError("worker intent SHA-256 mismatch")

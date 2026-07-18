@@ -10,12 +10,15 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from contextlib import ExitStack, nullcontext
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable
 from unittest import mock
 
+import manage_steel_module_production_attempt as phase2b_manage
+import seal_steel_module_production_phase2b_incident as phase2b_seal
 import steel_module_production_phase2b_lib as phase2b_lib
 from check_steel_module_managed_production import make_fixture
 from finalize_steel_module_managed_child import _successful_array_indexes
@@ -413,6 +416,326 @@ def test_inode_bound_control_lock_v1(repo_root: Path, scratch: Path) -> None:
     else:
         raise AssertionError("legacy control-lock open/flock replacement was accepted")
     assert replaced
+
+
+def test_exact_historical_v1_recovery_lock(
+    repo_root: Path, scratch: Path
+) -> None:
+    """Exercise the one closed v1 companion's additive recovery authority.
+
+    The fixture deliberately records a device/inode pair that differs from the
+    live empty lock file, as happens when the same OSC path is viewed from a
+    different login node.  The ordinary v1 validator must remain strict; only
+    the exact historical-recovery validator and lock may ignore that frozen
+    cross-node diagnostic.
+    """
+
+    base = make_execution(
+        repo_root,
+        scratch,
+        "lock-v1-exact-historical-recovery",
+        control_lock_protocol=CONTROL_LOCK_PROTOCOL_V1,
+    )
+    live_lock = base.directory / ".control.lock"
+    live_stat = live_lock.stat()
+
+    def make_formal_historical(value: dict[str, Any]) -> None:
+        value["test_mode"] = False
+        value["accepted_statistical_evidence"] = True
+        value["execution_id"] = (
+            "sm-v1-production-bc-s1-execution-historical-fixture"
+        )
+        record = value["artifacts"]["control_lock"]
+        record["device"] = live_stat.st_dev + 1000003
+        record["inode"] = live_stat.st_ino + 1000033
+
+    _rewrite_execution_manifest(base, make_formal_historical)
+    manifest = json.loads(
+        (base.directory / "managed_execution.json").read_text(encoding="utf-8")
+    )
+    historical = phase2b_lib.ManagedExecution(
+        base.directory,
+        base.managed_child,
+        manifest,
+        base.tasks,
+        base.scan_args,
+    )
+    record = manifest["artifacts"]["control_lock"]
+    assert (record["device"], record["inode"]) != (
+        live_lock.stat().st_dev,
+        live_lock.stat().st_ino,
+    )
+
+    # Prepare a realistic released attempt before assigning the synthetic
+    # identity the closed historical authority.  The setup bypasses the
+    # deliberately mismatched legacy lock; the behavior under test below does
+    # not.
+    attempt_id = "20260718T175107Z-historical-fixture"
+    with mock.patch.object(
+        phase2b_lib,
+        "execution_lock",
+        side_effect=lambda *_args, **_kwargs: nullcontext(),
+    ):
+        intent = _prepare(historical, attempt_id)
+    job_id = "9001"
+    append_attempt_event(
+        historical,
+        attempt_id,
+        "submission-invoked",
+        {"command_sha256": "a" * 64, "job_name": intent["scheduler"]["job_name"]},
+        actor="fixture-reviewer",
+        lock_held=True,
+    )
+    append_attempt_event(
+        historical,
+        attempt_id,
+        "submitted-held",
+        {"job_id": job_id},
+        actor="fixture-reviewer",
+        lock_held=True,
+    )
+    append_attempt_event(
+        historical,
+        attempt_id,
+        "job-verified",
+        {"job_id": job_id},
+        actor="fixture-reviewer",
+        lock_held=True,
+    )
+    append_attempt_event(
+        historical,
+        attempt_id,
+        "job-released",
+        {"job_id": job_id},
+        actor="fixture-reviewer",
+        lock_held=True,
+    )
+    assert attempt_state(historical, attempt_id).status == "released-active"
+
+    with ExitStack() as authority:
+        for module, name, value in (
+            (phase2b_lib, "HISTORICAL_CLOSED_EXECUTION_ID", historical.execution_id),
+            (
+                phase2b_lib,
+                "HISTORICAL_CLOSED_EXECUTION_HASH",
+                historical.execution_hash,
+            ),
+            (phase2b_lib, "HISTORICAL_CLOSED_LOCK_DEVICE", record["device"]),
+            (phase2b_lib, "HISTORICAL_CLOSED_LOCK_INODE", record["inode"]),
+            (phase2b_lib, "HISTORICAL_CLOSED_ATTEMPT_ID", attempt_id),
+            (
+                phase2b_lib,
+                "HISTORICAL_CLOSED_INTENT_SHA256",
+                intent["intent_sha256"],
+            ),
+            (phase2b_lib, "HISTORICAL_CLOSED_JOB_ID", job_id),
+            (phase2b_manage, "HISTORICAL_CLOSED_ATTEMPT_ID", attempt_id),
+            (
+                phase2b_manage,
+                "HISTORICAL_CLOSED_INTENT_SHA256",
+                intent["intent_sha256"],
+            ),
+            (phase2b_manage, "HISTORICAL_CLOSED_JOB_ID", job_id),
+            (phase2b_seal, "FORMAL_ATTEMPT_ID", attempt_id),
+            (phase2b_seal, "FORMAL_JOB_ID", job_id),
+        ):
+            authority.enter_context(mock.patch.object(module, name, value))
+
+        try:
+            phase2b_lib.validate_execution_control_lock(
+                historical.directory, historical.manifest
+            )
+        except ValueError as exc:
+            assert "inode identity mismatch" in str(exc)
+        else:
+            raise AssertionError(
+                "ordinary v1 validation accepted a cross-node inode mismatch"
+            )
+
+        phase2b_lib.validate_historical_recovery_control_lock(
+            historical.directory, historical.manifest
+        )
+        with phase2b_lib.historical_recovery_execution_lock(historical):
+            pass
+
+        wrong_scope = json.loads(json.dumps(historical.manifest))
+        wrong_scope["execution_id"] += "-wrong"
+        try:
+            phase2b_lib.validate_historical_recovery_control_lock(
+                historical.directory, wrong_scope
+            )
+        except ValueError as exc:
+            assert "limited to the closed execution" in str(exc)
+        else:
+            raise AssertionError("historical recovery accepted another execution")
+
+        try:
+            load_execution_companion(
+                historical.directory,
+                repo_root=repo_root,
+                allow_test_mode=True,
+                require_readiness=False,
+                _allow_historical_closed_recovery=True,
+            )
+        except ValueError as exc:
+            assert "full formal validation mode" in str(exc)
+        else:
+            raise AssertionError("historical loader accepted a weakened mode")
+
+        live_lock.chmod(0o640)
+        try:
+            phase2b_lib.validate_historical_recovery_control_lock(
+                historical.directory, historical.manifest
+            )
+        except ValueError as exc:
+            assert "mode mismatch" in str(exc)
+        else:
+            raise AssertionError("historical recovery accepted a mode tamper")
+        finally:
+            live_lock.chmod(0o600)
+
+        live_lock.write_bytes(b"x")
+        try:
+            phase2b_lib.validate_historical_recovery_control_lock(
+                historical.directory, historical.manifest
+            )
+        except ValueError as exc:
+            assert "size mismatch" in str(exc)
+        else:
+            raise AssertionError("historical recovery accepted lock content")
+        finally:
+            live_lock.write_bytes(b"")
+            live_lock.chmod(0o600)
+
+        extra_link = scratch / "historical-recovery-extra-link"
+        os.link(live_lock, extra_link)
+        try:
+            phase2b_lib.validate_historical_recovery_control_lock(
+                historical.directory, historical.manifest
+            )
+        except ValueError as exc:
+            assert "link-count mismatch" in str(exc)
+        else:
+            raise AssertionError("historical recovery accepted a hard link")
+        finally:
+            extra_link.unlink()
+
+        replacement = scratch / "historical-recovery-held-replacement"
+        replacement.write_bytes(b"")
+        replacement.chmod(0o600)
+        try:
+            with phase2b_lib.historical_recovery_execution_lock(historical):
+                os.replace(replacement, live_lock)
+        except ValueError as exc:
+            assert "changed while held" in str(exc)
+        else:
+            raise AssertionError(
+                "historical recovery missed a same-node lock replacement"
+            )
+        phase2b_lib.validate_historical_recovery_control_lock(
+            historical.directory, historical.manifest
+        )
+
+        scheduler_calls: list[tuple[str, ...]] = []
+
+        def scheduler_read_subprocess(
+            command: list[str], **_kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            scheduler_calls.append(tuple(command))
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        with mock.patch.object(
+            phase2b_seal.subprocess, "run", side_effect=scheduler_read_subprocess
+        ):
+            read_runner = phase2b_seal._historical_scheduler_read_runner(
+                historical,
+                {
+                    "scheduler_read_commands": {
+                        "sacct": "/usr/bin/sacct",
+                        "squeue": "/usr/bin/squeue",
+                    }
+                },
+            )
+            read_runner(
+                [
+                    "sacct", "-n", "-P", "-j", job_id,
+                    "--format=JobID,JobIDRaw,State,ExitCode,ElapsedRaw,MaxRSS,MaxVMSize",
+                ],
+                cwd=historical.directory,
+            )
+            assert scheduler_calls == [
+                (
+                    "/usr/bin/sacct", "-n", "-P", "-j", job_id,
+                    "--format=JobID,JobIDRaw,State,ExitCode,ElapsedRaw,MaxRSS,MaxVMSize",
+                )
+            ]
+            try:
+                read_runner(
+                    ["sbatch", "--parsable", "forbidden.sbatch"],
+                    cwd=historical.directory,
+                )
+            except ValueError as exc:
+                assert "non-allowlisted" in str(exc)
+            else:
+                raise AssertionError("historical recovery allowlisted sbatch")
+            assert len(scheduler_calls) == 1
+
+        def forbidden_normal_lock(*_args: object, **_kwargs: object) -> object:
+            raise AssertionError("historical recovery used the normal execution lock")
+
+        fake = FakeSlurm(historical, attempt_id, mode="all-failed-accounting")
+        with mock.patch.object(
+            phase2b_manage, "execution_lock", side_effect=forbidden_normal_lock
+        ), mock.patch.object(
+            phase2b_lib, "execution_lock", side_effect=forbidden_normal_lock
+        ):
+            accounting = freeze_terminal_accounting(
+                historical,
+                attempt_id=attempt_id,
+                intent_sha256=intent["intent_sha256"],
+                actor="fixture-reviewer",
+                runner=fake,
+                historical_incident_recovery=True,
+            )
+            assert accounting["schema_version"] == (
+                phase2b_lib.ACCOUNTING_SCHEMA_VERSION_V2
+            )
+            assert accounting["accepted_terminal"] is True
+            assert accounting["all_tasks_completed"] is False
+            assert set(accounting["task_states"].values()) == {"FAILED"}
+            terminal_events = [
+                event
+                for event in read_attempt_events(historical, attempt_id)
+                if event["event_type"] == "terminal-accounting-frozen"
+            ]
+            assert len(terminal_events) == 1
+            calls_after_first_freeze = tuple(fake.calls)
+
+            def forbidden_scheduler(*_args: object, **_kwargs: object) -> object:
+                raise AssertionError("idempotent recovery queried the scheduler")
+
+            repeated = freeze_terminal_accounting(
+                historical,
+                attempt_id=attempt_id,
+                intent_sha256=intent["intent_sha256"],
+                actor="fixture-reviewer",
+                runner=forbidden_scheduler,
+                historical_incident_recovery=True,
+            )
+            assert repeated == accounting
+            assert tuple(fake.calls) == calls_after_first_freeze
+            assert len(
+                [
+                    event
+                    for event in read_attempt_events(historical, attempt_id)
+                    if event["event_type"] == "terminal-accounting-frozen"
+                ]
+            ) == 1
+
+        assert all(Path(command[0]).name != "sbatch" for command in fake.calls)
+        attempt_dir = historical.directory / "attempts" / attempt_id
+        assert not (attempt_dir / "tasks").exists()
+        assert not tuple(historical.directory.rglob("*.root"))
 
 
 def test_materialization(repo_root: Path, scratch: Path) -> None:
@@ -1227,6 +1550,30 @@ def test_pre_simulation_incident_sealing(repo_root: Path, scratch: Path) -> None
     else:
         raise AssertionError("a foreign-job Slurm log was accepted")
     assert not (attempt_dir / "accounting").exists()
+    calls_before_bad_local_evidence = len(fake.calls)
+    events_before_bad_local_evidence = read_attempt_events(
+        execution, intent["attempt_id"]
+    )
+    try:
+        publish_incident_bundle(
+            execution,
+            repo_root=repo_root,
+            out_parent=scratch / "bad-local-evidence-incident-bundles",
+            attempt_id=intent["attempt_id"],
+            intent_sha256=intent["intent_sha256"],
+            actor="fixture-reviewer",
+            runner=fake,
+            historical_readiness=readiness,
+        )
+    except ValueError as exc:
+        assert "foreign Slurm log" in str(exc)
+    else:
+        raise AssertionError("bad local evidence wrote terminal incident state")
+    assert len(fake.calls) == calls_before_bad_local_evidence
+    assert read_attempt_events(
+        execution, intent["attempt_id"]
+    ) == events_before_bad_local_evidence
+    assert not (attempt_dir / "accounting").exists()
     foreign_log.unlink()
     calls_before_authority_rejection = len(fake.calls)
     wrong_readiness = dict(readiness, sha256="b" * 64)
@@ -1921,6 +2268,7 @@ def main() -> int:
         os.environ["PATH"] = str(sentinel_bin) + os.pathsep + original_path
         test_portable_control_lock_v2(repo_root, scratch)
         test_inode_bound_control_lock_v1(repo_root, scratch)
+        test_exact_historical_v1_recovery_lock(repo_root, scratch)
         test_materialization(repo_root, scratch)
         test_readiness_protected_artifact_set(scratch)
         test_intent_contract_tamper(repo_root, scratch)

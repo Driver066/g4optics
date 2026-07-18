@@ -42,14 +42,20 @@ from steel_module_production_phase2b_lib import (
     ACCOUNTING_SCHEMA_VERSION_V2,
     ACTOR_RE,
     EVENT_SCHEMA_VERSION,
+    HISTORICAL_CLOSED_ATTEMPT_ID,
+    HISTORICAL_CLOSED_EXECUTION_HASH,
+    HISTORICAL_CLOSED_EXECUTION_ID,
+    HISTORICAL_CLOSED_INTENT_SHA256,
+    HISTORICAL_CLOSED_JOB_ID,
     READINESS_LOCK_RELATIVE,
     READINESS_LOCK_SCHEMA_VERSION,
     ManagedExecution,
     attempt_state,
     fsync_tree,
+    list_attempt_ids,
     load_attempt_intent,
-    load_execution_companion,
     load_frozen_accounting,
+    load_historical_closed_execution_for_recovery,
     load_phase2a_lock,
     read_attempt_events,
     utc_now,
@@ -58,15 +64,11 @@ from steel_module_production_phase2b_lib import (
 
 INCIDENT_SCHEMA_VERSION = "steel-module-production-phase2b-incident-v1"
 FORMAL_EXECUTION_NAME = "steel-module-production-bc-s1-execution"
-FORMAL_ATTEMPT_ID = "20260718T175107Z-initial"
-FORMAL_JOB_ID = "50532143"
-FORMAL_INTENT_SHA256 = (
-    "1232d0e69302634580b5e6d1ab4d1c725a7d6ede08e4181c717ba71adb494b9d"
-)
-FORMAL_EXECUTION_ID = "sm-v1-production-bc-s1-execution-193d261c3059"
-FORMAL_EXECUTION_HASH = (
-    "d07a32a6afea7d2345b4f4ca45996fd88dde93a7cf8f9d875e0ba0e47e52cf7b"
-)
+FORMAL_ATTEMPT_ID = HISTORICAL_CLOSED_ATTEMPT_ID
+FORMAL_JOB_ID = HISTORICAL_CLOSED_JOB_ID
+FORMAL_INTENT_SHA256 = HISTORICAL_CLOSED_INTENT_SHA256
+FORMAL_EXECUTION_ID = HISTORICAL_CLOSED_EXECUTION_ID
+FORMAL_EXECUTION_HASH = HISTORICAL_CLOSED_EXECUTION_HASH
 FORMAL_IMPLEMENTATION_COMMIT = "20c9007f8cd3da27fe1b4fbd13cad8bdaefdc292"
 FORMAL_READINESS_COMMIT = "5eaf22a23ee84d3bab3ac2539923d62cb8276bdb"
 EXPECTED_FAILURE_LINE = (
@@ -105,10 +107,23 @@ def _historical_readiness_identity(
     if (
         companion.get("execution_id") != execution.execution_id
         or companion.get("execution_hash") != execution.execution_hash
+        or companion.get("directory") != str(execution.directory)
+        or companion.get("managed_execution_json_sha256")
+        != sha256_file(execution.directory / "managed_execution.json")
+        or companion.get("static_checksum_manifest_sha256")
+        != sha256_file(execution.directory / "STATIC_SHA256SUMS")
         or companion.get("control_lock")
         != require_dict(require_dict(execution.manifest, "artifacts"), "control_lock")
     ):
         raise ValueError("historical readiness lock execution identity mismatch")
+    scheduler_commands = require_dict(
+        require_dict(value, "osc_capabilities"), "commands"
+    )
+    if (
+        scheduler_commands.get("sacct") != "/usr/bin/sacct"
+        or scheduler_commands.get("squeue") != "/usr/bin/squeue"
+    ):
+        raise ValueError("historical readiness scheduler-read identity mismatch")
     control = require_dict(value, "control_plane")
     frozen_control = require_dict(require_dict(execution.manifest, "sources"), "control_plane")
     if control.get("git_commit") != FORMAL_IMPLEMENTATION_COMMIT:
@@ -163,7 +178,53 @@ def _historical_readiness_identity(
         "readiness_commit": FORMAL_READINESS_COMMIT,
         "readiness_commit_parent": FORMAL_IMPLEMENTATION_COMMIT,
         "commit_blob_sha256": sha256_bytes(blob.stdout),
+        "scheduler_read_commands": {
+            "sacct": scheduler_commands["sacct"],
+            "squeue": scheduler_commands["squeue"],
+        },
     }
+
+
+def _historical_scheduler_read_runner(
+    execution: ManagedExecution, readiness: dict[str, Any]
+) -> CommandRunner:
+    """Return a subprocess gateway for the two fixed read-only Slurm calls."""
+
+    intent = load_attempt_intent(execution, FORMAL_ATTEMPT_ID)
+    job_name = require_dict(intent, "scheduler")["job_name"]
+    commands = require_dict(readiness, "scheduler_read_commands")
+    allowed = {
+        (
+            "sacct", "-n", "-P", "-j", FORMAL_JOB_ID,
+            "--format=JobID,JobIDRaw,State,ExitCode,ElapsedRaw,MaxRSS,MaxVMSize",
+        ): commands["sacct"],
+        (
+            "squeue", "-h", "-o", "%A|%j|%a|%T|%r", "--name", job_name,
+        ): commands["squeue"],
+    }
+
+    def run(
+        command: Sequence[str], *, cwd: Path, timeout: int = 120
+    ) -> subprocess.CompletedProcess[str]:
+        key = tuple(command)
+        executable = allowed.get(key)
+        if executable is None:
+            raise ValueError("historical recovery rejected a non-allowlisted command")
+        if cwd.resolve() != execution.directory:
+            raise ValueError("historical scheduler read used an unexpected work directory")
+        argv = [executable, *key[1:]]
+        return subprocess.run(
+            argv,
+            cwd=cwd,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=timeout,
+            env={"PATH": "/usr/bin:/bin", "HOME": os.environ.get("HOME", "")},
+        )
+
+    return run
 
 
 def _recovery_control_plane_identity(repo_root: Path) -> dict[str, Any]:
@@ -259,6 +320,21 @@ def _validate_failure_outputs(
         if path.stat().st_size:
             raise ValueError(f"unexpected non-empty auxiliary Slurm log: {path}")
         auxiliary.append(record)
+    allowed_entries = {
+        "events",
+        *(path.name for path in job_logs),
+    }
+    accounting_dir = attempt_dir / "accounting"
+    if accounting_dir.is_dir() and not accounting_dir.is_symlink():
+        allowed_entries.add("accounting")
+    unexpected_entries = sorted(
+        path.name for path in attempt_dir.iterdir() if path.name not in allowed_entries
+    )
+    if unexpected_entries:
+        raise ValueError(
+            "pre-simulation incident contains unexpected attempt entries: "
+            + ", ".join(unexpected_entries)
+        )
     if len(logs) != 32:
         raise ValueError("formal pre-simulation incident requires exactly 32 task logs")
     return logs, auxiliary
@@ -312,6 +388,32 @@ def _validate_incident_authority(
             or state.job_id != FORMAL_JOB_ID
         ):
             raise ValueError("formal incident authority identity mismatch")
+        if list_attempt_ids(execution) != (FORMAL_ATTEMPT_ID,):
+            raise ValueError("formal incident does not have one unique intent")
+        for root_name, expected_names in (
+            ("intents", {FORMAL_ATTEMPT_ID}),
+            ("attempts", {FORMAL_ATTEMPT_ID}),
+            ("finalized", set()),
+        ):
+            root = execution.directory / root_name
+            names = {path.name for path in root.iterdir()}
+            if names != expected_names:
+                raise ValueError(
+                    f"formal incident contains unexpected {root_name} lineage"
+                )
+        events = read_attempt_events(execution, FORMAL_ATTEMPT_ID)
+        expected_types = (
+            "submission-invoked",
+            "submitted-held",
+            "release-ambiguous",
+            "job-verified",
+            "job-released",
+        )
+        observed_types = tuple(event["event_type"] for event in events)
+        if state.status == "terminal-accounting-frozen":
+            expected_types += ("terminal-accounting-frozen",)
+        if observed_types != expected_types:
+            raise ValueError("formal incident event lineage is not the fixed history")
     if formal:
         readiness = _historical_readiness_identity(repo_root, execution)
         if historical_readiness is not None and historical_readiness != readiness:
@@ -343,6 +445,10 @@ def collect_incident_evidence(
         actor=actor,
         historical_readiness=historical_readiness,
     )
+    # Prove the local pre-simulation disposition before any scheduler read.
+    logs, auxiliary_logs = _validate_failure_outputs(
+        execution, attempt_id, str(state.job_id)
+    )
     if state.status == "released-active":
         snapshot = preview_terminal_accounting(
             execution,
@@ -371,7 +477,6 @@ def collect_incident_evidence(
         or accounting.get("array_parent_row_present") is not False
     ):
         raise ValueError("scheduler evidence is not the exact OSC 32-task failure")
-    logs, auxiliary_logs = _validate_failure_outputs(execution, attempt_id, str(job_id))
     events = read_attempt_events(execution, attempt_id)
     accounting_manifest_sha256 = None
     if state.status == "terminal-accounting-frozen":
@@ -783,6 +888,9 @@ def publish_incident_bundle(
         historical_readiness=historical_readiness,
     )
     job_id = str(state.job_id)
+    # Fail before scheduler contact or immutable writes unless the complete
+    # local evidence already proves that no simulation output was created.
+    _validate_failure_outputs(execution, attempt_id, job_id)
     existing = _existing_incident(
         out_parent,
         execution=execution,
@@ -814,6 +922,7 @@ def publish_incident_bundle(
             intent_sha256=intent_sha256,
             actor=actor,
             runner=runner,
+            historical_incident_recovery=_formal_execution_identity(execution),
         )
     evidence = collect_incident_evidence(
         execution,
@@ -880,11 +989,8 @@ def _formal_execution(repo_root: Path) -> ManagedExecution:
     execution_dir = (
         Path(phase2a["canonical_directory"]).resolve().parent / FORMAL_EXECUTION_NAME
     )
-    execution = load_execution_companion(
-        execution_dir,
-        repo_root=repo_root,
-        require_readiness=False,
-        verify_runtime=True,
+    execution = load_historical_closed_execution_for_recovery(
+        execution_dir, repo_root=repo_root
     )
     if (
         execution.execution_id != FORMAL_EXECUTION_ID
@@ -919,6 +1025,7 @@ def main() -> int:
             raise ValueError("incident sealing requires a clean recovery checkout")
         execution = _formal_execution(repo_root)
         readiness = _historical_readiness_identity(repo_root, execution)
+        runner = _historical_scheduler_read_runner(execution, readiness)
         if args.check_only:
             evidence = collect_incident_evidence(
                 execution,
@@ -926,7 +1033,7 @@ def main() -> int:
                 attempt_id=FORMAL_ATTEMPT_ID,
                 intent_sha256=FORMAL_INTENT_SHA256,
                 actor=args.actor,
-                runner=_run,
+                runner=runner,
                 historical_readiness=readiness,
             )
             if evidence["attempt"]["job_id"] != FORMAL_JOB_ID:
@@ -945,7 +1052,7 @@ def main() -> int:
             attempt_id=FORMAL_ATTEMPT_ID,
             intent_sha256=FORMAL_INTENT_SHA256,
             actor=args.actor,
-            runner=_run,
+            runner=runner,
             historical_readiness=readiness,
         )
         incident = load_json(target / "incident.json")
@@ -963,24 +1070,6 @@ def main() -> int:
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
         print(f"Cannot seal steel-module Phase-2B incident: {exc}", file=sys.stderr)
         return 1
-
-
-def _run(
-    command: Sequence[str], *, cwd: Path, timeout: int = 120
-) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        list(command),
-        cwd=cwd,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-        timeout=timeout,
-        env={
-            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-            "HOME": os.environ.get("HOME", ""),
-        },
-    )
 
 
 if __name__ == "__main__":

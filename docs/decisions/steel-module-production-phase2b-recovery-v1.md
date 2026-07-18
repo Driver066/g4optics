@@ -48,6 +48,18 @@ device=214 inode=958967 mode=600 size=0 links=1
 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 ```
 
+A later login session showed that even two OSC login nodes can report a
+different numeric device/inode identity for this same shared path.  The first
+recovery sealer therefore failed before scheduler access for the same reason
+as the workers.  Historical sealing now has one narrowly scoped lock path:
+it accepts only the exact execution, attempt, intent, job, readiness-bound
+manifest/checksum identities, and original empty `0600` lock record above;
+it ignores only the current node's numeric device/inode.  It still requires a
+regular one-link file, `O_NOFOLLOW`, content/mode/size checks, `flock`, and
+same-node path/descriptor identity checks before, during, and after the
+critical section.  Ordinary v1 loaders and every production worker or
+submission mutation retain the original strict behavior.
+
 All 32 array logs contain exactly:
 
 ```text
@@ -149,6 +161,15 @@ The incident sealer has two explicit modes:
 The bundle contains `incident.json`, the complete event chain, logical/raw
 accounting, the 32-log index, and independent checksums.  It never calls
 `sbatch` or `scontrol`.
+
+Before either allowed `sacct`/`squeue` read, the formal sealer verifies the
+readiness-bound canonical companion and byte hashes, the single historical
+intent/attempt lineage, the fixed event chain, all 32 exact failure logs, and
+the absence of task, ROOT, or result output.  Its scheduler gateway accepts
+only the two fixed read-only command lines recorded by readiness.  Accounting
+publication and the terminal event share one exclusive historical recovery
+lock; a crash after publication can only validate the v2 logical/raw Job-ID
+snapshot and append the missing event, without another scheduler read.
 
 ### R2: materialize a successor execution
 

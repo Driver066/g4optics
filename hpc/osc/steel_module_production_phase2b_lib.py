@@ -61,6 +61,14 @@ HISTORICAL_CLOSED_EXECUTION_ID = (
 HISTORICAL_CLOSED_EXECUTION_HASH = (
     "d07a32a6afea7d2345b4f4ca45996fd88dde93a7cf8f9d875e0ba0e47e52cf7b"
 )
+HISTORICAL_CLOSED_ATTEMPT_ID = "20260718T175107Z-initial"
+HISTORICAL_CLOSED_INTENT_SHA256 = (
+    "1232d0e69302634580b5e6d1ab4d1c725a7d6ede08e4181c717ba71adb494b9d"
+)
+HISTORICAL_CLOSED_JOB_ID = "50532143"
+HISTORICAL_CLOSED_LOCK_DEVICE = 214
+HISTORICAL_CLOSED_LOCK_INODE = 958967
+EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 INTENT_SCHEMA_VERSION = "steel-module-production-attempt-intent-v1"
 EVENT_SCHEMA_VERSION = "steel-module-production-attempt-event-v1"
 ACCOUNTING_SCHEMA_VERSION_V1 = "steel-module-production-terminal-accounting-v1"
@@ -482,6 +490,110 @@ def _validate_inode_bound_v1_lock(lock_path: Path, record: dict[str, Any]) -> No
         raise ValueError("managed execution control-lock inode identity mismatch")
 
 
+def _require_historical_closed_execution_identity(
+    manifest: dict[str, Any]
+) -> dict[str, Any]:
+    if (
+        manifest.get("schema_version") != EXECUTION_SCHEMA_VERSION_V1
+        or manifest.get("test_mode") is not False
+        or manifest.get("execution_id") != HISTORICAL_CLOSED_EXECUTION_ID
+        or manifest.get("execution_hash") != HISTORICAL_CLOSED_EXECUTION_HASH
+        or manifest.get("execution_hash")
+        != _semantic_hash(manifest, "execution_hash")
+    ):
+        raise ValueError("historical recovery lock is limited to the closed execution")
+    record = require_dict(require_dict(manifest, "artifacts"), "control_lock")
+    if (
+        set(record)
+        != {"path", "device", "inode", "mode", "size_bytes", "sha256"}
+        or record.get("path") != ".control.lock"
+        or record.get("device") != HISTORICAL_CLOSED_LOCK_DEVICE
+        or record.get("inode") != HISTORICAL_CLOSED_LOCK_INODE
+        or record.get("mode") != 0o600
+        or record.get("size_bytes") != 0
+        or record.get("sha256") != EMPTY_SHA256
+    ):
+        raise ValueError("historical recovery control-lock record mismatch")
+    return record
+
+
+def _validate_historical_recovery_lock_stat(
+    value: os.stat_result, record: dict[str, Any]
+) -> None:
+    if not stat.S_ISREG(value.st_mode):
+        raise ValueError("historical recovery control lock is not a regular file")
+    if value.st_nlink != 1:
+        raise ValueError("historical recovery control-lock link-count mismatch")
+    if value.st_mode & 0o777 != record["mode"]:
+        raise ValueError("historical recovery control-lock mode mismatch")
+    if value.st_size != record["size_bytes"]:
+        raise ValueError("historical recovery control-lock size mismatch")
+
+
+@contextmanager
+def _opened_historical_recovery_lock(
+    lock_path: Path,
+    record: dict[str, Any],
+    *,
+    operation: int,
+) -> Iterator[None]:
+    """Lock the exact closed v1 companion without a cross-node inode claim."""
+
+    before_path = _safe_lock_lstat(lock_path)
+    _validate_historical_recovery_lock_stat(before_path, record)
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise ValueError("historical recovery control lock requires O_NOFOLLOW")
+    try:
+        descriptor = os.open(
+            lock_path,
+            os.O_RDWR | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+        )
+    except OSError as exc:
+        raise ValueError("historical recovery control lock cannot be opened") from exc
+    locked = False
+    try:
+        before_fd = os.fstat(descriptor)
+        if not _same_node_file_identity(before_path, before_fd):
+            raise ValueError("historical recovery control lock changed while opening")
+        _validate_historical_recovery_lock_stat(before_fd, record)
+        content = _read_descriptor_bytes(descriptor, before_fd.st_size)
+        if content or sha256_bytes(content) != record["sha256"]:
+            raise ValueError("historical recovery control-lock content mismatch")
+        fcntl.flock(descriptor, operation)
+        locked = True
+        after_fd = os.fstat(descriptor)
+        after_path = _safe_lock_lstat(lock_path)
+        if (
+            not _same_node_file_identity(before_fd, after_fd)
+            or not _same_node_file_identity(after_fd, after_path)
+        ):
+            raise ValueError("historical recovery control lock changed while acquiring")
+        _validate_historical_recovery_lock_stat(after_fd, record)
+        _validate_historical_recovery_lock_stat(after_path, record)
+        content = _read_descriptor_bytes(descriptor, after_fd.st_size)
+        if content or sha256_bytes(content) != record["sha256"]:
+            raise ValueError("historical recovery control-lock content mismatch")
+        try:
+            yield
+        finally:
+            final_fd = os.fstat(descriptor)
+            final_path = _safe_lock_lstat(lock_path)
+            if (
+                not _same_node_file_identity(after_fd, final_fd)
+                or not _same_node_file_identity(final_fd, final_path)
+            ):
+                raise ValueError("historical recovery control lock changed while held")
+            _validate_historical_recovery_lock_stat(final_fd, record)
+            _validate_historical_recovery_lock_stat(final_path, record)
+            content = _read_descriptor_bytes(descriptor, final_fd.st_size)
+            if content or sha256_bytes(content) != record["sha256"]:
+                raise ValueError("historical recovery control-lock content mismatch")
+    finally:
+        if locked:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+
+
 @contextmanager
 def _opened_inode_bound_v1_lock(
     lock_path: Path, record: dict[str, Any]
@@ -554,6 +666,27 @@ def validate_execution_control_lock(
         return
     with _opened_portable_control_lock(lock_path, record, operation=fcntl.LOCK_SH):
         pass
+
+
+def validate_historical_recovery_control_lock(
+    directory: Path, manifest: dict[str, Any]
+) -> None:
+    record = _require_historical_closed_execution_identity(manifest)
+    with _opened_historical_recovery_lock(
+        directory / ".control.lock", record, operation=fcntl.LOCK_SH
+    ):
+        pass
+
+
+@contextmanager
+def historical_recovery_execution_lock(
+    execution: ManagedExecution,
+) -> Iterator[None]:
+    record = _require_historical_closed_execution_identity(execution.manifest)
+    with _opened_historical_recovery_lock(
+        execution.directory / ".control.lock", record, operation=fcntl.LOCK_EX
+    ):
+        yield
 
 
 @contextmanager
@@ -1278,7 +1411,19 @@ def load_execution_companion(
     verify_runtime: bool = True,
     verify_phase2a_control_plane: bool = True,
     allow_staging: bool = False,
+    _allow_historical_closed_recovery: bool = False,
 ) -> ManagedExecution:
+    if _allow_historical_closed_recovery and (
+        repo_root is None
+        or allow_test_mode
+        or require_readiness
+        or not verify_runtime
+        or not verify_phase2a_control_plane
+        or allow_staging
+    ):
+        raise ValueError(
+            "historical closed recovery requires the full formal validation mode"
+        )
     requested = execution_dir.expanduser()
     if requested.is_symlink():
         raise ValueError("execution companion must not be a symlink")
@@ -1372,7 +1517,10 @@ def load_execution_companion(
         raise ValueError("source archive manifest mismatch")
     _verify_source_record(directory, require_dict(sources, "simulation"))
     _verify_source_record(directory, require_dict(sources, "control_plane"))
-    validate_execution_control_lock(directory, manifest)
+    if _allow_historical_closed_recovery:
+        validate_historical_recovery_control_lock(directory, manifest)
+    else:
+        validate_execution_control_lock(directory, manifest)
     recorded_pilot = require_dict(manifest, "sealed_pilot")
     current_pilot = _sealed_pilot_identity(
         Path(require_string(recorded_pilot, "directory")), allow_fixture=test_mode
@@ -1414,6 +1562,28 @@ def load_execution_companion(
     elif require_readiness:
         raise ValueError("test-mode execution can never satisfy formal readiness")
     return execution
+
+
+def load_historical_closed_execution_for_recovery(
+    execution_dir: Path, *, repo_root: Path
+) -> ManagedExecution:
+    """Load only the exact closed v1 companion for read/seal recovery.
+
+    This is deliberately separate from the ordinary loader interface.  It
+    preserves every formal identity and runtime check, relaxing only the
+    historical cross-node device/inode comparison for ``.control.lock``.
+    """
+
+    return load_execution_companion(
+        execution_dir,
+        repo_root=repo_root,
+        allow_test_mode=False,
+        require_readiness=False,
+        verify_runtime=True,
+        verify_phase2a_control_plane=True,
+        allow_staging=False,
+        _allow_historical_closed_recovery=True,
+    )
 
 
 def execution_task_by_id(execution: ManagedExecution) -> dict[str, CampaignTask]:
@@ -2070,18 +2240,24 @@ __all__ = [
     "CONTROL_LOCK_PROTOCOL_V1", "CONTROL_LOCK_PROTOCOL_V2",
     "EXECUTION_SCHEMA_VERSION", "EXECUTION_SCHEMA_VERSION_V1",
     "EXECUTION_SCHEMA_VERSION_V2", "FORMAL_ACCOUNT", "FORMAL_EXECUTION_NAME",
+    "HISTORICAL_CLOSED_ATTEMPT_ID", "HISTORICAL_CLOSED_EXECUTION_HASH",
+    "HISTORICAL_CLOSED_EXECUTION_ID", "HISTORICAL_CLOSED_INTENT_SHA256",
+    "HISTORICAL_CLOSED_JOB_ID", "HISTORICAL_CLOSED_LOCK_DEVICE",
+    "HISTORICAL_CLOSED_LOCK_INODE",
     "INTENT_SCHEMA_VERSION", "ManagedExecution", "READINESS_CRITICAL_ARTIFACTS",
     "READINESS_LOCK_RELATIVE", "READINESS_LOCK_SCHEMA_VERSION",
     "TASK_RESULT_SCHEMA_VERSION", "append_attempt_event", "attempt_state",
     "canonical_execution_directory", "execution_lock", "execution_task_by_id",
-    "fsync_directory", "fsync_tree",
+    "fsync_directory", "fsync_tree", "historical_recovery_execution_lock",
     "list_attempt_ids", "load_attempt_intent", "load_execution_companion",
+    "load_historical_closed_execution_for_recovery",
     "load_frozen_accounting", "load_managed_task_result", "load_phase2a_lock",
     "materialize_execution_companion", "prepare_attempt_intent",
     "require_production_execution_open", "read_attempt_events",
     "require_pristine_readiness_workspace", "selected_task_ids", "source_tree_hash",
     "utc_now", "verify_checksum_manifest", "verify_execution_static_checksums",
-    "validate_execution_control_lock", "verify_readiness_protected_artifacts",
+    "validate_execution_control_lock", "validate_historical_recovery_control_lock",
+    "verify_readiness_protected_artifacts",
     "write_exclusive_bytes",
     "write_exclusive_json",
 ]

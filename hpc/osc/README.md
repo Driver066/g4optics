@@ -533,6 +533,10 @@ uses the intent's unique Slurm job name, so a terminal job disappearing from
 The historical first attempt `20260718T175107Z-initial`, job `50532143`,
 failed before Apptainer or Geant4 because the login-node inode identity was not
 portable to compute nodes. Do not create another intent under that execution.
+OSC later demonstrated that the same numeric inode identity is not even stable
+across login nodes. The historical status/sealing path therefore relaxes only
+that cross-node number for this exact closed execution; normal workers and all
+submission mutations remain strict and closed.
 After pulling the recovery implementation, preview and explicitly seal only
 that incident with:
 
@@ -546,8 +550,10 @@ python3 hpc/osc/seal_steel_module_production_phase2b_incident.py \
 The preview performs scheduler reads but no writes. The seal freezes the exact
 32 `FAILED/1:0` rows, appends the terminal event, and publishes a
 content-addressed incident bundle. Neither form can invoke `sbatch` or
-`scontrol`. Successor execution materialization and retry remain separate,
-later gates.
+`scontrol`. Before the two allowlisted read-only scheduler calls, the tool
+validates the readiness-bound companion bytes, unique historical lineage, all
+32 failure logs, and the absence of simulation output. Successor execution
+materialization and retry remain separate, later gates.
 
 After all 32 tasks have one valid selected success, the offline downstream
 sequence is:

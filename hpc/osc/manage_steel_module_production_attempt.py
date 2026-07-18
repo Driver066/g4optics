@@ -31,6 +31,9 @@ from steel_module_production_phase2b_lib import (
     ACCOUNTING_SCHEMA_VERSION,
     ACTOR_RE,
     FORMAL_ACCOUNT,
+    HISTORICAL_CLOSED_ATTEMPT_ID,
+    HISTORICAL_CLOSED_INTENT_SHA256,
+    HISTORICAL_CLOSED_JOB_ID,
     READINESS_LOCK_RELATIVE,
     TERMINAL_FAILURE_STATES,
     ManagedExecution,
@@ -41,12 +44,14 @@ from steel_module_production_phase2b_lib import (
     list_attempt_ids,
     load_attempt_intent,
     load_execution_companion,
+    load_historical_closed_execution_for_recovery,
     load_frozen_accounting,
     load_phase2a_lock,
     prepare_attempt_intent,
     require_production_execution_open,
     fsync_tree,
     fsync_directory,
+    historical_recovery_execution_lock,
     utc_now,
 )
 
@@ -90,6 +95,17 @@ def _formal_execution(repo_root: Path, *, readiness: bool) -> ManagedExecution:
     execution_dir = child.parent / "steel-module-production-bc-s1-execution"
     return load_execution_companion(
         execution_dir, repo_root=repo_root, require_readiness=readiness
+    )
+
+
+def _historical_status_execution(repo_root: Path) -> ManagedExecution:
+    """Read the one closed v1 companion without granting mutation authority."""
+
+    _, phase2a = load_phase2a_lock(repo_root)
+    child = Path(phase2a["canonical_directory"])
+    execution_dir = child.parent / "steel-module-production-bc-s1-execution"
+    return load_historical_closed_execution_for_recovery(
+        execution_dir, repo_root=repo_root
     )
 
 
@@ -432,6 +448,7 @@ def reconcile_attempt(
     runner: CommandRunner = _run,
     now_utc: str | None = None,
 ) -> str:
+    require_production_execution_open(execution)
     intent = load_attempt_intent(execution, attempt_id)
     _verify_intent_hash(intent, intent_sha256)
     state = attempt_state(execution, attempt_id)
@@ -878,92 +895,148 @@ def freeze_terminal_accounting(
     intent_sha256: str,
     actor: str,
     runner: CommandRunner = _run,
+    historical_incident_recovery: bool = False,
 ) -> dict[str, Any]:
     if not isinstance(actor, str) or not ACTOR_RE.fullmatch(actor):
         raise ValueError("terminal accounting actor identity is invalid")
+    if not historical_incident_recovery:
+        require_production_execution_open(execution)
     intent = load_attempt_intent(execution, attempt_id)
     _verify_intent_hash(intent, intent_sha256)
     state = attempt_state(execution, attempt_id)
-    if state.status != "released-active" or state.job_id is None:
+    if (
+        state.status not in {"released-active", "terminal-accounting-frozen"}
+        or state.job_id is None
+    ):
         raise ValueError("terminal accounting requires one released attempt")
     job_id = state.job_id
-    target = execution.directory / "attempts" / attempt_id / "accounting"
-    if target.exists() or target.is_symlink():
-        if target.is_symlink():
-            raise ValueError("terminal accounting path is an unsafe symlink")
-        recovered = load_frozen_accounting(
-            execution, attempt_id, require_event_binding=False
-        )
-        task_count = intent["selected"]["task_count"]
-        expected_indices = {str(index) for index in range(1, task_count + 1)}
+    if historical_incident_recovery:
         if (
-            recovered.get("execution_id") != execution.execution_id
-            or recovered.get("execution_hash") != execution.execution_hash
-            or recovered.get("job_id") != job_id
-            or recovered.get("selected_task_count") != task_count
-            or recovered.get("terminal_task_count") != task_count
-            or recovered.get("accepted_terminal") is not True
-            or set(require_dict(recovered, "task_states")) != expected_indices
-            or set(require_dict(recovered, "task_exit_codes")) != expected_indices
+            attempt_id != HISTORICAL_CLOSED_ATTEMPT_ID
+            or intent_sha256 != HISTORICAL_CLOSED_INTENT_SHA256
+            or job_id != HISTORICAL_CLOSED_JOB_ID
         ):
-            raise ValueError("existing terminal accounting cannot be recovered")
-        validate_terminal_accounting_snapshot(
+            raise ValueError("historical incident accounting authority mismatch")
+
+    def accounting_lock() -> Any:
+        if historical_incident_recovery:
+            return historical_recovery_execution_lock(execution)
+        return execution_lock(execution.directory)
+
+    target = execution.directory / "attempts" / attempt_id / "accounting"
+    with accounting_lock():
+        current = attempt_state(execution, attempt_id)
+        if current.job_id != job_id:
+            raise ValueError("attempt job identity changed before terminal accounting")
+        if current.status == "terminal-accounting-frozen":
+            frozen = load_frozen_accounting(execution, attempt_id)
+            if (
+                historical_incident_recovery
+                and frozen.get("schema_version") != ACCOUNTING_SCHEMA_VERSION_V2
+            ):
+                raise ValueError(
+                    "historical incident requires logical/raw JobID accounting v2"
+                )
+            return frozen
+        if current.status != "released-active":
+            raise ValueError("attempt changed before terminal accounting")
+        if target.exists() or target.is_symlink():
+            if target.is_symlink():
+                raise ValueError("terminal accounting path is an unsafe symlink")
+            recovered = load_frozen_accounting(
+                execution, attempt_id, require_event_binding=False
+            )
+            task_count = intent["selected"]["task_count"]
+            expected_indices = {str(index) for index in range(1, task_count + 1)}
+            if (
+                (
+                    historical_incident_recovery
+                    and recovered.get("schema_version")
+                    != ACCOUNTING_SCHEMA_VERSION_V2
+                )
+                or recovered.get("execution_id") != execution.execution_id
+                or recovered.get("execution_hash") != execution.execution_hash
+                or recovered.get("job_id") != job_id
+                or recovered.get("selected_task_count") != task_count
+                or recovered.get("terminal_task_count") != task_count
+                or recovered.get("accepted_terminal") is not True
+                or set(require_dict(recovered, "task_states")) != expected_indices
+                or set(require_dict(recovered, "task_exit_codes")) != expected_indices
+            ):
+                raise ValueError("existing terminal accounting cannot be recovered")
+            validate_terminal_accounting_snapshot(
+                execution,
+                attempt_id=attempt_id,
+                intent_sha256=intent_sha256,
+                job_id=job_id,
+                payload=recovered,
+                sacct_psv=(target / "sacct.psv").read_text(encoding="utf-8"),
+                squeue_psv=(target / "squeue.psv").read_text(encoding="utf-8"),
+            )
+            append_attempt_event(
+                execution, attempt_id, "terminal-accounting-frozen",
+                {
+                    "job_id": job_id,
+                    "accounting_manifest_sha256": sha256_file(
+                        target / "SHA256SUMS"
+                    ),
+                    "all_tasks_completed": recovered.get("all_tasks_completed"),
+                    "recovered_after_publish": True,
+                },
+                actor=actor,
+                lock_held=True,
+            )
+            return recovered
+        snapshot = preview_terminal_accounting(
             execution,
             attempt_id=attempt_id,
             intent_sha256=intent_sha256,
-            job_id=job_id,
-            payload=recovered,
-            sacct_psv=(target / "sacct.psv").read_text(encoding="utf-8"),
-            squeue_psv=(target / "squeue.psv").read_text(encoding="utf-8"),
-        )
-        append_attempt_event(
-            execution, attempt_id, "terminal-accounting-frozen",
-            {
-                "job_id": job_id,
-                "accounting_manifest_sha256": sha256_file(target / "SHA256SUMS"),
-                "all_tasks_completed": recovered.get("all_tasks_completed"),
-                "recovered_after_publish": True,
-            },
             actor=actor,
+            runner=runner,
         )
-        return recovered
-    snapshot = preview_terminal_accounting(
-        execution,
-        attempt_id=attempt_id,
-        intent_sha256=intent_sha256,
-        actor=actor,
-        runner=runner,
-    )
-    payload = require_dict(snapshot, "payload")
-    all_completed = payload["all_tasks_completed"]
-    temp = Path(tempfile.mkdtemp(prefix=".accounting-", dir=target.parent))
-    try:
-        (temp / "sacct.psv").write_text(snapshot["sacct_psv"], encoding="utf-8")
-        (temp / "squeue.psv").write_text(snapshot["squeue_psv"], encoding="utf-8")
-        (temp / "frozen.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-        (temp / "SHA256SUMS").write_text(
-            "".join(
-                f"{sha256_file(temp / name)}  {name}\n"
-                for name in ("frozen.json", "sacct.psv", "squeue.psv")
-            ), encoding="utf-8",
-        )
-        for path in temp.iterdir():
-            path.chmod(0o444)
-        fsync_tree(temp)
-        with execution_lock(execution.directory):
+        payload = require_dict(snapshot, "payload")
+        all_completed = payload["all_tasks_completed"]
+        temp = Path(tempfile.mkdtemp(prefix=".accounting-", dir=target.parent))
+        try:
+            (temp / "sacct.psv").write_text(
+                snapshot["sacct_psv"], encoding="utf-8"
+            )
+            (temp / "squeue.psv").write_text(
+                snapshot["squeue_psv"], encoding="utf-8"
+            )
+            (temp / "frozen.json").write_text(
+                json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+            )
+            (temp / "SHA256SUMS").write_text(
+                "".join(
+                    f"{sha256_file(temp / name)}  {name}\n"
+                    for name in ("frozen.json", "sacct.psv", "squeue.psv")
+                ),
+                encoding="utf-8",
+            )
+            for path in temp.iterdir():
+                path.chmod(0o444)
+            fsync_tree(temp)
             if target.exists() or target.is_symlink():
                 raise ValueError("terminal accounting appeared concurrently")
             os.rename(temp, target)
             fsync_directory(target.parent)
-        append_attempt_event(
-            execution, attempt_id, "terminal-accounting-frozen",
-            {"job_id": job_id, "accounting_manifest_sha256": sha256_file(target / "SHA256SUMS"),
-             "all_tasks_completed": all_completed}, actor=actor,
-        )
-        return payload
-    finally:
-        if temp.exists():
-            shutil.rmtree(temp)
+            append_attempt_event(
+                execution, attempt_id, "terminal-accounting-frozen",
+                {
+                    "job_id": job_id,
+                    "accounting_manifest_sha256": sha256_file(
+                        target / "SHA256SUMS"
+                    ),
+                    "all_tasks_completed": all_completed,
+                },
+                actor=actor,
+                lock_held=True,
+            )
+            return payload
+        finally:
+            if temp.exists():
+                shutil.rmtree(temp)
 
 
 def parse_args() -> argparse.Namespace:
@@ -1011,9 +1084,8 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parents[2]
     try:
         readiness_path = repo_root / READINESS_LOCK_RELATIVE
-        execution = _formal_execution(repo_root, readiness=False)
-        require_manager_command_allowed(execution, args.command)
         if args.command == "status":
+            execution = _historical_status_execution(repo_root)
             print(f"execution_id: {execution.execution_id}")
             print(f"execution_hash: {execution.execution_hash}")
             closed = False
@@ -1030,6 +1102,7 @@ def main() -> int:
             return 0
 
         execution = _formal_execution(repo_root, readiness=True)
+        require_manager_command_allowed(execution, args.command)
         readiness_sha = _readiness_sha(repo_root)
         if args.command == "prepare-intent":
             value = prepare_attempt_intent(
