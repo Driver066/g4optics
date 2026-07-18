@@ -346,6 +346,18 @@ therefore reject both the parent and every child directory. Generate the clean
 OSC evidence object with:
 
 ```bash
+cd ~/projects/g4optics
+source hpc/osc/activate_steel_module_osc.sh
+```
+
+The sourced helper validates the OSC repository, analysis virtual environment,
+sealed pilot, finalized checksums, and Geant4 data directory. It exports
+`REPO`, `WORK`, `CAMPAIGN`, `DATA_ROOT`, and `G4_DATA_ROOT`, activates
+`$WORK/analysis-venv`, and returns to the source repository. Running it as a
+normal executable is intentionally rejected because an executed child process
+cannot activate the parent shell.
+
+```bash
 python3 hpc/osc/generate_steel_module_production_program.py \
   --out-dir /path/to/campaigns/steel-module-production-program \
   --program-seed 20260717 \
