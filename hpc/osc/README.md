@@ -435,6 +435,125 @@ Slurm command; real submission remains blocked until the downstream closure is
 implemented and reviewed. Validate the deterministic no-Slurm contract with
 `python3 hpc/osc/check_steel_module_managed_production.py`.
 
+Phase 2B adds a separate execution companion and the complete managed evidence
+closure without changing the frozen Phase-2A directory. Its exact contract and
+stopping boundary are in
+`docs/decisions/steel-module-production-phase2b-v1.md`. At implementation
+commit C, first activate the existing OSC analysis environment and run:
+
+```bash
+python3 hpc/osc/check_steel_module_campaign_infrastructure.py
+python3 hpc/osc/materialize_steel_module_production_execution.py
+python3 hpc/osc/manage_steel_module_production_attempt.py status
+```
+
+The materializer has no path, program, child, account, or source override. It
+creates only the canonical sibling
+`$WORK/campaigns/steel-module-production-bc-s1-execution`, two read-only source
+archives, one fixed-inode control lock, and immutable static identity files. It
+creates no `campaign.json`, intent, job, ROOT output, or readiness authority.
+
+Still at commit C, collect the no-Slurm OSC readiness evidence into an untracked
+file outside the repository:
+
+```bash
+python3 hpc/osc/generate_steel_module_production_phase2b_readiness.py \
+  --write-proposal "$WORK/evidence/steel-module-phase2b-readiness-proposal.json"
+```
+
+This reruns the integrated checker, requires NumPy/uproot/matplotlib, exercises
+cross-process locking and atomic publication on the campaign filesystem, checks
+that all scheduler commands exist while a sentinel blocks every scheduler
+executable during the checker, and requires `intents/`, `attempts/`, and
+`finalized/` to be exactly empty. The proposal is deliberately
+non-authoritative: it records `managed_submission_ready=false` and cannot write
+inside the repository. After human review, a separate readiness-lock commit R
+may add only
+`hpc/osc/configurations/steel-module-production-phase2b-v1.lock.json`, changing
+the reviewed status to `accepted-formal-phase-2b-ready` and readiness to true
+while retaining `automatic_submission=false`, zero intents, and zero job IDs.
+After pulling R on OSC, validate it with:
+
+```bash
+python3 hpc/osc/validate_steel_module_production_phase2b_readiness.py
+```
+
+The validator requires the fixed complete critical-artifact set and compares
+every digest across the reviewed lock, the clean R checkout, and the read-only
+Implementation-C control archive. It also rechecks the exact Phase-2A lock
+digest and the empty mutable roots; the readiness lock cannot choose a smaller
+protected set.
+
+Readiness also starts an isolated Python process directly from the read-only
+control archive (which intentionally has no `.git`) and loads the formal
+execution/runtime through the relocated-lock path. This probe runs neither the
+worker simulation nor Geant4 and remains inside the scheduler sentinel.
+
+The first real intent is outside the Phase-2B readiness rollout. When that
+separate gate is authorized, the two-step interface is:
+
+```bash
+ATTEMPT_ID=20260718T120000Z-initial
+
+python3 hpc/osc/manage_steel_module_production_attempt.py prepare-intent \
+  --attempt-id "$ATTEMPT_ID" --mode initial --check-only
+python3 hpc/osc/manage_steel_module_production_attempt.py prepare-intent \
+  --attempt-id "$ATTEMPT_ID" --mode initial --write-intent
+
+# Copy the full printed intent SHA-256 into INTENT_SHA256 and review it first.
+python3 hpc/osc/manage_steel_module_production_attempt.py submit-intent \
+  --attempt-id "$ATTEMPT_ID" --intent-sha256 "$INTENT_SHA256" --check-only
+
+# This is the only form that may contact Slurm; do not run it during readiness.
+python3 hpc/osc/manage_steel_module_production_attempt.py submit-intent \
+  --attempt-id "$ATTEMPT_ID" --intent-sha256 "$INTENT_SHA256" --submit
+```
+
+Submission uses one held array and verifies its account, immutable wrapper,
+working directory, output pattern, and exact array shape before release. Any
+uncertain submission or release is quarantined and must be reconciled against
+that same intent/job; it never triggers another `sbatch`. Freeze terminal
+accounting while OSC still retains it:
+
+```bash
+python3 hpc/osc/manage_steel_module_production_attempt.py freeze-accounting \
+  --attempt-id "$ATTEMPT_ID" --intent-sha256 "$INTENT_SHA256"
+```
+
+After all 32 tasks have one valid selected success, the offline downstream
+sequence is:
+
+```bash
+EXECUTION="$WORK/campaigns/steel-module-production-bc-s1-execution"
+
+python3 hpc/osc/finalize_steel_module_managed_child.py \
+  --execution-dir "$EXECUTION" --check-only
+python3 hpc/osc/finalize_steel_module_managed_child.py \
+  --execution-dir "$EXECUTION"
+python3 hpc/osc/build_steel_module_production_checkpoint.py \
+  --execution-dir "$EXECUTION" --state BC-ONLY-S1 --check-only
+python3 hpc/osc/build_steel_module_production_checkpoint.py \
+  --execution-dir "$EXECUTION" --state BC-ONLY-S1
+
+# Copy the content-addressed path printed by the builder, for example:
+CHECKPOINT="$WORK/campaigns/steel-module-production-checkpoints/bc-only-s1-<hash12>"
+
+python3 hpc/osc/analyze_steel_module_production_checkpoint.py \
+  --checkpoint-dir "$CHECKPOINT"
+python3 hpc/osc/render_steel_module_production_review.py \
+  --analysis-dir "${CHECKPOINT}-analysis"
+```
+
+The analyzer uses only the new 4,000 events per endpoint for its observed-net
+`24/4` estimate. It recomputes the sealed pilot only for reconciliation and a
+precision/tail baseline, performs 10,000 PCG64 event bootstraps and exactly 32
+leave-one-block-out evaluations, and emits numeric eligibility rather than a
+decision. The offline HTML/PDF review is mandatory. A human decision uses
+`record_steel_module_progression.py --check-only` first and an explicit
+`--record` second; adverse or indeterminate tail review permits only
+`pause-review`. No analyzer, renderer, or recorder modifies a child or invokes
+Slurm.
+
 The production analyzer must keep pooled scintillation production equally
 weighted across the three layout strata even though their final event counts
 differ. Bootstrap within each stratum at its available sample size and average

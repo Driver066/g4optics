@@ -905,6 +905,7 @@ def load_managed_production_child(
     require_current_control_plane: bool = False,
     allow_test_mode: bool = False,
     _allow_materialization_staging: bool = False,
+    _allow_formal_lock_relocation: bool = False,
 ) -> ManagedProductionChild:
     requested_directory = campaign_dir.expanduser()
     if requested_directory.is_symlink():
@@ -1002,6 +1003,12 @@ def load_managed_production_child(
     if not test_mode:
         if repo_root is None:
             raise ValueError("formal managed child validation requires repo_root")
+        if _allow_formal_lock_relocation and (
+            verify_control_plane or require_current_control_plane
+        ):
+            raise ValueError(
+                "formal-lock relocation is only valid for a frozen control source"
+            )
         _validate_formal_child_location(
             directory,
             program,
@@ -1009,7 +1016,10 @@ def load_managed_production_child(
         )
         lock_path, lock = _formal_lock(repo_root)
         _validate_program_against_lock(program, lock_path, lock)
-        if program_record.get("formal_lock_path") != str(lock_path):
+        if (
+            not _allow_formal_lock_relocation
+            and program_record.get("formal_lock_path") != str(lock_path)
+        ):
             raise ValueError("managed child formal lock path mismatch")
         if program_record.get("formal_lock_sha256") != sha256_file(lock_path):
             raise ValueError("managed child formal lock digest mismatch")

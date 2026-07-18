@@ -2,8 +2,9 @@
 
 Status: formal Phase-1 production program frozen and runtime-verified; formal
 Phase-2A managed `BC-S1` plan materialized and read-only verified on OSC;
-non-submittable; managed submission and downstream evidence tooling remain
-pending
+non-submittable; Phase-2B managed submission and downstream evidence tooling
+implemented for implementation-commit validation, with the formal OSC
+readiness lock still pending
 
 Study preset: `steel-module-scan-v1`
 
@@ -189,9 +190,15 @@ allowlist. The dedicated wrapper is hard-locked to `--check-only` and exposes
 no Slurm, resume, retry, account, or frozen-source option.
 
 Formal OSC child materialization and read-only verification are complete, but
-they do not change the authorization boundary. A managed attempt contract,
-whole-child finalization and event/seed audit, `BC-ONLY-S1` cumulative
-checkpoint and analyzer, static human review, append-only progression
-decisions, and a full non-overwriting dry run must still be implemented and
-reviewed before any production Slurm submission. `BC-S1` remains unsubmitted;
-`FIXED` and `BC-S2...BC-S4` remain locked.
+they do not change the authorization boundary. The Phase-2B implementation now
+provides the managed attempt contract, whole-child finalization and event/seed
+audit, exact `BC-ONLY-S1` checkpoint and analyzer, static human review,
+append-only progression decisions, adversarial fake-scheduler tests, and a
+separate readiness-evidence proposal. Its detailed contract is
+`docs/decisions/steel-module-production-phase2b-v1.md`.
+
+This implementation must still be committed as implementation commit C,
+validated on OSC without scheduler contact, and followed by a separately
+reviewed readiness-lock commit R. Until that lock is accepted, `BC-S1` remains
+unsubmitted and cannot create a formal intent; `FIXED` and
+`BC-S2...BC-S4` remain locked.

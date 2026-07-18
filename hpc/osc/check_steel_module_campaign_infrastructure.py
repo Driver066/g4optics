@@ -937,11 +937,24 @@ def main() -> int:
         [sys.executable, "hpc/osc/check_steel_module_analysis_v2.py"],
         cwd=repo_root,
     )
+    run(
+        [sys.executable, "hpc/osc/check_steel_module_production_phase2b_control.py"],
+        cwd=repo_root,
+    )
+    run(
+        [sys.executable, "hpc/osc/check_steel_module_production_finalization.py"],
+        cwd=repo_root,
+    )
+    run(
+        [sys.executable, "hpc/osc/check_steel_module_production_analysis.py"],
+        cwd=repo_root,
+    )
 
     print(
         "steel-module campaign infrastructure: PASS "
         "(18-task smoke, 120-task frozen pilot, 914-task production program, "
-        "managed BC-S1 Phase-2A, finalizer, v1/v2 analyzers)"
+        "managed BC-S1 Phase-2A/2B, whole-child finalizer, checkpoint, "
+        "v1/v2/production analyzers, offline review and progression recorder)"
     )
     return 0
 
