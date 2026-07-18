@@ -1,13 +1,15 @@
-# Steel Module Production Program — Formal Phase-1 Freeze
+# Steel Module Production Program — Phase-1 Freeze and BC-S1 Phase-2A Evidence
 
-Status: formal Phase-1 production program frozen and runtime-verified;
-non-submittable; Phase-2A managed `BC-S1` materialization and read-only gate
-implemented locally; OSC materialization, submission, and downstream evidence
-tooling remain pending
+Status: formal Phase-1 production program frozen and runtime-verified; formal
+Phase-2A managed `BC-S1` plan materialized and read-only verified on OSC;
+non-submittable; managed submission and downstream evidence tooling remain
+pending
 
 Study preset: `steel-module-scan-v1`
 
-Frozen and verified: 2026-07-17
+Phase-1 frozen and verified: 2026-07-17
+
+Phase-2A materialized and verified: 2026-07-18
 
 ## Purpose and authority
 
@@ -55,7 +57,7 @@ hashes have different roles and must not be substituted for one another.
 | Child | Tasks | Events | Current authorization state |
 | --- | ---: | ---: | --- |
 | `FIXED` | `592` | `148,000` | locked |
-| `BC-S1` | `32` | `8,000` | first child named by the graph; not materialized or submittable |
+| `BC-S1` | `32` | `8,000` | formally materialized and check-only verified; not submittable |
 | `BC-S2` | `48` | `12,000` | locked |
 | `BC-S3` | `80` | `20,000` | locked |
 | `BC-S4` | `162` | `40,500` | locked; `continue` is forbidden at this ceiling |
@@ -116,7 +118,7 @@ production program.
 The OSC checkout passed the complete infrastructure gate:
 
 ```text
-steel-module campaign infrastructure: PASS (18-task smoke, 120-task frozen pilot, 914-task production program, finalizer, v1/v2 analyzers)
+steel-module campaign infrastructure: PASS (18-task smoke, 120-task frozen pilot, 914-task production program, managed BC-S1 Phase-2A, finalizer, v1/v2 analyzers)
 ```
 
 The formal generator reported all `914` tasks, `228,500` events, the exact
@@ -127,9 +129,43 @@ program validator was then run with `--verify-runtime-artifacts` and reported:
 steel-module production program: PASS
 ```
 
-Generation and validation did not run Geant4, create ROOT events, materialize
-a campaign, create a submission attempt, contact Slurm, or assign a Slurm job
-ID.
+Phase-1 generation and validation did not run Geant4, create ROOT events,
+materialize a campaign, create a submission attempt, contact Slurm, or assign a
+Slurm job ID. The later Phase-2A operation materialized only the managed plan
+described below; it still created no ordinary campaign or submission attempt.
+
+## Formal Phase-2A BC-S1 materialization
+
+The machine-readable evidence lock is
+`hpc/osc/configurations/steel-module-production-bc-s1-phase2a-v1.lock.json`.
+It anchors the exact OSC directory and must be the starting identity for any
+future managed-attempt implementation:
+
+`/users/PAS2524/anolddriver66/g4optics-rn/campaigns/steel-module-production-bc-s1`
+
+| Item | Frozen value |
+| --- | --- |
+| Phase | `Phase-2A` |
+| Child | `BC-S1` |
+| Reserved campaign ID | `sm-v1-production-bc-s1-ad01d98af612` |
+| Tasks / events | `32 / 8,000` |
+| Child plan hash | `1d1bf8a24d7a3e23cca745b718d53e79f8ec6e178b3df44980d75e01f1c609bb` |
+| Binding semantic hash | `14a3764457247c981145bd7277b2abb78b4b5038c1c9a40aa7354d3275d993a0` |
+| `managed_child.json` SHA-256 | `4c4b6dcbabe82962d90bfd4140cabebc9302d1571b823a53cd50b879294b8a00` |
+| `program_binding.json` SHA-256 | `2607b958018e8a32086b9ebe65e424edc5e388702ceac881e5c9d70503526269` |
+| Root `SHA256SUMS` SHA-256 | `7fee31135156a6f288f34ed990a87ea19f31d6a39bbde24dd7efe5e6dfcaf47b` |
+| Control-plane commit | `4a07a40c43849356959dde60bce3e7b3ef025495` |
+| Control-plane tree | `753cb27dba1df1f84a283baa07b8c614c8e5d913` |
+| Checkout | clean |
+| Accepted statistical evidence | `true` for plan identity and provenance |
+| Submittable | `false` |
+
+The formal materializer and dedicated `--check-only` validator both passed.
+The root checksum verification returned exit code `0`. No `campaign.json`,
+submission journal, source archive, Slurm command, ROOT event, or job ID was
+created. The semantic binding hash and the three byte-level file digests have
+different roles and must all remain unchanged. The OSC directory is now frozen
+and must not be edited or rematerialized.
 
 ## Execution boundary and next gate
 
@@ -152,9 +188,10 @@ The generic submitter is also restricted to the known non-production stage
 allowlist. The dedicated wrapper is hard-locked to `--check-only` and exposes
 no Slurm, resume, retry, account, or frozen-source option.
 
-This local implementation does not change the authorization boundary. Formal
-OSC child materialization and read-only verification are the next operational
-gate. Whole-child finalization, cumulative analysis, static human review,
-append-only progression decisions, and a managed attempt contract must still
-be implemented and dry-run validated before any production Slurm submission.
+Formal OSC child materialization and read-only verification are complete, but
+they do not change the authorization boundary. A managed attempt contract,
+whole-child finalization and event/seed audit, `BC-ONLY-S1` cumulative
+checkpoint and analyzer, static human review, append-only progression
+decisions, and a full non-overwriting dry run must still be implemented and
+reviewed before any production Slurm submission. `BC-S1` remains unsubmitted;
 `FIXED` and `BC-S2...BC-S4` remain locked.
