@@ -331,12 +331,14 @@ def check_candidate_selection(root: Path) -> None:
 
     accounting = root / "sacct.psv"
     accounting.write_text(
-        "12345_1|COMPLETED|0:0|9||\n"
+        "12345_1|COMPLETED|0:0|9|||\n"
         "12345_1.batch|COMPLETED|0:0|9|180000K|0\n",
         encoding="utf-8",
     )
     rows = finalizer._accounting_rows(accounting)
-    assert rows[0][:3] == ["12345_1", "COMPLETED", "0:0"]
+    assert rows[0]["JobIDRaw"] == "12345_1"
+    assert rows[0]["State"] == "COMPLETED"
+    assert rows[0]["ExitCode"] == "0:0"
 
 
 def check_recursive_tamper(checkpoint_dir: Path, scratch: Path) -> None:

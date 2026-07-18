@@ -1,8 +1,15 @@
 # Steel Module Production Phase-2B Managed Execution Closure
 
-Status: implementation complete and locally regression-tested; implementation
-commit C and formal OSC readiness evidence remain to be frozen; readiness lock,
-formal intent, and real BC-S1 submission remain absent
+Historical status at the original implementation-C checkpoint: implementation
+complete and locally regression-tested; readiness evidence, formal intent, and
+real submission were then still absent.
+
+Postscript: implementation C and readiness R were subsequently frozen, and
+the first real attempt exposed a non-portable cross-node inode assumption
+before Geant4 started. This historical v1 contract is not retroactively
+rewritten with the recovery behavior. The additive incident and successor
+authority is documented in
+`docs/decisions/steel-module-production-phase2b-recovery-v1.md`.
 
 Study preset: `steel-module-scan-v1`
 

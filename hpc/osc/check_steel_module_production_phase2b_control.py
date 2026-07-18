@@ -13,15 +13,33 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, Callable
+from unittest import mock
 
+import steel_module_production_phase2b_lib as phase2b_lib
 from check_steel_module_managed_production import make_fixture
+from finalize_steel_module_managed_child import _successful_array_indexes
 from manage_steel_module_production_attempt import (
     freeze_terminal_accounting,
     reconcile_attempt,
+    require_manager_command_allowed,
     submit_intent,
+    validate_terminal_accounting_snapshot,
+)
+from seal_steel_module_production_phase2b_incident import (
+    EXPECTED_FAILURE_LINE,
+    _existing_incident,
+    collect_incident_evidence,
+    publish_incident_bundle,
+    validate_incident_bundle,
 )
 from steel_module_campaign_lib import sha256_file
 from steel_module_production_phase2b_lib import (
+    CONTROL_LOCK_PROTOCOL_V1,
+    CONTROL_LOCK_PROTOCOL_V2,
+    ACCOUNTING_SCHEMA_VERSION_V1,
+    EXECUTION_SCHEMA_VERSION_V1,
+    EXECUTION_SCHEMA_VERSION_V2,
     READINESS_CRITICAL_ARTIFACTS,
     append_attempt_event,
     attempt_state,
@@ -32,6 +50,7 @@ from steel_module_production_phase2b_lib import (
     prepare_attempt_intent,
     read_attempt_events,
     require_pristine_readiness_workspace,
+    require_production_execution_open,
     selected_task_ids,
     verify_readiness_protected_artifacts,
 )
@@ -44,6 +63,7 @@ class FakeSlurm:
         self.mode = mode
         self.calls: list[tuple[str, ...]] = []
         self.job_id = "9001"
+        self.accounting_query_seen = False
 
     def _intent(self) -> dict[str, object]:
         return json.loads(
@@ -55,12 +75,46 @@ class FakeSlurm:
         scheduler = intent["scheduler"]
         wrapper = self.execution.directory / "intents" / self.attempt_id / "job-wrapper.sh"
         array = "31" if self.mode == "bad-array" else scheduler["array_spec"].split("-", 1)[1]
+        account = "pas2524" if self.mode == "lowercase-account" else (
+            "DIFFERENT" if self.mode == "wrong-account" else "PAS2524"
+        )
         return (
             f"JobId={self.job_id}_[1-{array}] ArrayJobId={self.job_id} "
-            f"ArrayTaskId=1-{array} Account=PAS2524 JobName={scheduler['job_name']} "
+            f"ArrayTaskId=1-{array} Account={account} JobName={scheduler['job_name']} "
             f"JobState={state} Reason={reason} Requeue=0 Command={wrapper} "
             f"WorkDir={self.execution.directory} StdOut={scheduler['output_pattern']}\n"
         )
+
+    def _array_accounting_rows(self, *, include_job_name: bool) -> str:
+        state = "CANCELLED by 1234" if self.mode == "cancelled-accounting" else "COMPLETED"
+        exit_code = "0:15" if self.mode == "cancelled-accounting" else "0:0"
+        if self.mode == "all-failed-accounting":
+            state, exit_code = "FAILED", "1:0"
+        token = self._intent()["scheduler"]["job_name"]
+        rows = []
+        for index in range(1, 33):
+            if self.mode == "missing-accounting" and index == 17:
+                continue
+            # Reproduce OSC: JobID is the logical array identity, whereas
+            # JobIDRaw is a numeric allocation identity.  Task 32 may reuse
+            # the parent number as its raw ID without being a parent row.
+            raw_id = self.job_id if index == 32 else str(9100 + index)
+            values = [f"{self.job_id}_{index}", raw_id]
+            if include_job_name:
+                values.append(token)
+            values.extend([state, exit_code])
+            if not include_job_name:
+                values.extend(["10", "100K", "200K"])
+            rows.append("|".join(values) + "|\n")
+        if self.mode == "duplicate-accounting":
+            values = [f"{self.job_id}_1", "9999"]
+            if include_job_name:
+                values.append(token)
+            values.extend(["COMPLETED", "0:0"])
+            if not include_job_name:
+                values.extend(["10", "100K", "200K"])
+            rows.append("|".join(values) + "|\n")
+        return "".join(rows)
 
     def __call__(self, command: list[str], *, cwd: Path, timeout: int) -> subprocess.CompletedProcess[str]:
         self.calls.append(tuple(command))
@@ -94,7 +148,9 @@ class FakeSlurm:
         if name == "squeue" and "--name" in command:
             intent = self._intent()
             token = intent["scheduler"]["job_name"]
-            if self.mode == "multi":
+            if self.accounting_query_seen:
+                text = ""
+            elif self.mode == "multi":
                 text = f"9001|{token}|1-32|PENDING|JobHeldUser\n9002|{token}|1-32|PENDING|JobHeldUser\n"
             elif self.mode in {"zero", "timeout"}:
                 text = ""
@@ -103,24 +159,17 @@ class FakeSlurm:
             return subprocess.CompletedProcess(command, 0, text, "")
         if name == "sacct" and "--name" in command:
             if self.mode == "scontrol-missing-terminal":
-                token = self._intent()["scheduler"]["job_name"]
                 return subprocess.CompletedProcess(
-                    command, 0,
-                    f"{self.job_id}|{token}|COMPLETED|0:0\n", "",
+                    command, 0, self._array_accounting_rows(include_job_name=True), "",
                 )
             return subprocess.CompletedProcess(command, 0, "", "")
         if name == "squeue":
             return subprocess.CompletedProcess(command, 0, "", "")
         if name == "sacct":
-            state = "CANCELLED by 1234" if self.mode == "cancelled-accounting" else "COMPLETED"
-            exit_code = "0:15" if self.mode == "cancelled-accounting" else "0:0"
-            rows = f"{self.job_id}|{state}|{exit_code}|10||\n" + "".join(
-                f"{self.job_id}_{index}|{state}|{exit_code}|10|100K|200K\n"
-                for index in range(1, 33)
+            self.accounting_query_seen = True
+            return subprocess.CompletedProcess(
+                command, 0, self._array_accounting_rows(include_job_name=False), ""
             )
-            if self.mode == "duplicate-accounting":
-                rows += f"{self.job_id}_1|COMPLETED|0:0|10|100K|200K\n"
-            return subprocess.CompletedProcess(command, 0, rows, "")
         raise AssertionError(f"unexpected fake Slurm command: {command}")
 
 
@@ -154,7 +203,13 @@ def _fixture_sources(root: Path) -> tuple[Path, Path]:
     return simulation, control
 
 
-def make_execution(repo_root: Path, scratch: Path, suffix: str) -> object:
+def make_execution(
+    repo_root: Path,
+    scratch: Path,
+    suffix: str,
+    *,
+    control_lock_protocol: str = CONTROL_LOCK_PROTOCOL_V2,
+) -> object:
     fixture = scratch / suffix
     fixture.mkdir()
     _, child = make_fixture(repo_root, fixture)
@@ -165,15 +220,199 @@ def make_execution(repo_root: Path, scratch: Path, suffix: str) -> object:
         repo_root=repo_root, managed_child_dir=child,
         out_dir=fixture / "execution", pilot_dir=pilot,
         test_mode=True, fixture_sources=sources,
+        control_lock_protocol=control_lock_protocol,
     )
     assert execution.manifest["accepted_statistical_evidence"] is False
     assert execution.manifest["test_mode"] is True
     assert not (execution.directory / "campaign.json").exists()
-    assert execution.manifest["artifacts"]["control_lock"]["inode"] == (
-        execution.directory / ".control.lock"
-    ).stat().st_ino
+    lock_record = execution.manifest["artifacts"]["control_lock"]
+    if control_lock_protocol == CONTROL_LOCK_PROTOCOL_V2:
+        assert execution.manifest["schema_version"] == EXECUTION_SCHEMA_VERSION_V2
+        assert lock_record["protocol"] == CONTROL_LOCK_PROTOCOL_V2
+        assert lock_record["creation_inode"] == (
+            execution.directory / ".control.lock"
+        ).stat().st_ino
+        assert lock_record["link_count"] == 1
+        assert lock_record["size_bytes"] > 0
+    else:
+        assert execution.manifest["schema_version"] == EXECUTION_SCHEMA_VERSION_V1
+        assert lock_record["inode"] == (
+            execution.directory / ".control.lock"
+        ).stat().st_ino
     assert not (execution.directory / "sources" / "control" / ".git").exists()
     return execution
+
+
+def _rewrite_execution_manifest(
+    execution: object, mutate: Callable[[dict[str, Any]], None]
+) -> None:
+    manifest_path = execution.directory / "managed_execution.json"
+    value = json.loads(manifest_path.read_text(encoding="utf-8"))
+    mutate(value)
+    value["execution_hash"] = phase2b_lib._semantic_hash(value, "execution_hash")
+    manifest_path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+    phase2b_lib._write_static_checksums(execution.directory)
+
+
+def _expect_lock_rejection(execution: object, marker: str) -> None:
+    try:
+        load_execution_companion(
+            execution.directory, allow_test_mode=True, require_readiness=False
+        )
+    except ValueError as exc:
+        assert marker in str(exc), str(exc)
+    else:
+        raise AssertionError(f"control-lock tamper was accepted: {marker}")
+
+
+def test_portable_control_lock_v2(repo_root: Path, scratch: Path) -> None:
+    cross_node = make_execution(repo_root, scratch, "lock-v2-cross-node")
+    original = cross_node.manifest["artifacts"]["control_lock"]
+
+    def change_creation_diagnostics(value: dict[str, Any]) -> None:
+        record = value["artifacts"]["control_lock"]
+        record["creation_device"] = original["creation_device"] + 1000003
+        record["creation_inode"] = original["creation_inode"] + 1000033
+
+    _rewrite_execution_manifest(cross_node, change_creation_diagnostics)
+    loaded = load_execution_companion(
+        cross_node.directory, allow_test_mode=True, require_readiness=False
+    )
+    assert loaded.manifest["artifacts"]["control_lock"]["creation_device"] != (
+        loaded.directory / ".control.lock"
+    ).stat().st_dev
+    assert loaded.manifest["artifacts"]["control_lock"]["creation_inode"] != (
+        loaded.directory / ".control.lock"
+    ).stat().st_ino
+
+    mode = make_execution(repo_root, scratch, "lock-v2-mode")
+    (mode.directory / ".control.lock").chmod(0o640)
+    _expect_lock_rejection(mode, "mode mismatch")
+
+    same_size_content = make_execution(repo_root, scratch, "lock-v2-content")
+    content_path = same_size_content.directory / ".control.lock"
+    content = bytearray(content_path.read_bytes())
+    content[-2] = ord("0") if content[-2] != ord("0") else ord("1")
+    content_path.write_bytes(content)
+    _expect_lock_rejection(same_size_content, "content-token/hash mismatch")
+
+    size = make_execution(repo_root, scratch, "lock-v2-size")
+    size_path = size.directory / ".control.lock"
+    size_path.write_bytes(size_path.read_bytes() + b"x")
+    _expect_lock_rejection(size, "size mismatch")
+
+    linked = make_execution(repo_root, scratch, "lock-v2-link")
+    os.link(linked.directory / ".control.lock", scratch / "lock-v2-extra-link")
+    _expect_lock_rejection(linked, "link-count mismatch")
+
+    symlinked = make_execution(repo_root, scratch, "lock-v2-symlink")
+    symlink_path = symlinked.directory / ".control.lock"
+    symlink_target = scratch / "lock-v2-symlink-target"
+    symlink_target.write_bytes(symlink_path.read_bytes())
+    symlink_path.unlink()
+    symlink_path.symlink_to(symlink_target)
+    _expect_lock_rejection(symlinked, "root must not contain symlinks")
+
+    nonregular = make_execution(repo_root, scratch, "lock-v2-nonregular")
+    nonregular_path = nonregular.directory / ".control.lock"
+    nonregular_path.unlink()
+    os.mkfifo(nonregular_path, mode=0o600)
+    _expect_lock_rejection(nonregular, "not a regular file")
+
+    acquiring = make_execution(repo_root, scratch, "lock-v2-acquire-race")
+    acquiring_path = acquiring.directory / ".control.lock"
+    replacement = scratch / "lock-v2-acquire-replacement"
+    replacement.write_bytes(acquiring_path.read_bytes())
+    replacement.chmod(0o600)
+    real_flock = phase2b_lib.fcntl.flock
+    replaced = False
+
+    def replace_after_flock(descriptor: int, operation: int) -> object:
+        nonlocal replaced
+        result = real_flock(descriptor, operation)
+        if operation == phase2b_lib.fcntl.LOCK_SH and not replaced:
+            os.replace(replacement, acquiring_path)
+            replaced = True
+        return result
+
+    with mock.patch.object(
+        phase2b_lib.fcntl, "flock", side_effect=replace_after_flock
+    ):
+        _expect_lock_rejection(acquiring, "changed while acquiring flock")
+    assert replaced
+
+    held = make_execution(repo_root, scratch, "lock-v2-held-replacement")
+    held_path = held.directory / ".control.lock"
+    held_replacement = scratch / "lock-v2-held-replacement-file"
+    held_replacement.write_bytes(held_path.read_bytes())
+    held_replacement.chmod(0o600)
+    try:
+        with phase2b_lib.execution_lock(held):
+            os.replace(held_replacement, held_path)
+    except ValueError as exc:
+        assert "changed while held" in str(exc)
+    else:
+        raise AssertionError("same-content control-lock replacement was accepted while held")
+
+    exceptional = make_execution(repo_root, scratch, "lock-v2-exception-replacement")
+    exceptional_path = exceptional.directory / ".control.lock"
+    exceptional_replacement = scratch / "lock-v2-exception-replacement-file"
+    exceptional_replacement.write_bytes(exceptional_path.read_bytes())
+    exceptional_replacement.chmod(0o600)
+    try:
+        with phase2b_lib.execution_lock(exceptional):
+            os.replace(exceptional_replacement, exceptional_path)
+            raise RuntimeError("protected body failed after replacing the lock")
+    except ValueError as exc:
+        assert "changed while held" in str(exc)
+    else:
+        raise AssertionError("exception path hid a held control-lock replacement")
+
+
+def test_inode_bound_control_lock_v1(repo_root: Path, scratch: Path) -> None:
+    legacy = make_execution(
+        repo_root, scratch, "lock-v1-legacy",
+        control_lock_protocol=CONTROL_LOCK_PROTOCOL_V1,
+    )
+
+    def simulate_cross_node(value: dict[str, Any]) -> None:
+        record = value["artifacts"]["control_lock"]
+        record["device"] += 1
+        record["inode"] += 1
+
+    _rewrite_execution_manifest(legacy, simulate_cross_node)
+    _expect_lock_rejection(legacy, "inode identity mismatch")
+
+    legacy_race = make_execution(
+        repo_root, scratch, "lock-v1-acquire-race",
+        control_lock_protocol=CONTROL_LOCK_PROTOCOL_V1,
+    )
+    legacy_path = legacy_race.directory / ".control.lock"
+    replacement = scratch / "lock-v1-acquire-replacement"
+    replacement.write_bytes(legacy_path.read_bytes())
+    replacement.chmod(0o600)
+    real_flock = phase2b_lib.fcntl.flock
+    replaced = False
+
+    def replace_after_flock(descriptor: int, operation: int) -> object:
+        nonlocal replaced
+        result = real_flock(descriptor, operation)
+        if operation == phase2b_lib.fcntl.LOCK_EX and not replaced:
+            os.replace(replacement, legacy_path)
+            replaced = True
+        return result
+
+    try:
+        with mock.patch.object(
+            phase2b_lib.fcntl, "flock", side_effect=replace_after_flock
+        ):
+            with phase2b_lib.execution_lock(legacy_race):
+                pass
+    except ValueError as exc:
+        assert "changed while acquiring flock" in str(exc)
+    else:
+        raise AssertionError("legacy control-lock open/flock replacement was accepted")
+    assert replaced
 
 
 def test_materialization(repo_root: Path, scratch: Path) -> None:
@@ -410,7 +649,20 @@ def test_success(repo_root: Path, scratch: Path) -> None:
     )
     assert accounting["accepted_terminal"] is True
     assert accounting["all_tasks_completed"] is True
+    assert accounting["array_index_identity_field"] == "JobID"
+    assert accounting["array_parent_row_present"] is False
+    assert accounting["task_job_ids"]["32"] == "9001_32"
+    assert accounting["task_job_ids_raw"]["32"] == "9001"
+    assert accounting["task_job_ids_raw"]["1"] != "9001"
+    assert _successful_array_indexes(
+        execution, intent["attempt_id"], accounting, "9001"
+    ) == set(range(1, 33))
     assert attempt_state(execution, intent["attempt_id"]).status == "terminal-accounting-frozen"
+    frozen_squeue = (
+        execution.directory / "attempts" / intent["attempt_id"]
+        / "accounting" / "squeue.psv"
+    )
+    assert frozen_squeue.read_text(encoding="utf-8") == ""
 
     first_task = execution.tasks[0]
     marker_dir = (
@@ -480,6 +732,106 @@ def test_success(repo_root: Path, scratch: Path) -> None:
         raise AssertionError("tampered event chain was accepted")
 
 
+def test_account_case_canonicalization(repo_root: Path, scratch: Path) -> None:
+    execution = make_execution(repo_root, scratch, "lowercase-account")
+    intent = _prepare(execution, "20260718T120050Z-initial")
+    fake = FakeSlurm(execution, intent["attempt_id"], mode="lowercase-account")
+    submit_intent(
+        execution,
+        attempt_id=intent["attempt_id"],
+        intent_sha256=intent["intent_sha256"],
+        actor="fixture-reviewer",
+        runner=fake,
+    )
+    verified = next(
+        event
+        for event in read_attempt_events(execution, intent["attempt_id"])
+        if event["event_type"] == "job-verified"
+    )
+    assert verified["payload"]["expected_account"] == "PAS2524"
+    assert verified["payload"]["observed_account"] == "pas2524"
+    assert verified["payload"]["account_comparison"] == (
+        "osc-ascii-lowercase-canonicalization"
+    )
+
+    rejected = make_execution(repo_root, scratch, "wrong-account")
+    rejected_intent = _prepare(rejected, "20260718T120051Z-initial")
+    rejected_fake = FakeSlurm(
+        rejected, rejected_intent["attempt_id"], mode="wrong-account"
+    )
+    try:
+        submit_intent(
+            rejected,
+            attempt_id=rejected_intent["attempt_id"],
+            intent_sha256=rejected_intent["intent_sha256"],
+            actor="fixture-reviewer",
+            runner=rejected_fake,
+        )
+    except ValueError as exc:
+        assert "quarantined" in str(exc)
+    else:
+        raise AssertionError("a different OSC account was accepted")
+    assert attempt_state(rejected, rejected_intent["attempt_id"]).status == (
+        "release-ambiguous"
+    )
+
+
+def test_historical_execution_is_explicitly_closed() -> None:
+    historical = SimpleNamespace(
+        execution_id="sm-v1-production-bc-s1-execution-193d261c3059",
+        execution_hash=(
+            "d07a32a6afea7d2345b4f4ca45996fd88dde93a7cf8f9d875e0ba0e47e52cf7b"
+        ),
+    )
+    try:
+        require_production_execution_open(historical)
+    except ValueError as exc:
+        assert "historical Phase-2B execution is closed" in str(exc)
+    else:
+        raise AssertionError("the historical execution remained production-open")
+    require_manager_command_allowed(historical, "status")
+    for command in (
+        "prepare-intent", "submit-intent", "cancel-intent", "reconcile",
+        "freeze-accounting",
+    ):
+        try:
+            require_manager_command_allowed(historical, command)
+        except ValueError as exc:
+            assert "historical Phase-2B execution is closed" in str(exc)
+        else:
+            raise AssertionError(f"historical command remained enabled: {command}")
+    try:
+        prepare_attempt_intent(
+            historical,
+            attempt_id="20260718T190000Z-retry",
+            mode="retry-failed",
+            actor="fixture-reviewer",
+            write=False,
+            readiness_lock_sha256="a" * 64,
+        )
+    except ValueError as exc:
+        assert "historical Phase-2B execution is closed" in str(exc)
+    else:
+        raise AssertionError("direct historical intent preparation remained enabled")
+    try:
+        submit_intent(
+            historical,
+            attempt_id="20260718T175107Z-initial",
+            intent_sha256="a" * 64,
+            actor="fixture-reviewer",
+        )
+    except ValueError as exc:
+        assert "historical Phase-2B execution is closed" in str(exc)
+    else:
+        raise AssertionError("direct historical submission remained enabled")
+    successor = SimpleNamespace(
+        execution_id="sm-v1-production-bc-s1-execution-v2-fixture",
+        execution_hash="b" * 64,
+    )
+    require_production_execution_open(successor)
+    require_manager_command_allowed(successor, "prepare-intent")
+
+
 def test_accounting_publish_crash_recovery(repo_root: Path, scratch: Path) -> None:
     execution = make_execution(repo_root, scratch, "accounting-recovery")
     intent = _prepare(execution, "20260718T120500Z-initial")
@@ -515,6 +867,250 @@ def test_accounting_publish_crash_recovery(repo_root: Path, scratch: Path) -> No
     last = read_attempt_events(execution, intent["attempt_id"])[-1]
     assert last["payload"]["recovered_after_publish"] is True
 
+    tampered = make_execution(repo_root, scratch, "accounting-recovery-tampered")
+    tampered_intent = _prepare(tampered, "20260718T120501Z-initial")
+    tampered_fake = FakeSlurm(tampered, tampered_intent["attempt_id"])
+    submit_intent(
+        tampered,
+        attempt_id=tampered_intent["attempt_id"],
+        intent_sha256=tampered_intent["intent_sha256"],
+        actor="fixture-reviewer",
+        runner=tampered_fake,
+    )
+    freeze_terminal_accounting(
+        tampered,
+        attempt_id=tampered_intent["attempt_id"],
+        intent_sha256=tampered_intent["intent_sha256"],
+        actor="fixture-reviewer",
+        runner=tampered_fake,
+    )
+    tampered_event = next(
+        (
+            tampered.directory
+            / "attempts"
+            / tampered_intent["attempt_id"]
+            / "events"
+        ).glob("*-terminal-accounting-frozen-*.json")
+    )
+    tampered_event.unlink()
+    accounting_dir = (
+        tampered.directory / "attempts" / tampered_intent["attempt_id"] / "accounting"
+    )
+    sacct = accounting_dir / "sacct.psv"
+    sacct.chmod(0o644)
+    sacct.write_text(
+        sacct.read_text(encoding="utf-8").replace(
+            "9001_1|9101|COMPLETED|0:0|",
+            "9001_1|9101|FAILED|1:0|",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    checksum = accounting_dir / "SHA256SUMS"
+    checksum.chmod(0o644)
+    checksum.write_text(
+        "".join(
+            f"{sha256_file(accounting_dir / name)}  {name}\n"
+            for name in ("frozen.json", "sacct.psv", "squeue.psv")
+        ),
+        encoding="utf-8",
+    )
+    try:
+        freeze_terminal_accounting(
+            tampered,
+            attempt_id=tampered_intent["attempt_id"],
+            intent_sha256=tampered_intent["intent_sha256"],
+            actor="fixture-reviewer",
+            runner=forbidden_runner,
+        )
+    except ValueError as exc:
+        assert "disagree" in str(exc)
+    else:
+        raise AssertionError("self-rehashed sacct tamper was accepted before terminal event")
+    assert attempt_state(tampered, tampered_intent["attempt_id"]).status == (
+        "released-active"
+    )
+
+
+def test_terminal_accounting_v1_compatibility(
+    repo_root: Path, scratch: Path
+) -> None:
+    execution = make_execution(repo_root, scratch, "terminal-accounting-v1")
+    intent = _prepare(execution, "20260718T120501Z-initial")
+    fake = FakeSlurm(execution, intent["attempt_id"])
+    submit_intent(
+        execution,
+        attempt_id=intent["attempt_id"],
+        intent_sha256=intent["intent_sha256"],
+        actor="fixture-reviewer",
+        runner=fake,
+    )
+    accounting_dir = (
+        execution.directory / "attempts" / intent["attempt_id"] / "accounting"
+    )
+    accounting_dir.mkdir()
+    rows = [f"{fake.job_id}|COMPLETED|0:0|10|||\n"]
+    rows.extend(
+        f"{fake.job_id}_{index}|COMPLETED|0:0|10|100K|200K|\n"
+        for index in range(1, 33)
+    )
+    sacct_psv = "".join(rows)
+    task_states = {str(index): "COMPLETED" for index in range(1, 33)}
+    task_exit_codes = {str(index): "0:0" for index in range(1, 33)}
+    payload = {
+        "schema_version": ACCOUNTING_SCHEMA_VERSION_V1,
+        "created_at_utc": "2026-07-18T12:05:01+00:00",
+        "created_by": "fixture-reviewer",
+        "execution_id": execution.execution_id,
+        "execution_hash": execution.execution_hash,
+        "attempt_id": intent["attempt_id"],
+        "intent_sha256": intent["intent_sha256"],
+        "job_id": fake.job_id,
+        "selected_task_count": 32,
+        "terminal_task_count": 32,
+        "accepted_terminal": True,
+        "all_tasks_completed": True,
+        "task_states": task_states,
+        "task_exit_codes": task_exit_codes,
+    }
+    (accounting_dir / "frozen.json").write_text(
+        json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+    )
+    (accounting_dir / "sacct.psv").write_text(sacct_psv, encoding="utf-8")
+    (accounting_dir / "squeue.psv").write_text("", encoding="utf-8")
+    manifest = accounting_dir / "SHA256SUMS"
+    manifest.write_text(
+        "".join(
+            f"{sha256_file(accounting_dir / name)}  {name}\n"
+            for name in ("frozen.json", "sacct.psv", "squeue.psv")
+        ),
+        encoding="utf-8",
+    )
+    validate_terminal_accounting_snapshot(
+        execution,
+        attempt_id=intent["attempt_id"],
+        intent_sha256=intent["intent_sha256"],
+        job_id=fake.job_id,
+        payload=payload,
+        sacct_psv=sacct_psv,
+        squeue_psv="",
+    )
+    append_attempt_event(
+        execution,
+        intent["attempt_id"],
+        "terminal-accounting-frozen",
+        {
+            "job_id": fake.job_id,
+            "accounting_manifest_sha256": sha256_file(manifest),
+            "all_tasks_completed": True,
+        },
+        actor="fixture-reviewer",
+    )
+    loaded = load_frozen_accounting(execution, intent["attempt_id"])
+    assert loaded["schema_version"] == ACCOUNTING_SCHEMA_VERSION_V1
+    assert _successful_array_indexes(
+        execution, intent["attempt_id"], loaded, fake.job_id
+    ) == set(range(1, 33))
+
+
+def test_empty_raw_job_id_rejected_after_publish_crash(
+    repo_root: Path, scratch: Path
+) -> None:
+    execution = make_execution(repo_root, scratch, "empty-raw-id-recovery")
+    intent = _prepare(execution, "20260718T120503Z-initial")
+    fake = FakeSlurm(execution, intent["attempt_id"])
+    submit_intent(
+        execution,
+        attempt_id=intent["attempt_id"],
+        intent_sha256=intent["intent_sha256"],
+        actor="fixture-reviewer",
+        runner=fake,
+    )
+    freeze_terminal_accounting(
+        execution,
+        attempt_id=intent["attempt_id"],
+        intent_sha256=intent["intent_sha256"],
+        actor="fixture-reviewer",
+        runner=fake,
+    )
+    event = next(
+        (
+            execution.directory / "attempts" / intent["attempt_id"] / "events"
+        ).glob("*-terminal-accounting-frozen-*.json")
+    )
+    event.unlink()
+    accounting = (
+        execution.directory / "attempts" / intent["attempt_id"] / "accounting"
+    )
+    sacct = accounting / "sacct.psv"
+    sacct.chmod(0o644)
+    sacct.write_text(
+        sacct.read_text(encoding="utf-8").replace(
+            "9001_1|9101|COMPLETED", "9001_1||COMPLETED", 1
+        ),
+        encoding="utf-8",
+    )
+    frozen = accounting / "frozen.json"
+    frozen.chmod(0o644)
+    payload = json.loads(frozen.read_text(encoding="utf-8"))
+    payload["task_job_ids_raw"]["1"] = ""
+    frozen.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    manifest = accounting / "SHA256SUMS"
+    manifest.chmod(0o644)
+    manifest.write_text(
+        "".join(
+            f"{sha256_file(accounting / name)}  {name}\n"
+            for name in ("frozen.json", "sacct.psv", "squeue.psv")
+        ),
+        encoding="utf-8",
+    )
+
+    def forbidden_runner(*args: object, **kwargs: object) -> object:
+        raise AssertionError("self-rehashed accounting unexpectedly queried Slurm")
+
+    try:
+        freeze_terminal_accounting(
+            execution,
+            attempt_id=intent["attempt_id"],
+            intent_sha256=intent["intent_sha256"],
+            actor="fixture-reviewer",
+            runner=forbidden_runner,
+        )
+    except ValueError as exc:
+        assert "job-ID maps disagree" in str(exc)
+    else:
+        raise AssertionError("empty JobIDRaw provenance was accepted after a crash")
+
+
+def test_invalid_accounting_actor_zero_write(repo_root: Path, scratch: Path) -> None:
+    execution = make_execution(repo_root, scratch, "invalid-accounting-actor")
+    intent = _prepare(execution, "20260718T120502Z-initial")
+    fake = FakeSlurm(execution, intent["attempt_id"])
+    submit_intent(
+        execution,
+        attempt_id=intent["attempt_id"],
+        intent_sha256=intent["intent_sha256"],
+        actor="fixture-reviewer",
+        runner=fake,
+    )
+    calls_before = len(fake.calls)
+    try:
+        freeze_terminal_accounting(
+            execution,
+            attempt_id=intent["attempt_id"],
+            intent_sha256=intent["intent_sha256"],
+            actor="invalid actor",
+            runner=fake,
+        )
+    except ValueError as exc:
+        assert "actor identity" in str(exc)
+    else:
+        raise AssertionError("invalid accounting actor was accepted")
+    assert len(fake.calls) == calls_before
+    assert not (
+        execution.directory / "attempts" / intent["attempt_id"] / "accounting"
+    ).exists()
+
 
 def test_duplicate_accounting_rejected(repo_root: Path, scratch: Path) -> None:
     execution = make_execution(repo_root, scratch, "duplicate-accounting")
@@ -538,6 +1134,343 @@ def test_duplicate_accounting_rejected(repo_root: Path, scratch: Path) -> None:
     assert not (
         execution.directory / "attempts" / intent["attempt_id"] / "accounting"
     ).exists()
+
+
+def test_missing_accounting_rejected(repo_root: Path, scratch: Path) -> None:
+    execution = make_execution(repo_root, scratch, "missing-accounting")
+    intent = _prepare(execution, "20260718T120650Z-initial")
+    fake = FakeSlurm(execution, intent["attempt_id"], mode="missing-accounting")
+    submit_intent(
+        execution, attempt_id=intent["attempt_id"],
+        intent_sha256=intent["intent_sha256"], actor="fixture-reviewer",
+        runner=fake,
+    )
+    try:
+        freeze_terminal_accounting(
+            execution, attempt_id=intent["attempt_id"],
+            intent_sha256=intent["intent_sha256"], actor="fixture-reviewer",
+            runner=fake,
+        )
+    except ValueError as exc:
+        assert "exact array-task" in str(exc)
+    else:
+        raise AssertionError("incomplete logical sacct array-task set was accepted")
+    assert not (
+        execution.directory / "attempts" / intent["attempt_id"] / "accounting"
+    ).exists()
+
+
+def test_all_failed_accounting_enables_full_retry(
+    repo_root: Path, scratch: Path
+) -> None:
+    execution = make_execution(repo_root, scratch, "all-failed-accounting")
+    intent = _prepare(execution, "20260718T120655Z-initial")
+    fake = FakeSlurm(execution, intent["attempt_id"], mode="all-failed-accounting")
+    submit_intent(
+        execution, attempt_id=intent["attempt_id"],
+        intent_sha256=intent["intent_sha256"], actor="fixture-reviewer",
+        runner=fake,
+    )
+    accounting = freeze_terminal_accounting(
+        execution, attempt_id=intent["attempt_id"],
+        intent_sha256=intent["intent_sha256"], actor="fixture-reviewer",
+        runner=fake,
+    )
+    assert accounting["terminal_task_count"] == 32
+    assert accounting["all_tasks_completed"] is False
+    assert set(accounting["task_states"].values()) == {"FAILED"}
+    assert set(accounting["task_exit_codes"].values()) == {"1:0"}
+    assert _successful_array_indexes(
+        execution, intent["attempt_id"], accounting, "9001"
+    ) == set()
+    assert len(selected_task_ids(execution, "retry-failed")) == 32
+
+
+def test_pre_simulation_incident_sealing(repo_root: Path, scratch: Path) -> None:
+    execution = make_execution(repo_root, scratch, "pre-simulation-incident")
+    intent = _prepare(execution, "20260718T120650Z-initial")
+    fake = FakeSlurm(execution, intent["attempt_id"], mode="all-failed-accounting")
+    submit_intent(
+        execution,
+        attempt_id=intent["attempt_id"],
+        intent_sha256=intent["intent_sha256"],
+        actor="fixture-reviewer",
+        runner=fake,
+    )
+    attempt_dir = execution.directory / "attempts" / intent["attempt_id"]
+    for index in range(1, 33):
+        (attempt_dir / f"slurm-{fake.job_id}_{index}.out").write_text(
+            EXPECTED_FAILURE_LINE + "\n", encoding="utf-8"
+        )
+    readiness = {
+        "path": "/fixture/readiness.json",
+        "sha256": "a" * 64,
+        "schema_version": "fixture-readiness-v1",
+        "status": "accepted-fixture",
+        "implementation_commit": "f" * 40,
+        "readiness_commit": "e" * 40,
+    }
+    foreign_log = attempt_dir / "slurm-9999_1.out"
+    foreign_log.write_text("foreign scheduler output\n", encoding="utf-8")
+    try:
+        collect_incident_evidence(
+            execution,
+            repo_root=repo_root,
+            attempt_id=intent["attempt_id"],
+            intent_sha256=intent["intent_sha256"],
+            actor="fixture-reviewer",
+            runner=fake,
+            historical_readiness=readiness,
+        )
+    except ValueError as exc:
+        assert "foreign Slurm log" in str(exc)
+    else:
+        raise AssertionError("a foreign-job Slurm log was accepted")
+    assert not (attempt_dir / "accounting").exists()
+    foreign_log.unlink()
+    calls_before_authority_rejection = len(fake.calls)
+    wrong_readiness = dict(readiness, sha256="b" * 64)
+    try:
+        publish_incident_bundle(
+            execution,
+            repo_root=repo_root,
+            out_parent=scratch / "rejected-incident-bundles",
+            attempt_id=intent["attempt_id"],
+            intent_sha256=intent["intent_sha256"],
+            actor="fixture-reviewer",
+            runner=fake,
+            historical_readiness=wrong_readiness,
+        )
+    except ValueError as exc:
+        assert "intent/readiness digest mismatch" in str(exc)
+    else:
+        raise AssertionError("mismatched incident authority was allowed to publish")
+    assert len(fake.calls) == calls_before_authority_rejection
+    assert not (attempt_dir / "accounting").exists()
+    preview = collect_incident_evidence(
+        execution,
+        repo_root=repo_root,
+        attempt_id=intent["attempt_id"],
+        intent_sha256=intent["intent_sha256"],
+        actor="fixture-reviewer",
+        runner=fake,
+        historical_readiness=readiness,
+    )
+    assert preview["classification"] == "pre-simulation-control-plane-failure"
+    assert preview["accepted_incident_evidence"] is False
+    assert preview["simulation_disposition"]["events_consumed"] == 0
+    assert preview["simulation_disposition"]["production_seeds_consumed"] == 0
+    assert len(preview["failure_logs"]) == 32
+    assert attempt_state(execution, intent["attempt_id"]).status == "released-active"
+    assert not (attempt_dir / "accounting").exists()
+
+    output_parent = scratch / "incident-bundles"
+    target = publish_incident_bundle(
+        execution,
+        repo_root=repo_root,
+        out_parent=output_parent,
+        attempt_id=intent["attempt_id"],
+        intent_sha256=intent["intent_sha256"],
+        actor="fixture-reviewer",
+        runner=fake,
+        historical_readiness=readiness,
+    )
+    assert attempt_state(execution, intent["attempt_id"]).status == (
+        "terminal-accounting-frozen"
+    )
+    incident = json.loads((target / "incident.json").read_text(encoding="utf-8"))
+    assert incident["attempt"]["job_id"] == fake.job_id
+    assert incident["attempt"]["terminal_event_sha256"]
+    assert incident["attempt"]["accounting_manifest_sha256"]
+    assert incident["scheduler"]["array_parent_row_present"] is False
+    assert incident["scheduler"]["task_job_ids_raw"]["32"] == fake.job_id
+    assert (target / "SHA256SUMS").is_file()
+    assert _existing_incident(
+        output_parent,
+        execution=execution,
+        attempt_id=intent["attempt_id"],
+        intent_sha256=intent["intent_sha256"],
+        job_id="different-job",
+    ) is None
+
+    calls_before = len(fake.calls)
+    assert publish_incident_bundle(
+        execution,
+        repo_root=repo_root,
+        out_parent=output_parent,
+        attempt_id=intent["attempt_id"],
+        intent_sha256=intent["intent_sha256"],
+        actor="different-fixture-reviewer",
+        runner=fake,
+        historical_readiness=readiness,
+    ) == target
+    assert len(fake.calls) == calls_before
+    assert len(selected_task_ids(execution, "resume")) == 32
+
+    advanced_control = dict(incident["recovery_control_plane"])
+    advanced_control["git_commit"] = "1" * 40
+    advanced_control["git_tree"] = "2" * 40
+    with mock.patch(
+        "seal_steel_module_production_phase2b_incident."
+        "_recovery_control_plane_identity",
+        return_value=advanced_control,
+    ):
+        assert publish_incident_bundle(
+            execution,
+            repo_root=repo_root,
+            out_parent=output_parent,
+            attempt_id=intent["attempt_id"],
+            intent_sha256=intent["intent_sha256"],
+            actor="future-clean-checkout-reviewer",
+            runner=fake,
+            historical_readiness=readiness,
+        ) == target
+    assert len(fake.calls) == calls_before
+
+    tampered_parent = scratch / "tampered-incident-bundles"
+    tampered_parent.mkdir()
+    tampered = tampered_parent / target.name
+    shutil.copytree(target, tampered)
+    event_chain = tampered / "event_chain.json"
+    event_chain.chmod(0o644)
+    event_chain.write_text("[]\n", encoding="utf-8")
+    checksum = tampered / "SHA256SUMS"
+    checksum.chmod(0o644)
+    names = sorted(
+        path.name
+        for path in tampered.iterdir()
+        if path.is_file() and path.name != "SHA256SUMS"
+    )
+    checksum.write_text(
+        "".join(f"{sha256_file(tampered / name)}  {name}\n" for name in names),
+        encoding="utf-8",
+    )
+    try:
+        validate_incident_bundle(tampered, execution=execution)
+    except ValueError as exc:
+        assert "event chain" in str(exc)
+    else:
+        raise AssertionError("a self-rehashed cross-file incident tamper was accepted")
+
+    accounting_tamper_parent = scratch / "accounting-tamper-incident-bundles"
+    accounting_tamper_parent.mkdir()
+    accounting_tamper = accounting_tamper_parent / target.name
+    shutil.copytree(target, accounting_tamper)
+    bundled_accounting = accounting_tamper / "accounting.json"
+    bundled_accounting.chmod(0o644)
+    accounting_value = json.loads(
+        bundled_accounting.read_text(encoding="utf-8")
+    )
+    accounting_value["execution_hash"] = "c" * 64
+    bundled_accounting.write_text(
+        json.dumps(accounting_value, indent=2) + "\n", encoding="utf-8"
+    )
+    accounting_checksum = accounting_tamper / "SHA256SUMS"
+    accounting_checksum.chmod(0o644)
+    accounting_names = sorted(
+        path.name
+        for path in accounting_tamper.iterdir()
+        if path.is_file() and path.name != "SHA256SUMS"
+    )
+    accounting_checksum.write_text(
+        "".join(
+            f"{sha256_file(accounting_tamper / name)}  {name}\n"
+            for name in accounting_names
+        ),
+        encoding="utf-8",
+    )
+    try:
+        validate_incident_bundle(accounting_tamper)
+    except ValueError as exc:
+        assert "accounting binding" in str(exc)
+    else:
+        raise AssertionError("a self-rehashed accounting identity tamper was accepted")
+
+
+def test_concurrent_incident_publication(repo_root: Path, scratch: Path) -> None:
+    execution = make_execution(repo_root, scratch, "concurrent-incident")
+    intent = _prepare(execution, "20260718T120659Z-initial")
+    fake = FakeSlurm(execution, intent["attempt_id"], mode="all-failed-accounting")
+    submit_intent(
+        execution,
+        attempt_id=intent["attempt_id"],
+        intent_sha256=intent["intent_sha256"],
+        actor="fixture-reviewer",
+        runner=fake,
+    )
+    attempt_dir = execution.directory / "attempts" / intent["attempt_id"]
+    for index in range(1, 33):
+        (attempt_dir / f"slurm-{fake.job_id}_{index}.out").write_text(
+            EXPECTED_FAILURE_LINE + "\n", encoding="utf-8"
+        )
+    freeze_terminal_accounting(
+        execution,
+        attempt_id=intent["attempt_id"],
+        intent_sha256=intent["intent_sha256"],
+        actor="fixture-reviewer",
+        runner=fake,
+    )
+    calls_before = len(fake.calls)
+    readiness = {
+        "path": "/fixture/readiness.json",
+        "sha256": "a" * 64,
+        "schema_version": "fixture-readiness-v1",
+        "status": "accepted-fixture",
+        "implementation_commit": "f" * 40,
+        "readiness_commit": "e" * 40,
+    }
+    output_parent = scratch / "concurrent-incident-bundles"
+
+    def publish(actor: str) -> tuple[str, str]:
+        try:
+            path = publish_incident_bundle(
+                execution,
+                repo_root=repo_root,
+                out_parent=output_parent,
+                attempt_id=intent["attempt_id"],
+                intent_sha256=intent["intent_sha256"],
+                actor=actor,
+                runner=fake,
+                historical_readiness=readiness,
+            )
+        except ValueError as exc:
+            return "rejected", str(exc)
+        return "published", str(path)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(
+            pool.map(
+                publish,
+                ("fixture-reviewer-one", "fixture-reviewer-two"),
+            )
+        )
+    bundles = sorted(
+        path
+        for path in output_parent.iterdir()
+        if path.is_dir() and not path.name.startswith(".")
+    )
+    assert len(bundles) == 1
+    assert any(kind == "published" for kind, _ in outcomes)
+    assert all(
+        kind == "published"
+        or "publication is already active" in message
+        or "refusing to overwrite" in message
+        for kind, message in outcomes
+    )
+    assert not any(path.name.startswith(".") for path in output_parent.iterdir())
+    assert len(fake.calls) == calls_before
+    validate_incident_bundle(bundles[0], execution=execution)
+    assert publish_incident_bundle(
+        execution,
+        repo_root=repo_root,
+        out_parent=output_parent,
+        attempt_id=intent["attempt_id"],
+        intent_sha256=intent["intent_sha256"],
+        actor="fixture-reviewer-three",
+        runner=fake,
+        historical_readiness=readiness,
+    ) == bundles[0]
+    assert len(fake.calls) == calls_before
 
 
 def test_cancelled_accounting_enables_retry(repo_root: Path, scratch: Path) -> None:
@@ -960,6 +1893,19 @@ def main() -> int:
     )
     assert "sbatch-command" not in help_result.stdout
     assert "execution-dir" not in help_result.stdout
+    incident_help = subprocess.run(
+        [
+            sys.executable,
+            "hpc/osc/seal_steel_module_production_phase2b_incident.py",
+            "--help",
+        ],
+        cwd=repo_root,
+        text=True,
+        stdout=subprocess.PIPE,
+        check=True,
+    )
+    for forbidden in ("execution-dir", "attempt-id", "job-id", "scheduler-command"):
+        assert forbidden not in incident_help.stdout
     with tempfile.TemporaryDirectory(prefix="steel-module-phase2b-control-") as temporary:
         scratch = Path(temporary)
         sentinel = scratch / "real-sbatch-was-invoked"
@@ -973,12 +1919,23 @@ def main() -> int:
         sbatch.chmod(0o755)
         original_path = os.environ.get("PATH", "")
         os.environ["PATH"] = str(sentinel_bin) + os.pathsep + original_path
+        test_portable_control_lock_v2(repo_root, scratch)
+        test_inode_bound_control_lock_v1(repo_root, scratch)
         test_materialization(repo_root, scratch)
         test_readiness_protected_artifact_set(scratch)
         test_intent_contract_tamper(repo_root, scratch)
         test_success(repo_root, scratch)
+        test_account_case_canonicalization(repo_root, scratch)
+        test_historical_execution_is_explicitly_closed()
         test_accounting_publish_crash_recovery(repo_root, scratch)
+        test_terminal_accounting_v1_compatibility(repo_root, scratch)
+        test_empty_raw_job_id_rejected_after_publish_crash(repo_root, scratch)
+        test_invalid_accounting_actor_zero_write(repo_root, scratch)
         test_duplicate_accounting_rejected(repo_root, scratch)
+        test_missing_accounting_rejected(repo_root, scratch)
+        test_all_failed_accounting_enables_full_retry(repo_root, scratch)
+        test_pre_simulation_incident_sealing(repo_root, scratch)
+        test_concurrent_incident_publication(repo_root, scratch)
         test_cancelled_accounting_enables_retry(repo_root, scratch)
         test_single_nonterminal_intent_gate(repo_root, scratch)
         test_accounting_event_binding(repo_root, scratch)

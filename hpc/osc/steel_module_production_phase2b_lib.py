@@ -15,8 +15,10 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shlex
 import shutil
+import stat
 import subprocess
 import tarfile
 import tempfile
@@ -45,10 +47,25 @@ from steel_module_managed_production_lib import (
 )
 
 
-EXECUTION_SCHEMA_VERSION = "steel-module-production-managed-execution-v1"
+EXECUTION_SCHEMA_VERSION_V1 = "steel-module-production-managed-execution-v1"
+EXECUTION_SCHEMA_VERSION_V2 = "steel-module-production-managed-execution-v2"
+# Keep the public legacy name stable.  The canonical Phase-2B materializer
+# remains v1 unless a successor explicitly selects the portable lock protocol.
+EXECUTION_SCHEMA_VERSION = EXECUTION_SCHEMA_VERSION_V1
+CONTROL_LOCK_PROTOCOL_V1 = "inode-bound-v1"
+CONTROL_LOCK_PROTOCOL_V2 = "portable-flock-v2"
+CONTROL_LOCK_TOKEN_RE = re.compile(r"^[0-9a-f]{64}$")
+HISTORICAL_CLOSED_EXECUTION_ID = (
+    "sm-v1-production-bc-s1-execution-193d261c3059"
+)
+HISTORICAL_CLOSED_EXECUTION_HASH = (
+    "d07a32a6afea7d2345b4f4ca45996fd88dde93a7cf8f9d875e0ba0e47e52cf7b"
+)
 INTENT_SCHEMA_VERSION = "steel-module-production-attempt-intent-v1"
 EVENT_SCHEMA_VERSION = "steel-module-production-attempt-event-v1"
-ACCOUNTING_SCHEMA_VERSION = "steel-module-production-terminal-accounting-v1"
+ACCOUNTING_SCHEMA_VERSION_V1 = "steel-module-production-terminal-accounting-v1"
+ACCOUNTING_SCHEMA_VERSION_V2 = "steel-module-production-terminal-accounting-v2"
+ACCOUNTING_SCHEMA_VERSION = ACCOUNTING_SCHEMA_VERSION_V2
 TASK_RESULT_SCHEMA_VERSION = "steel-module-managed-production-task-result-v1"
 READINESS_LOCK_SCHEMA_VERSION = "steel-module-production-phase2b-readiness-lock-v1"
 PHASE2A_LOCK_SCHEMA_VERSION = "steel-module-production-bc-s1-phase2a-lock-v1"
@@ -73,6 +90,7 @@ READINESS_CRITICAL_ARTIFACTS = (
     "hpc/osc/steel_module_production_phase2b_lib.py",
     "hpc/osc/materialize_steel_module_production_execution.py",
     "hpc/osc/manage_steel_module_production_attempt.py",
+    "hpc/osc/seal_steel_module_production_phase2b_incident.py",
     "hpc/osc/record_steel_module_production_task_result.py",
     "hpc/osc/run_steel_module_production_phase2b_task.py",
     "hpc/osc/submit_steel_module_production_phase2b.sbatch",
@@ -90,6 +108,7 @@ READINESS_CRITICAL_ARTIFACTS = (
     "hpc/osc/check_steel_module_campaign_infrastructure.py",
     "hpc/osc/README.md",
     "docs/decisions/steel-module-production-phase2b-v1.md",
+    "docs/decisions/steel-module-production-phase2b-recovery-v1.md",
     "docs/decisions/steel-module-production-program-freeze-v1.md",
 )
 FORMAL_CHILD_NAME = "steel-module-production-bc-s1"
@@ -305,18 +324,257 @@ def write_exclusive_json(
     )
 
 
-@contextmanager
-def execution_lock(execution_dir: Path) -> Iterator[None]:
-    lock_path = execution_dir / ".control.lock"
-    if not lock_path.is_file() or lock_path.is_symlink():
-        raise ValueError("managed execution control lock is missing or unsafe")
-    descriptor = os.open(lock_path, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0))
+def _portable_lock_content(token: str) -> bytes:
+    if not isinstance(token, str) or not CONTROL_LOCK_TOKEN_RE.fullmatch(token):
+        raise ValueError("portable control-lock content token is invalid")
+    return f"steel-module-managed-execution-control-lock-v2:{token}\n".encode()
+
+
+def _safe_lock_lstat(lock_path: Path) -> os.stat_result:
     try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
-        yield
+        value = lock_path.lstat()
+    except OSError as exc:
+        raise ValueError("managed execution control lock is missing or unsafe") from exc
+    if not stat.S_ISREG(value.st_mode) or stat.S_ISLNK(value.st_mode):
+        raise ValueError("managed execution control lock is not a regular file")
+    return value
+
+
+def _same_node_file_identity(left: os.stat_result, right: os.stat_result) -> bool:
+    """Compare two observations made on the same host.
+
+    Parallel filesystems may expose different ``st_dev``/``st_ino`` values on
+    login and compute nodes.  Those values are still useful for detecting a
+    path swap between lstat/fstat calls made by one process on one node.
+    """
+
+    return os.path.samestat(left, right)
+
+
+def _read_descriptor_bytes(descriptor: int, size: int) -> bytes:
+    if size < 0 or size > 4096:
+        raise ValueError("managed execution control-lock size is unsafe")
+    chunks: list[bytes] = []
+    offset = 0
+    while offset <= size:
+        chunk = os.pread(descriptor, min(4096, size + 1 - offset), offset)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        offset += len(chunk)
+    return b"".join(chunks)
+
+
+def _validate_portable_lock_stat(
+    value: os.stat_result, record: dict[str, Any]
+) -> None:
+    if not stat.S_ISREG(value.st_mode):
+        raise ValueError("managed execution control lock is not a regular file")
+    if value.st_nlink != record["link_count"]:
+        raise ValueError("managed execution control-lock link-count mismatch")
+    if value.st_nlink != 1:
+        raise ValueError("managed execution portable control lock must have one link")
+    if value.st_mode & 0o777 != record["mode"]:
+        raise ValueError("managed execution control-lock mode mismatch")
+    if value.st_size != record["size_bytes"]:
+        raise ValueError("managed execution control-lock size mismatch")
+
+
+def _validate_portable_lock_record(record: dict[str, Any]) -> bytes:
+    expected_keys = {
+        "path", "protocol", "content_token", "mode", "size_bytes", "sha256",
+        "link_count", "creation_device", "creation_inode",
+    }
+    if set(record) != expected_keys:
+        raise ValueError("portable control-lock record shape mismatch")
+    if record.get("path") != ".control.lock":
+        raise ValueError("portable control-lock path mismatch")
+    if record.get("protocol") != CONTROL_LOCK_PROTOCOL_V2:
+        raise ValueError("portable control-lock protocol mismatch")
+    content = _portable_lock_content(record.get("content_token"))
+    if (
+        record.get("mode") != 0o600
+        or record.get("size_bytes") != len(content)
+        or record.get("sha256") != sha256_bytes(content)
+        or record.get("link_count") != 1
+        or not isinstance(record.get("creation_device"), int)
+        or record["creation_device"] < 0
+        or not isinstance(record.get("creation_inode"), int)
+        or record["creation_inode"] < 0
+    ):
+        raise ValueError("portable control-lock immutable identity mismatch")
+    return content
+
+
+@contextmanager
+def _opened_portable_control_lock(
+    lock_path: Path,
+    record: dict[str, Any],
+    *,
+    operation: int,
+) -> Iterator[None]:
+    expected_content = _validate_portable_lock_record(record)
+    before_path = _safe_lock_lstat(lock_path)
+    _validate_portable_lock_stat(before_path, record)
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise ValueError("portable control lock requires O_NOFOLLOW support")
+    flags = os.O_RDWR | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    try:
+        descriptor = os.open(lock_path, flags)
+    except OSError as exc:
+        raise ValueError("managed execution control lock cannot be opened safely") from exc
+    locked = False
+    try:
+        before_fd = os.fstat(descriptor)
+        if not _same_node_file_identity(before_path, before_fd):
+            raise ValueError("managed execution control lock changed while opening")
+        _validate_portable_lock_stat(before_fd, record)
+        content = _read_descriptor_bytes(descriptor, before_fd.st_size)
+        if content != expected_content or sha256_bytes(content) != record["sha256"]:
+            raise ValueError("managed execution control-lock content-token/hash mismatch")
+
+        fcntl.flock(descriptor, operation)
+        locked = True
+        after_fd = os.fstat(descriptor)
+        after_path = _safe_lock_lstat(lock_path)
+        if (
+            not _same_node_file_identity(before_fd, after_fd)
+            or not _same_node_file_identity(after_fd, after_path)
+        ):
+            raise ValueError("managed execution control lock changed while acquiring flock")
+        _validate_portable_lock_stat(after_fd, record)
+        _validate_portable_lock_stat(after_path, record)
+        content = _read_descriptor_bytes(descriptor, after_fd.st_size)
+        if content != expected_content or sha256_bytes(content) != record["sha256"]:
+            raise ValueError("managed execution control-lock content-token/hash mismatch")
+
+        try:
+            yield
+        finally:
+            # Recheck even when the protected operation raises.  A path swap
+            # must not be hidden by an unrelated exception from the caller.
+            final_fd = os.fstat(descriptor)
+            final_path = _safe_lock_lstat(lock_path)
+            if (
+                not _same_node_file_identity(after_fd, final_fd)
+                or not _same_node_file_identity(final_fd, final_path)
+            ):
+                raise ValueError("managed execution control lock changed while held")
+            _validate_portable_lock_stat(final_fd, record)
+            _validate_portable_lock_stat(final_path, record)
+            content = _read_descriptor_bytes(descriptor, final_fd.st_size)
+            if content != expected_content or sha256_bytes(content) != record["sha256"]:
+                raise ValueError("managed execution control-lock content-token/hash mismatch")
     finally:
-        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        if locked:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
         os.close(descriptor)
+
+
+def _validate_inode_bound_v1_lock(lock_path: Path, record: dict[str, Any]) -> None:
+    value = _safe_lock_lstat(lock_path)
+    expected = {
+        "path": ".control.lock", "device": value.st_dev,
+        "inode": value.st_ino, "mode": value.st_mode & 0o777,
+        "size_bytes": value.st_size, "sha256": sha256_file(lock_path),
+    }
+    if record != expected:
+        raise ValueError("managed execution control-lock inode identity mismatch")
+
+
+@contextmanager
+def _opened_inode_bound_v1_lock(
+    lock_path: Path, record: dict[str, Any]
+) -> Iterator[None]:
+    """Acquire a legacy lock without weakening its frozen inode semantics."""
+
+    _validate_inode_bound_v1_lock(lock_path, record)
+    before_path = _safe_lock_lstat(lock_path)
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise ValueError("managed execution control lock requires O_NOFOLLOW support")
+    try:
+        descriptor = os.open(
+            lock_path, os.O_RDWR | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+        )
+    except OSError as exc:
+        raise ValueError("managed execution control lock cannot be opened safely") from exc
+    locked = False
+    try:
+        before_fd = os.fstat(descriptor)
+        if not _same_node_file_identity(before_path, before_fd):
+            raise ValueError("managed execution legacy control lock changed while opening")
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        locked = True
+        after_fd = os.fstat(descriptor)
+        after_path = _safe_lock_lstat(lock_path)
+        if (
+            not _same_node_file_identity(before_fd, after_fd)
+            or not _same_node_file_identity(after_fd, after_path)
+        ):
+            raise ValueError(
+                "managed execution legacy control lock changed while acquiring flock"
+            )
+        _validate_inode_bound_v1_lock(lock_path, record)
+        try:
+            yield
+        finally:
+            final_fd = os.fstat(descriptor)
+            final_path = _safe_lock_lstat(lock_path)
+            if (
+                not _same_node_file_identity(after_fd, final_fd)
+                or not _same_node_file_identity(final_fd, final_path)
+            ):
+                raise ValueError("managed execution legacy control lock changed while held")
+            _validate_inode_bound_v1_lock(lock_path, record)
+    finally:
+        if locked:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+
+
+def _control_lock_record_from_manifest(
+    directory: Path, manifest: dict[str, Any]
+) -> tuple[str, dict[str, Any]]:
+    schema = manifest.get("schema_version")
+    record = require_dict(require_dict(manifest, "artifacts"), "control_lock")
+    if schema == EXECUTION_SCHEMA_VERSION_V1:
+        return CONTROL_LOCK_PROTOCOL_V1, record
+    if schema == EXECUTION_SCHEMA_VERSION_V2:
+        return CONTROL_LOCK_PROTOCOL_V2, record
+    raise ValueError("unsupported managed-execution schema")
+
+
+def validate_execution_control_lock(
+    directory: Path, manifest: dict[str, Any]
+) -> None:
+    protocol, record = _control_lock_record_from_manifest(directory, manifest)
+    lock_path = directory / ".control.lock"
+    if protocol == CONTROL_LOCK_PROTOCOL_V1:
+        _validate_inode_bound_v1_lock(lock_path, record)
+        return
+    with _opened_portable_control_lock(lock_path, record, operation=fcntl.LOCK_SH):
+        pass
+
+
+@contextmanager
+def execution_lock(execution: ManagedExecution | Path) -> Iterator[None]:
+    if isinstance(execution, ManagedExecution):
+        directory = execution.directory
+        manifest = execution.manifest
+    else:
+        directory = Path(execution).expanduser().resolve()
+        verify_execution_static_checksums(directory)
+        manifest = load_json(directory / "managed_execution.json")
+        if manifest.get("execution_hash") != _semantic_hash(manifest, "execution_hash"):
+            raise ValueError("managed-execution semantic hash mismatch")
+    protocol, record = _control_lock_record_from_manifest(directory, manifest)
+    lock_path = directory / ".control.lock"
+    if protocol == CONTROL_LOCK_PROTOCOL_V1:
+        with _opened_inode_bound_v1_lock(lock_path, record):
+            yield
+        return
+    with _opened_portable_control_lock(lock_path, record, operation=fcntl.LOCK_EX):
+        yield
 
 
 def _parse_checksum_manifest(path: Path) -> dict[str, str]:
@@ -591,11 +849,22 @@ def _write_execution_tree(
     test_mode: bool,
     fixture_sources: tuple[Path, Path] | None,
     fault_after: str | None,
+    control_lock_protocol: str,
 ) -> None:
     directory.mkdir()
     for name in ("intents", "attempts", "finalized"):
         (directory / name).mkdir()
-    (directory / ".control.lock").touch(mode=0o600, exist_ok=False)
+    lock_path = directory / ".control.lock"
+    lock_token: str | None = None
+    if control_lock_protocol == CONTROL_LOCK_PROTOCOL_V1:
+        lock_path.touch(mode=0o600, exist_ok=False)
+    elif control_lock_protocol == CONTROL_LOCK_PROTOCOL_V2:
+        lock_token = secrets.token_hex(32)
+        write_exclusive_bytes(
+            lock_path, _portable_lock_content(lock_token), mode=0o600
+        )
+    else:
+        raise ValueError("unsupported managed execution control-lock protocol")
     tasks_path = directory / "tasks.tsv"
     args_path = directory / "scan_args.txt"
     _write_tasks(tasks_path, managed.plan.tasks)
@@ -640,8 +909,37 @@ def _write_execution_tree(
         load_json(Path(managed.binding["program"]["program_directory"]) / "production_program.json"),
         "pilot_exclusion",
     )
+    lock_stat = lock_path.lstat()
+    if control_lock_protocol == CONTROL_LOCK_PROTOCOL_V1:
+        control_lock_record: dict[str, Any] = {
+            "path": ".control.lock",
+            "device": lock_stat.st_dev,
+            "inode": lock_stat.st_ino,
+            "mode": lock_stat.st_mode & 0o777,
+            "size_bytes": lock_stat.st_size,
+            "sha256": sha256_file(lock_path),
+        }
+        execution_schema_version = EXECUTION_SCHEMA_VERSION_V1
+    else:
+        if lock_token is None:
+            raise AssertionError("portable control-lock token was not created")
+        control_lock_record = {
+            "path": ".control.lock",
+            "protocol": CONTROL_LOCK_PROTOCOL_V2,
+            "content_token": lock_token,
+            "mode": lock_stat.st_mode & 0o777,
+            "size_bytes": lock_stat.st_size,
+            "sha256": sha256_file(lock_path),
+            "link_count": lock_stat.st_nlink,
+            # Creation-node stat values are provenance diagnostics only.
+            "creation_device": lock_stat.st_dev,
+            "creation_inode": lock_stat.st_ino,
+        }
+        _validate_portable_lock_record(control_lock_record)
+        execution_schema_version = EXECUTION_SCHEMA_VERSION_V2
+
     payload: dict[str, Any] = {
-        "schema_version": EXECUTION_SCHEMA_VERSION,
+        "schema_version": execution_schema_version,
         "object_kind": "managed-production-execution-companion",
         "created_at_utc": utc_now(),
         "test_mode": test_mode,
@@ -701,14 +999,7 @@ def _write_execution_tree(
             "tasks": {"path": "tasks.tsv", "sha256": sha256_file(tasks_path)},
             "scan_args": {"path": "scan_args.txt", "sha256": sha256_file(args_path)},
             "source_archives": {"path": "source_archives.json", "sha256": sha256_file(directory / "source_archives.json")},
-            "control_lock": {
-                "path": ".control.lock",
-                "device": (directory / ".control.lock").stat().st_dev,
-                "inode": (directory / ".control.lock").stat().st_ino,
-                "mode": (directory / ".control.lock").stat().st_mode & 0o777,
-                "size_bytes": (directory / ".control.lock").stat().st_size,
-                "sha256": sha256_file(directory / ".control.lock"),
-            },
+            "control_lock": control_lock_record,
         },
         "submission_policy": {
             "account": FORMAL_ACCOUNT, "two_step_required": True,
@@ -740,6 +1031,7 @@ def materialize_execution_companion(
     test_mode: bool = False,
     fixture_sources: tuple[Path, Path] | None = None,
     fault_after: str | None = None,
+    control_lock_protocol: str = CONTROL_LOCK_PROTOCOL_V1,
 ) -> ManagedExecution:
     """Atomically create one execution companion; formal paths are not overridable."""
 
@@ -780,6 +1072,7 @@ def materialize_execution_companion(
             temporary, managed=managed, repo_root=root, phase2a_path=phase2a_path,
             phase2a_lock=phase2a, pilot_dir=pilot, test_mode=test_mode,
             fixture_sources=fixture_sources, fault_after=fault_after,
+            control_lock_protocol=control_lock_protocol,
         )
         loaded = load_execution_companion(
             temporary, repo_root=root if not test_mode else None,
@@ -1008,7 +1301,9 @@ def load_execution_companion(
     if any(path.is_symlink() for path in directory.iterdir()):
         raise ValueError("managed execution root must not contain symlinks")
     manifest = load_json(directory / "managed_execution.json")
-    if manifest.get("schema_version") != EXECUTION_SCHEMA_VERSION:
+    if manifest.get("schema_version") not in {
+        EXECUTION_SCHEMA_VERSION_V1, EXECUTION_SCHEMA_VERSION_V2,
+    }:
         raise ValueError("unsupported managed-execution schema")
     if manifest.get("execution_hash") != _semantic_hash(manifest, "execution_hash"):
         raise ValueError("managed-execution semantic hash mismatch")
@@ -1077,16 +1372,7 @@ def load_execution_companion(
         raise ValueError("source archive manifest mismatch")
     _verify_source_record(directory, require_dict(sources, "simulation"))
     _verify_source_record(directory, require_dict(sources, "control_plane"))
-    lock_record = require_dict(require_dict(manifest, "artifacts"), "control_lock")
-    lock_path = directory / ".control.lock"
-    lock_stat = lock_path.stat()
-    expected_lock = {
-        "path": ".control.lock", "device": lock_stat.st_dev,
-        "inode": lock_stat.st_ino, "mode": lock_stat.st_mode & 0o777,
-        "size_bytes": lock_stat.st_size, "sha256": sha256_file(lock_path),
-    }
-    if lock_path.is_symlink() or lock_record != expected_lock:
-        raise ValueError("managed execution control-lock inode identity mismatch")
+    validate_execution_control_lock(directory, manifest)
     recorded_pilot = require_dict(manifest, "sealed_pilot")
     current_pilot = _sealed_pilot_identity(
         Path(require_string(recorded_pilot, "directory")), allow_fixture=test_mode
@@ -1523,6 +1809,19 @@ def selected_task_ids(execution: ManagedExecution, mode: str) -> tuple[str, ...]
     return _selected_task_ids_from_prior(execution, mode, list_attempt_ids(execution))
 
 
+def require_production_execution_open(execution: ManagedExecution) -> None:
+    """Close the failed historical v1 companion to every new production action."""
+
+    if (
+        execution.execution_id == HISTORICAL_CLOSED_EXECUTION_ID
+        and execution.execution_hash == HISTORICAL_CLOSED_EXECUTION_HASH
+    ):
+        raise ValueError(
+            "historical Phase-2B execution is closed after its pre-simulation "
+            "incident; use the additive recovery sealer, not a new intent"
+        )
+
+
 def _task_set_hash(tasks: Sequence[CampaignTask]) -> str:
     return sha256_bytes(canonical_json([asdict(task) for task in tasks]))
 
@@ -1536,6 +1835,7 @@ def prepare_attempt_intent(
     write: bool,
     readiness_lock_sha256: str | None,
 ) -> dict[str, Any]:
+    require_production_execution_open(execution)
     _safe_id(attempt_id, "attempt ID")
     _safe_actor(actor)
     require_sha256({"readiness": readiness_lock_sha256}, "readiness")
@@ -1650,8 +1950,29 @@ def load_frozen_accounting(
     if set(rows) != {"frozen.json", "sacct.psv", "squeue.psv"}:
         raise ValueError("terminal accounting checksum set mismatch")
     value = load_json(directory / "frozen.json")
-    if value.get("schema_version") != ACCOUNTING_SCHEMA_VERSION:
+    schema = value.get("schema_version")
+    if schema not in {ACCOUNTING_SCHEMA_VERSION_V1, ACCOUNTING_SCHEMA_VERSION_V2}:
         raise ValueError("unsupported terminal-accounting schema")
+    if schema == ACCOUNTING_SCHEMA_VERSION_V2:
+        selected_task_count = value.get("selected_task_count")
+        if not isinstance(selected_task_count, int) or selected_task_count < 1:
+            raise ValueError("terminal-accounting v2 task count is invalid")
+        expected_indices = {
+            str(index)
+            for index in range(1, selected_task_count + 1)
+        }
+        if (
+            value.get("sacct_field_order")
+            != [
+                "JobID", "JobIDRaw", "State", "ExitCode", "ElapsedRaw",
+                "MaxRSS", "MaxVMSize",
+            ]
+            or value.get("array_index_identity_field") != "JobID"
+            or not isinstance(value.get("array_parent_row_present"), bool)
+            or set(require_dict(value, "task_job_ids")) != expected_indices
+            or set(require_dict(value, "task_job_ids_raw")) != expected_indices
+        ):
+            raise ValueError("terminal-accounting v2 provenance is incomplete")
     intent = load_attempt_intent(execution, attempt_id)
     if value.get("attempt_id") != attempt_id or value.get("intent_sha256") != intent.get("intent_sha256"):
         raise ValueError("terminal accounting identity mismatch")
@@ -1744,8 +2065,11 @@ def load_managed_task_result(
 
 
 __all__ = [
-    "ACCOUNTING_SCHEMA_VERSION", "AttemptState", "EVENT_SCHEMA_VERSION",
-    "EXECUTION_SCHEMA_VERSION", "FORMAL_ACCOUNT", "FORMAL_EXECUTION_NAME",
+    "ACCOUNTING_SCHEMA_VERSION", "ACCOUNTING_SCHEMA_VERSION_V1",
+    "ACCOUNTING_SCHEMA_VERSION_V2", "AttemptState", "EVENT_SCHEMA_VERSION",
+    "CONTROL_LOCK_PROTOCOL_V1", "CONTROL_LOCK_PROTOCOL_V2",
+    "EXECUTION_SCHEMA_VERSION", "EXECUTION_SCHEMA_VERSION_V1",
+    "EXECUTION_SCHEMA_VERSION_V2", "FORMAL_ACCOUNT", "FORMAL_EXECUTION_NAME",
     "INTENT_SCHEMA_VERSION", "ManagedExecution", "READINESS_CRITICAL_ARTIFACTS",
     "READINESS_LOCK_RELATIVE", "READINESS_LOCK_SCHEMA_VERSION",
     "TASK_RESULT_SCHEMA_VERSION", "append_attempt_event", "attempt_state",
@@ -1753,9 +2077,11 @@ __all__ = [
     "fsync_directory", "fsync_tree",
     "list_attempt_ids", "load_attempt_intent", "load_execution_companion",
     "load_frozen_accounting", "load_managed_task_result", "load_phase2a_lock",
-    "materialize_execution_companion", "prepare_attempt_intent", "read_attempt_events",
+    "materialize_execution_companion", "prepare_attempt_intent",
+    "require_production_execution_open", "read_attempt_events",
     "require_pristine_readiness_workspace", "selected_task_ids", "source_tree_hash",
     "utc_now", "verify_checksum_manifest", "verify_execution_static_checksums",
-    "verify_readiness_protected_artifacts", "write_exclusive_bytes",
+    "validate_execution_control_lock", "verify_readiness_protected_artifacts",
+    "write_exclusive_bytes",
     "write_exclusive_json",
 ]

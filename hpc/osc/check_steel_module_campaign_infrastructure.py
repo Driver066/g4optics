@@ -953,7 +953,9 @@ def main() -> int:
     print(
         "steel-module campaign infrastructure: PASS "
         "(18-task smoke, 120-task frozen pilot, 914-task production program, "
-        "managed BC-S1 Phase-2A/2B, whole-child finalizer, checkpoint, "
+        "managed BC-S1 Phase-2A/2B, OSC-shaped incident fixture, "
+        "portable-lock local gate, "
+        "whole-child finalizer, checkpoint, "
         "v1/v2/production analyzers, offline review and progression recorder)"
     )
     return 0

@@ -26,7 +26,10 @@ from typing import Any, Callable, Sequence
 
 from steel_module_campaign_lib import load_json, require_dict, sha256_file
 from steel_module_production_phase2b_lib import (
+    ACCOUNTING_SCHEMA_VERSION_V1,
+    ACCOUNTING_SCHEMA_VERSION_V2,
     ACCOUNTING_SCHEMA_VERSION,
+    ACTOR_RE,
     FORMAL_ACCOUNT,
     READINESS_LOCK_RELATIVE,
     TERMINAL_FAILURE_STATES,
@@ -41,6 +44,7 @@ from steel_module_production_phase2b_lib import (
     load_frozen_accounting,
     load_phase2a_lock,
     prepare_attempt_intent,
+    require_production_execution_open,
     fsync_tree,
     fsync_directory,
     utc_now,
@@ -49,6 +53,19 @@ from steel_module_production_phase2b_lib import (
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 JOB_ID_RE = re.compile(r"^[1-9][0-9]*$")
+MUTATING_COMMANDS = {
+    "prepare-intent", "submit-intent", "cancel-intent", "reconcile",
+    "freeze-accounting",
+}
+
+
+def require_manager_command_allowed(
+    execution: ManagedExecution, command: str
+) -> None:
+    if command not in {"status", *MUTATING_COMMANDS}:
+        raise ValueError("unknown managed production command")
+    if command != "status":
+        require_production_execution_open(execution)
 
 
 def _run(
@@ -141,7 +158,6 @@ def _validate_held_job(
         raise ValueError("scontrol did not return the exact array job")
     scheduler = intent["scheduler"]
     expected = {
-        "Account": FORMAL_ACCOUNT,
         "JobName": scheduler["job_name"],
         "Command": str(
             execution.directory / "intents" / intent["attempt_id"]
@@ -157,7 +173,23 @@ def _validate_held_job(
         .replace(re.escape("%a"), r"(?:[0-9]+|\[[0-9,%-]+\])") + "$"
     )
     observed_indices: set[int] = set()
+    account_comparison: str | None = None
     for row in array_rows:
+        observed_account = row.get("Account")
+        if observed_account == FORMAL_ACCOUNT:
+            comparison = "exact"
+        elif (
+            isinstance(observed_account, str)
+            and observed_account.isascii()
+            and FORMAL_ACCOUNT.isascii()
+            and observed_account == FORMAL_ACCOUNT.lower()
+        ):
+            comparison = "osc-ascii-lowercase-canonicalization"
+        else:
+            raise ValueError("Slurm held job Account mismatch")
+        if account_comparison is not None and comparison != account_comparison:
+            raise ValueError("Slurm held job Account representation changed across rows")
+        account_comparison = comparison
         for key, value in expected.items():
             if row.get(key) != value:
                 raise ValueError(f"Slurm held job {key} mismatch")
@@ -190,7 +222,11 @@ def _validate_held_job(
     expected_indices = set(range(1, intent["selected"]["task_count"] + 1))
     if observed_indices != expected_indices:
         raise ValueError("Slurm held job array shape mismatch")
-    return array_rows[0]
+    selected = dict(array_rows[0])
+    selected["ExpectedAccount"] = FORMAL_ACCOUNT
+    selected["ObservedAccount"] = selected["Account"]
+    selected["AccountComparison"] = account_comparison or ""
+    return selected
 
 
 def submit_intent(
@@ -203,6 +239,7 @@ def submit_intent(
 ) -> str:
     """Contact Slurm once, initially held; any uncertainty is quarantined."""
 
+    require_production_execution_open(execution)
     intent = load_attempt_intent(execution, attempt_id)
     _verify_intent_hash(intent, intent_sha256)
     if attempt_state(execution, attempt_id).status != "prepared":
@@ -262,7 +299,14 @@ def submit_intent(
         raise ValueError("submitted job could not be verified and remains quarantined") from exc
     append_attempt_event(
         execution, attempt_id, "job-verified",
-        {"job_id": job_id, "job_name": row["JobName"], "state": row["JobState"]},
+        {
+            "job_id": job_id,
+            "job_name": row["JobName"],
+            "state": row["JobState"],
+            "expected_account": row["ExpectedAccount"],
+            "observed_account": row["ObservedAccount"],
+            "account_comparison": row["AccountComparison"],
+        },
         actor=actor,
     )
     try:
@@ -295,7 +339,7 @@ def _query_matching_jobs(
     commands = {
         "squeue": ["squeue", "-h", "-o", "%A|%j|%a|%T|%r", "--name", token],
         "sacct": ["sacct", "-n", "-P", "-X", "--name", token,
-                  "--format=JobIDRaw,JobName,State,ExitCode"],
+                  "--format=JobID,JobIDRaw,JobName,State,ExitCode"],
     }
     raw: dict[str, str] = {}
     matches: dict[str, dict[str, str]] = {}
@@ -306,37 +350,75 @@ def _query_matching_jobs(
         raw[name] = result.stdout
         for line in result.stdout.splitlines():
             values = line.split("|")
-            if len(values) < 2:
-                continue
-            job_id, job_name = values[:2]
-            parent = job_id.split("_", 1)[0].split(".", 1)[0]
+            if name == "squeue":
+                if len(values) < 2:
+                    continue
+                logical_job_id, job_name = values[:2]
+            else:
+                if len(values) < 3:
+                    continue
+                logical_job_id, _raw_job_id, job_name = values[:3]
+            parent = logical_job_id.split("_", 1)[0].split(".", 1)[0]
             if job_name == token and JOB_ID_RE.fullmatch(parent):
                 matches.setdefault(parent, {"job_id": parent, "job_name": job_name})
     return sorted(matches.values(), key=lambda row: int(row["job_id"])), raw
 
 
-def _terminal_parent_from_sacct(
-    text: str, *, job_id: str, job_name: str
+def _terminal_job_from_sacct(
+    text: str, *, job_id: str, job_name: str, task_count: int
 ) -> dict[str, str] | None:
+    """Recognize a terminal array with or without a separate parent row.
+
+    OSC reports the logical array identity in ``JobID`` while ``JobIDRaw`` is
+    an allocation-specific numeric identifier.  In particular, the last
+    task's raw ID may equal the array parent ID, and a separate logical parent
+    row need not be present.  Array membership must therefore come exclusively
+    from ``JobID``.
+    """
+
     terminal = {"COMPLETED", *TERMINAL_FAILURE_STATES}
-    matches: list[dict[str, str]] = []
+    parent_rows: list[dict[str, str]] = []
+    task_rows: list[dict[str, str]] = []
     for line in text.splitlines():
         values = line.split("|")
-        if len(values) < 4:
+        if len(values) < 5:
             continue
-        observed_id, observed_name, state, exit_code = values[:4]
-        if (
-            observed_id == job_id
-            and observed_name == job_name
-            and base_slurm_state(state) in terminal
-        ):
-            matches.append(
-                {"job_id": observed_id, "job_name": observed_name,
-                 "state": state, "exit_code": exit_code}
-            )
-    if len(matches) > 1:
+        logical_id, raw_id, observed_name, state, exit_code = values[:5]
+        if observed_name != job_name:
+            continue
+        row = {
+            "job_id": logical_id, "job_id_raw": raw_id,
+            "job_name": observed_name, "state": state, "exit_code": exit_code,
+        }
+        if logical_id == job_id:
+            parent_rows.append(row)
+        elif re.fullmatch(rf"{re.escape(job_id)}_[1-9][0-9]*", logical_id):
+            task_rows.append(row)
+    if len(parent_rows) > 1:
         raise ValueError("sacct returned duplicate exact array-parent rows")
-    return matches[0] if matches else None
+    if parent_rows and base_slurm_state(parent_rows[0]["state"]) in terminal:
+        return {**parent_rows[0], "evidence_source": "array-parent"}
+
+    indexed: dict[int, dict[str, str]] = {}
+    for row in task_rows:
+        index = int(row["job_id"].split("_", 1)[1])
+        if index in indexed:
+            raise ValueError("sacct returned duplicate logical array-task rows")
+        indexed[index] = row
+    if set(indexed) != set(range(1, task_count + 1)):
+        return None
+    if any(base_slurm_state(row["state"]) not in terminal for row in indexed.values()):
+        return None
+    states = {base_slurm_state(row["state"]) for row in indexed.values()}
+    exit_codes = {row["exit_code"] for row in indexed.values()}
+    return {
+        "job_id": job_id,
+        "job_id_raw": "",
+        "job_name": job_name,
+        "state": next(iter(states)) if len(states) == 1 else "MIXED_TERMINAL",
+        "exit_code": next(iter(exit_codes)) if len(exit_codes) == 1 else "MIXED",
+        "evidence_source": "complete-array-task-set",
+    }
 
 
 def reconcile_attempt(
@@ -383,31 +465,33 @@ def reconcile_attempt(
             previously_verified = any(
                 event["event_type"] == "job-verified" for event in state.events
             )
-            terminal_parent = _terminal_parent_from_sacct(
+            terminal_job = _terminal_job_from_sacct(
                 raw["sacct"], job_id=job_id,
                 job_name=intent["scheduler"]["job_name"],
+                task_count=intent["selected"]["task_count"],
             )
             if (
                 state.status in {"verified-held", "release-ambiguous"}
                 and previously_verified
                 and state.job_id == job_id
-                and terminal_parent is not None
+                and terminal_job is not None
             ):
                 append_attempt_event(
                     execution, attempt_id, "job-released",
                     {
                         "job_id": job_id,
                         "reconciled": True,
-                        "recovery_source": "terminal-sacct-parent",
-                        "observed_state": terminal_parent["state"],
-                        "observed_exit_code": terminal_parent["exit_code"],
+                        "recovery_source": "terminal-sacct-"
+                        + terminal_job["evidence_source"],
+                        "observed_state": terminal_job["state"],
+                        "observed_exit_code": terminal_job["exit_code"],
                         "sacct_psv": raw["sacct"],
                     },
                     actor=actor,
                 )
                 return (
                     f"reconciled-terminal-sacct:{job_id}:"
-                    f"{terminal_parent['state']}"
+                    f"{terminal_job['state']}"
                 )
             raise
         if state.status == "submission-ambiguous":
@@ -418,14 +502,24 @@ def reconcile_attempt(
             )
             append_attempt_event(
                 execution, attempt_id, "job-verified",
-                {"job_id": job_id, "job_name": row["JobName"], "state": row["JobState"],
-                 "reconciled": True}, actor=actor,
+                {
+                    "job_id": job_id, "job_name": row["JobName"],
+                    "state": row["JobState"], "reconciled": True,
+                    "expected_account": row["ExpectedAccount"],
+                    "observed_account": row["ObservedAccount"],
+                    "account_comparison": row["AccountComparison"],
+                }, actor=actor,
             )
         elif state.status == "submitted-held":
             append_attempt_event(
                 execution, attempt_id, "job-verified",
-                {"job_id": job_id, "job_name": row["JobName"],
-                 "state": row["JobState"], "reconciled": True}, actor=actor,
+                {
+                    "job_id": job_id, "job_name": row["JobName"],
+                    "state": row["JobState"], "reconciled": True,
+                    "expected_account": row["ExpectedAccount"],
+                    "observed_account": row["ObservedAccount"],
+                    "account_comparison": row["AccountComparison"],
+                }, actor=actor,
             )
         held = (
             row.get("JobState") == "PENDING"
@@ -435,8 +529,13 @@ def reconcile_attempt(
             if state.status == "release-ambiguous":
                 append_attempt_event(
                     execution, attempt_id, "job-verified",
-                    {"job_id": job_id, "job_name": row["JobName"],
-                     "state": row["JobState"], "reconciled": True}, actor=actor,
+                    {
+                        "job_id": job_id, "job_name": row["JobName"],
+                        "state": row["JobState"], "reconciled": True,
+                        "expected_account": row["ExpectedAccount"],
+                        "observed_account": row["ObservedAccount"],
+                        "account_comparison": row["AccountComparison"],
+                    }, actor=actor,
                 )
             try:
                 released = _run_with(
@@ -516,8 +615,13 @@ def reconcile_attempt(
     return "no-job-confirmed"
 
 
-def _parse_sacct_rows(text: str) -> list[dict[str, str]]:
-    names = ["job_id", "state", "exit_code", "elapsed_raw", "max_rss", "max_vmsize"]
+def _parse_sacct_rows(
+    text: str,
+    names: tuple[str, ...] = (
+        "job_id", "job_id_raw", "state", "exit_code", "elapsed_raw",
+        "max_rss", "max_vmsize",
+    ),
+) -> list[dict[str, str]]:
     rows = []
     for raw in text.splitlines():
         values = raw.split("|")
@@ -531,6 +635,242 @@ def _parse_sacct_rows(text: str) -> list[dict[str, str]]:
     return rows
 
 
+def validate_terminal_accounting_snapshot(
+    execution: ManagedExecution,
+    *,
+    attempt_id: str,
+    intent_sha256: str,
+    job_id: str,
+    payload: dict[str, Any],
+    sacct_psv: str,
+    squeue_psv: str,
+) -> None:
+    """Cross-reconcile frozen maps with the exact scheduler text."""
+
+    intent = load_attempt_intent(execution, attempt_id)
+    _verify_intent_hash(intent, intent_sha256)
+    task_count = intent["selected"]["task_count"]
+    expected_indices = set(range(1, task_count + 1))
+    expected_keys = {str(index) for index in expected_indices}
+    if squeue_psv.strip():
+        raise ValueError("frozen squeue evidence still contains an active job")
+    if (
+        payload.get("execution_id") != execution.execution_id
+        or payload.get("execution_hash") != execution.execution_hash
+        or payload.get("attempt_id") != attempt_id
+        or payload.get("intent_sha256") != intent_sha256
+        or payload.get("job_id") != job_id
+        or payload.get("selected_task_count") != task_count
+        or payload.get("terminal_task_count") != task_count
+        or payload.get("accepted_terminal") is not True
+    ):
+        raise ValueError("terminal accounting snapshot identity mismatch")
+
+    schema = payload.get("schema_version")
+    if schema == ACCOUNTING_SCHEMA_VERSION_V2:
+        names = (
+            "job_id", "job_id_raw", "state", "exit_code", "elapsed_raw",
+            "max_rss", "max_vmsize",
+        )
+        logical_field = "job_id"
+        raw_field = "job_id_raw"
+        if (
+            payload.get("sacct_field_order")
+            != [
+                "JobID", "JobIDRaw", "State", "ExitCode", "ElapsedRaw",
+                "MaxRSS", "MaxVMSize",
+            ]
+            or payload.get("array_index_identity_field") != "JobID"
+        ):
+            raise ValueError("terminal accounting v2 field identity mismatch")
+    elif schema == ACCOUNTING_SCHEMA_VERSION_V1:
+        names = (
+            "job_id_raw", "state", "exit_code", "elapsed_raw", "max_rss",
+            "max_vmsize",
+        )
+        logical_field = "job_id_raw"
+        raw_field = "job_id_raw"
+    else:
+        raise ValueError("unsupported terminal accounting snapshot schema")
+
+    rows = _parse_sacct_rows(sacct_psv, names)
+    parent_rows = [row for row in rows if row[logical_field] == job_id]
+    task_rows: dict[int, dict[str, str]] = {}
+    pattern = re.compile(rf"{re.escape(job_id)}_([1-9][0-9]*)")
+    raw_task_count = 0
+    for row in rows:
+        match = pattern.fullmatch(row[logical_field])
+        if match is None:
+            continue
+        raw_task_count += 1
+        index = int(match.group(1))
+        if index in task_rows:
+            raise ValueError("duplicate logical task in terminal accounting snapshot")
+        task_rows[index] = row
+    if (
+        raw_task_count != task_count
+        or set(task_rows) != expected_indices
+        or len(parent_rows) > 1
+        or (schema == ACCOUNTING_SCHEMA_VERSION_V1 and len(parent_rows) != 1)
+    ):
+        raise ValueError("terminal accounting snapshot lacks the exact array set")
+    terminal = {"COMPLETED", *TERMINAL_FAILURE_STATES}
+    if any(base_slurm_state(row["state"]) not in terminal for row in task_rows.values()):
+        raise ValueError("terminal accounting snapshot contains a non-terminal task")
+    if parent_rows and base_slurm_state(parent_rows[0]["state"]) not in terminal:
+        raise ValueError("terminal accounting snapshot parent is not terminal")
+
+    task_states = require_dict(payload, "task_states")
+    task_exit_codes = require_dict(payload, "task_exit_codes")
+    if set(task_states) != expected_keys or set(task_exit_codes) != expected_keys:
+        raise ValueError("terminal accounting snapshot task maps are incomplete")
+    for index, row in task_rows.items():
+        key = str(index)
+        if (
+            task_states[key] != row["state"]
+            or task_exit_codes[key] != row["exit_code"]
+        ):
+            raise ValueError("terminal accounting maps disagree with sacct evidence")
+    if schema == ACCOUNTING_SCHEMA_VERSION_V2:
+        logical_ids = require_dict(payload, "task_job_ids")
+        raw_ids = require_dict(payload, "task_job_ids_raw")
+        if set(logical_ids) != expected_keys or set(raw_ids) != expected_keys:
+            raise ValueError("terminal accounting v2 job-ID maps are incomplete")
+        for index, row in task_rows.items():
+            key = str(index)
+            if (
+                not row[raw_field]
+                or not raw_ids[key]
+                or logical_ids[key] != row[logical_field]
+                or raw_ids[key] != row[raw_field]
+            ):
+                raise ValueError("terminal accounting job-ID maps disagree with sacct")
+        if (
+            payload.get("array_parent_row_present") != bool(parent_rows)
+            or payload.get("array_parent_state")
+            != (parent_rows[0]["state"] if parent_rows else None)
+            or payload.get("array_parent_exit_code")
+            != (parent_rows[0]["exit_code"] if parent_rows else None)
+        ):
+            raise ValueError("terminal accounting parent metadata disagrees with sacct")
+    all_completed = all(
+        base_slurm_state(row["state"]) == "COMPLETED" and row["exit_code"] == "0:0"
+        for row in task_rows.values()
+    )
+    if payload.get("all_tasks_completed") is not all_completed:
+        raise ValueError("terminal accounting completion flag disagrees with sacct")
+
+
+def preview_terminal_accounting(
+    execution: ManagedExecution,
+    *,
+    attempt_id: str,
+    intent_sha256: str,
+    actor: str,
+    runner: CommandRunner = _run,
+) -> dict[str, Any]:
+    """Collect and validate terminal accounting without writing evidence.
+
+    The returned object contains the future ``frozen.json`` payload together
+    with the exact scheduler text that would be checksum-frozen.  This is the
+    read-only half of the incident-sealing two-step flow.
+    """
+
+    if not isinstance(actor, str) or not ACTOR_RE.fullmatch(actor):
+        raise ValueError("terminal accounting actor identity is invalid")
+    intent = load_attempt_intent(execution, attempt_id)
+    _verify_intent_hash(intent, intent_sha256)
+    state = attempt_state(execution, attempt_id)
+    if state.status != "released-active" or state.job_id is None:
+        raise ValueError("terminal accounting preview requires one released attempt")
+    job_id = state.job_id
+    sacct = _run_with(
+        runner,
+        ["sacct", "-n", "-P", "-j", job_id,
+         "--format=JobID,JobIDRaw,State,ExitCode,ElapsedRaw,MaxRSS,MaxVMSize"],
+        cwd=execution.directory,
+    )
+    squeue = _run_with(
+        runner,
+        ["squeue", "-h", "-o", "%A|%j|%a|%T|%r", "--name",
+         intent["scheduler"]["job_name"]],
+        cwd=execution.directory,
+    )
+    if sacct.returncode or squeue.returncode:
+        raise ValueError("cannot collect complete scheduler accounting")
+    if squeue.stdout.strip():
+        raise ValueError("Slurm still reports active tasks; accounting is not terminal")
+    rows = _parse_sacct_rows(sacct.stdout)
+    task_count = intent["selected"]["task_count"]
+    parent_rows = [row for row in rows if row["job_id"] == job_id]
+    if len(parent_rows) > 1:
+        raise ValueError("sacct contains duplicate exact array-parent accounting rows")
+    raw_task_rows = [
+        row for row in rows
+        if re.fullmatch(rf"{re.escape(job_id)}_[1-9][0-9]*", row["job_id"])
+    ]
+    task_rows = {
+        int(row["job_id"].split("_", 1)[1]): row for row in raw_task_rows
+    }
+    if (
+        len(raw_task_rows) != task_count
+        or len(task_rows) != task_count
+        or set(task_rows) != set(range(1, task_count + 1))
+    ):
+        raise ValueError("sacct lacks the exact array-task accounting set")
+    terminal = {"COMPLETED", *TERMINAL_FAILURE_STATES}
+    if any(base_slurm_state(row["state"]) not in terminal for row in task_rows.values()):
+        raise ValueError("sacct contains non-terminal array tasks")
+    if parent_rows and base_slurm_state(parent_rows[0]["state"]) not in terminal:
+        raise ValueError("sacct array parent is not terminal")
+    if any(not row["job_id_raw"] for row in task_rows.values()):
+        raise ValueError("sacct array task lacks JobIDRaw provenance")
+    all_completed = all(
+        base_slurm_state(row["state"]) == "COMPLETED" and row["exit_code"] == "0:0"
+        for row in task_rows.values()
+    )
+    payload = {
+        "schema_version": ACCOUNTING_SCHEMA_VERSION,
+        "created_at_utc": utc_now(), "created_by": actor,
+        "execution_id": execution.execution_id, "execution_hash": execution.execution_hash,
+        "attempt_id": attempt_id, "intent_sha256": intent_sha256, "job_id": job_id,
+        "selected_task_count": task_count, "terminal_task_count": len(task_rows),
+        "accepted_terminal": True, "all_tasks_completed": all_completed,
+        "sacct_field_order": [
+            "JobID", "JobIDRaw", "State", "ExitCode", "ElapsedRaw",
+            "MaxRSS", "MaxVMSize",
+        ],
+        "array_index_identity_field": "JobID",
+        "array_parent_row_present": bool(parent_rows),
+        "array_parent_state": parent_rows[0]["state"] if parent_rows else None,
+        "array_parent_exit_code": parent_rows[0]["exit_code"] if parent_rows else None,
+        "task_job_ids": {
+            str(index): task_rows[index]["job_id"] for index in sorted(task_rows)
+        },
+        "task_job_ids_raw": {
+            str(index): task_rows[index]["job_id_raw"] for index in sorted(task_rows)
+        },
+        "task_states": {str(index): task_rows[index]["state"] for index in sorted(task_rows)},
+        "task_exit_codes": {
+            str(index): task_rows[index]["exit_code"] for index in sorted(task_rows)
+        },
+    }
+    validate_terminal_accounting_snapshot(
+        execution,
+        attempt_id=attempt_id,
+        intent_sha256=intent_sha256,
+        job_id=job_id,
+        payload=payload,
+        sacct_psv=sacct.stdout,
+        squeue_psv=squeue.stdout,
+    )
+    return {
+        "payload": payload,
+        "sacct_psv": sacct.stdout,
+        "squeue_psv": squeue.stdout,
+    }
+
+
 def freeze_terminal_accounting(
     execution: ManagedExecution,
     *,
@@ -539,6 +879,8 @@ def freeze_terminal_accounting(
     actor: str,
     runner: CommandRunner = _run,
 ) -> dict[str, Any]:
+    if not isinstance(actor, str) or not ACTOR_RE.fullmatch(actor):
+        raise ValueError("terminal accounting actor identity is invalid")
     intent = load_attempt_intent(execution, attempt_id)
     _verify_intent_hash(intent, intent_sha256)
     state = attempt_state(execution, attempt_id)
@@ -565,6 +907,15 @@ def freeze_terminal_accounting(
             or set(require_dict(recovered, "task_exit_codes")) != expected_indices
         ):
             raise ValueError("existing terminal accounting cannot be recovered")
+        validate_terminal_accounting_snapshot(
+            execution,
+            attempt_id=attempt_id,
+            intent_sha256=intent_sha256,
+            job_id=job_id,
+            payload=recovered,
+            sacct_psv=(target / "sacct.psv").read_text(encoding="utf-8"),
+            squeue_psv=(target / "squeue.psv").read_text(encoding="utf-8"),
+        )
         append_attempt_event(
             execution, attempt_id, "terminal-accounting-frozen",
             {
@@ -576,65 +927,19 @@ def freeze_terminal_accounting(
             actor=actor,
         )
         return recovered
-    sacct = _run_with(
-        runner,
-        ["sacct", "-n", "-P", "-j", job_id,
-         "--format=JobIDRaw,State,ExitCode,ElapsedRaw,MaxRSS,MaxVMSize"],
-        cwd=execution.directory,
+    snapshot = preview_terminal_accounting(
+        execution,
+        attempt_id=attempt_id,
+        intent_sha256=intent_sha256,
+        actor=actor,
+        runner=runner,
     )
-    squeue = _run_with(
-        runner, ["squeue", "-h", "-o", "%A|%a|%T|%r", "-j", job_id],
-        cwd=execution.directory,
-    )
-    if sacct.returncode or squeue.returncode:
-        raise ValueError("cannot freeze incomplete scheduler accounting")
-    if squeue.stdout.strip():
-        raise ValueError("Slurm still reports active tasks; accounting is not terminal")
-    rows = _parse_sacct_rows(sacct.stdout)
-    task_count = intent["selected"]["task_count"]
-    parent_rows = [row for row in rows if row["job_id"] == job_id]
-    if len(parent_rows) != 1:
-        raise ValueError("sacct lacks one exact array-parent accounting row")
-    raw_task_rows = [
-        row for row in rows
-        if re.fullmatch(rf"{re.escape(job_id)}_[1-9][0-9]*", row["job_id"])
-    ]
-    task_rows = {
-        int(row["job_id"].split("_", 1)[1]): row for row in raw_task_rows
-    }
-    if (
-        len(raw_task_rows) != task_count
-        or len(task_rows) != task_count
-        or set(task_rows) != set(range(1, task_count + 1))
-    ):
-        raise ValueError("sacct lacks the exact array-task accounting set")
-    terminal = {
-        "COMPLETED", *(__import__("steel_module_production_phase2b_lib").TERMINAL_FAILURE_STATES)
-    }
-    if any(base_slurm_state(row["state"]) not in terminal for row in task_rows.values()):
-        raise ValueError("sacct contains non-terminal array tasks")
-    if base_slurm_state(parent_rows[0]["state"]) not in terminal:
-        raise ValueError("sacct array parent is not terminal")
-    all_completed = all(
-        base_slurm_state(row["state"]) == "COMPLETED" and row["exit_code"] == "0:0"
-        for row in task_rows.values()
-    )
-    payload = {
-        "schema_version": ACCOUNTING_SCHEMA_VERSION,
-        "created_at_utc": utc_now(), "created_by": actor,
-        "execution_id": execution.execution_id, "execution_hash": execution.execution_hash,
-        "attempt_id": attempt_id, "intent_sha256": intent_sha256, "job_id": job_id,
-        "selected_task_count": task_count, "terminal_task_count": len(task_rows),
-        "accepted_terminal": True, "all_tasks_completed": all_completed,
-        "task_states": {str(index): task_rows[index]["state"] for index in sorted(task_rows)},
-        "task_exit_codes": {
-            str(index): task_rows[index]["exit_code"] for index in sorted(task_rows)
-        },
-    }
+    payload = require_dict(snapshot, "payload")
+    all_completed = payload["all_tasks_completed"]
     temp = Path(tempfile.mkdtemp(prefix=".accounting-", dir=target.parent))
     try:
-        (temp / "sacct.psv").write_text(sacct.stdout, encoding="utf-8")
-        (temp / "squeue.psv").write_text(squeue.stdout, encoding="utf-8")
+        (temp / "sacct.psv").write_text(snapshot["sacct_psv"], encoding="utf-8")
+        (temp / "squeue.psv").write_text(snapshot["squeue_psv"], encoding="utf-8")
         (temp / "frozen.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         (temp / "SHA256SUMS").write_text(
             "".join(
@@ -706,18 +1011,25 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parents[2]
     try:
         readiness_path = repo_root / READINESS_LOCK_RELATIVE
-        readiness = args.command != "status" or readiness_path.is_file()
-        execution = _formal_execution(repo_root, readiness=readiness)
+        execution = _formal_execution(repo_root, readiness=False)
+        require_manager_command_allowed(execution, args.command)
         if args.command == "status":
             print(f"execution_id: {execution.execution_id}")
             print(f"execution_hash: {execution.execution_hash}")
-            print(f"submission_ready: {str(readiness).lower()}")
+            closed = False
+            try:
+                require_production_execution_open(execution)
+            except ValueError:
+                closed = True
+            print(f"submission_ready: {str(readiness_path.is_file() and not closed).lower()}")
+            print(f"historical_execution_closed: {str(closed).lower()}")
             print(f"intents: {len(list_attempt_ids(execution))}")
             for attempt_id in list_attempt_ids(execution):
                 state = attempt_state(execution, attempt_id)
                 print(f"{attempt_id}: {state.status} job={state.job_id or '-'}")
             return 0
 
+        execution = _formal_execution(repo_root, readiness=True)
         readiness_sha = _readiness_sha(repo_root)
         if args.command == "prepare-intent":
             value = prepare_attempt_intent(

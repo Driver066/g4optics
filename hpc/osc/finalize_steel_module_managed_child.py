@@ -8,6 +8,7 @@ import csv
 import json
 import math
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -172,17 +173,22 @@ def _intent_task_rows(execution: Any, attempt_id: str) -> tuple[dict[str, str], 
     return rows
 
 
-def _accounting_rows(path: Path) -> list[list[str]]:
-    rows: list[list[str]] = []
+def _accounting_rows(
+    path: Path,
+    fields: tuple[str, ...] = (
+        "JobIDRaw", "State", "ExitCode", "ElapsedRaw", "MaxRSS", "MaxVMSize",
+    ),
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
     for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if not raw:
             continue
         values = raw.split("|")
         if values and values[-1] == "":
             values.pop()
-        if len(values) < 3:
+        if len(values) != len(fields):
             raise ValueError(f"invalid frozen sacct row {number}: {raw!r}")
-        rows.append(values)
+        rows.append(dict(zip(fields, values)))
     return rows
 
 
@@ -194,20 +200,70 @@ def _successful_array_indexes(
     path = execution.directory / "attempts" / attempt_id / "accounting" / "sacct.psv"
     if path.is_symlink() or not path.is_file():
         raise ValueError(f"attempt lacks frozen sacct.psv: {attempt_id}")
-    rows = _accounting_rows(path)
+    intent = load_attempt_intent(execution, attempt_id)
+    task_count = intent["selected"]["task_count"]
+    expected_indices = set(range(1, task_count + 1))
+    field_order = accounting.get("sacct_field_order")
+    if field_order == [
+        "JobID", "JobIDRaw", "State", "ExitCode", "ElapsedRaw",
+        "MaxRSS", "MaxVMSize",
+    ]:
+        fields = tuple(field_order)
+        logical_field = "JobID"
+        raw_field = "JobIDRaw"
+    elif field_order is None:
+        # Backward-compatible validation of pre-amendment fixture evidence.
+        fields = ("JobIDRaw", "State", "ExitCode", "ElapsedRaw", "MaxRSS", "MaxVMSize")
+        logical_field = "JobIDRaw"
+        raw_field = "JobIDRaw"
+    else:
+        raise ValueError(f"unsupported frozen sacct field order: {attempt_id}")
+    rows = _accounting_rows(path, fields)
+    task_rows: dict[int, dict[str, str]] = {}
+    task_pattern = re.compile(rf"{re.escape(job_id)}_([1-9][0-9]*)")
+    raw_task_rows = []
+    for row in rows:
+        match = task_pattern.fullmatch(row[logical_field])
+        if match is None:
+            continue
+        raw_task_rows.append(row)
+        index = int(match.group(1))
+        if index in task_rows:
+            raise ValueError(f"duplicate logical array-task accounting row: {attempt_id}")
+        task_rows[index] = row
+    if len(raw_task_rows) != task_count or set(task_rows) != expected_indices:
+        raise ValueError(f"frozen accounting lacks exact array-task set: {attempt_id}")
+
+    task_states = accounting.get("task_states")
+    task_exit_codes = accounting.get("task_exit_codes")
+    if not isinstance(task_states, dict) or not isinstance(task_exit_codes, dict):
+        raise ValueError(f"frozen accounting task maps are invalid: {attempt_id}")
+    expected_keys = {str(index) for index in expected_indices}
+    if set(task_states) != expected_keys or set(task_exit_codes) != expected_keys:
+        raise ValueError(f"frozen accounting task maps are incomplete: {attempt_id}")
+    if field_order is not None:
+        logical_ids = accounting.get("task_job_ids")
+        raw_ids = accounting.get("task_job_ids_raw")
+        if not isinstance(logical_ids, dict) or not isinstance(raw_ids, dict):
+            raise ValueError(f"frozen accounting lacks dual job-ID provenance: {attempt_id}")
+        if set(logical_ids) != expected_keys or set(raw_ids) != expected_keys:
+            raise ValueError(f"frozen accounting job-ID maps are incomplete: {attempt_id}")
+
     successful: set[int] = set()
-    prefix = f"{job_id}_"
-    for values in rows:
-        raw_job_id = values[0]
-        if not raw_job_id.startswith(prefix) or "." in raw_job_id:
-            continue
-        suffix = raw_job_id[len(prefix) :]
-        if not suffix.isdigit():
-            continue
-        state = base_slurm_state(values[1])
-        exit_code = values[2]
+    for index in sorted(task_rows):
+        row = task_rows[index]
+        key = str(index)
+        if task_states[key] != row["State"] or task_exit_codes[key] != row["ExitCode"]:
+            raise ValueError(f"frozen accounting disagrees with sacct rows: {attempt_id}")
+        if field_order is not None and (
+            logical_ids[key] != row[logical_field]
+            or raw_ids[key] != row[raw_field]
+        ):
+            raise ValueError(f"frozen job-ID provenance disagrees with sacct: {attempt_id}")
+        state = base_slurm_state(row["State"])
+        exit_code = row["ExitCode"]
         if state == "COMPLETED" and exit_code == "0:0":
-            successful.add(int(suffix))
+            successful.add(index)
     return successful
 
 

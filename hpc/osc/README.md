@@ -450,8 +450,11 @@ python3 hpc/osc/manage_steel_module_production_attempt.py status
 The materializer has no path, program, child, account, or source override. It
 creates only the canonical sibling
 `$WORK/campaigns/steel-module-production-bc-s1-execution`, two read-only source
-archives, one fixed-inode control lock, and immutable static identity files. It
-creates no `campaign.json`, intent, job, ROOT output, or readiness authority.
+archives, the historical inode-bound v1 control lock, and immutable static
+identity files. It creates no `campaign.json`, intent, job, ROOT output, or
+readiness authority. The real OSC failure of this cross-node inode assumption
+and its additive recovery are recorded in
+`docs/decisions/steel-module-production-phase2b-recovery-v1.md`.
 
 Still at commit C, collect the no-Slurm OSC readiness evidence into an untracked
 file outside the repository:
@@ -519,6 +522,32 @@ accounting while OSC still retains it:
 python3 hpc/osc/manage_steel_module_production_attempt.py freeze-accounting \
   --attempt-id "$ATTEMPT_ID" --intent-sha256 "$INTENT_SHA256"
 ```
+
+The managed freezer derives array indices from logical `sacct JobID` values
+and records `JobIDRaw` separately as scheduler provenance. It accepts OSC's
+normal terminal shape of one complete array-task set with no separate parent
+row; the final task's raw ID may equal the parent number. The active-job check
+uses the intent's unique Slurm job name, so a terminal job disappearing from
+`squeue -j` is not mistaken for missing accounting.
+
+The historical first attempt `20260718T175107Z-initial`, job `50532143`,
+failed before Apptainer or Geant4 because the login-node inode identity was not
+portable to compute nodes. Do not create another intent under that execution.
+After pulling the recovery implementation, preview and explicitly seal only
+that incident with:
+
+```bash
+python3 hpc/osc/seal_steel_module_production_phase2b_incident.py \
+  --check-only --actor "$USER"
+python3 hpc/osc/seal_steel_module_production_phase2b_incident.py \
+  --seal --actor "$USER"
+```
+
+The preview performs scheduler reads but no writes. The seal freezes the exact
+32 `FAILED/1:0` rows, appends the terminal event, and publishes a
+content-addressed incident bundle. Neither form can invoke `sbatch` or
+`scontrol`. Successor execution materialization and retry remain separate,
+later gates.
 
 After all 32 tasks have one valid selected success, the offline downstream
 sequence is:
