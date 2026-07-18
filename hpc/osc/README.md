@@ -390,8 +390,50 @@ For a local development dry run, use `--environment-mode local-dev
 --allow-dirty` and omit the four runtime artifact paths. Such output is always
 marked `accepted_statistical_evidence=false`. Phase 1 is complete only after
 `check_steel_module_production_program.py` passes; it still does not authorize
-or submit `BC-S1`. Managed child materialization and submission belong to
-Phase 2.
+a `BC-S1` Slurm submission. Managed child materialization and submission belong
+to Phase 2.
+
+Phase 2A materializes only the exact `BC-S1` child named by the initial
+authorization graph from the tracked formal-program lock. The CLI intentionally
+has no program, child, seed, or identity override: the execution source remains
+the Phase-1 program source while the clean Phase-2A checkout is recorded
+separately as the control plane. From a clean OSC checkout, create the one
+canonical target fixed beside the formal parent program with:
+
+```bash
+python3 hpc/osc/materialize_steel_module_production_child.py
+```
+
+The fixed output is
+`$WORK/campaigns/steel-module-production-bc-s1`. It is a managed child plan,
+not a campaign: it intentionally contains `managed_child.json` and no
+`campaign.json`, attempt journal, or Slurm entry point. This also makes every
+historical generic submitter fail before submission. The plan contains exactly
+32 tasks and 8,000 events: `4/24 mm back-center`, 250 events in each of blocks
+`0-15`. It is checksum-bound to the parent program, its frozen
+seeds/configuration hashes, the initial authorization graph, the execution
+source, and the recorded control-plane source. Its dedicated Phase-2A wrapper
+provides read-only validation only:
+
+```bash
+python3 hpc/osc/submit_steel_module_production_child.py \
+  --managed-child-dir "$WORK/campaigns/steel-module-production-bc-s1" \
+  --g4-data-root "$DATA_ROOT" \
+  --check-only
+```
+
+The recorded Phase-2A commit/tree and artifact blobs remain verifiable from
+Git history after HEAD advances. This immediate check-only wrapper additionally
+requires the current clean checkout to equal that recorded commit. A future
+actual-attempt implementation must bind its newer submission control plane
+separately; it must not rewrite or rematerialize this plan.
+
+Omitting `--check-only` is rejected before any plan mutation. The generic
+steel-module submitter rejects every production-stage campaign, including this
+managed child. Phase 2A creates no attempt journal, frozen-source archive, or
+Slurm command; real submission remains blocked until the downstream closure is
+implemented and reviewed. Validate the deterministic no-Slurm contract with
+`python3 hpc/osc/check_steel_module_managed_production.py`.
 
 The production analyzer must keep pooled scintillation production equally
 weighted across the three layout strata even though their final event counts

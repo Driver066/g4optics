@@ -1053,7 +1053,10 @@ def main() -> int:
                 cwd=repo_root,
                 expect_success=False,
             )
-            assert "Cannot load campaign" in rejected.stdout
+            assert (
+                "Cannot load campaign" in rejected.stdout
+                or "managed/checksum-bound steel-module objects" in rejected.stdout
+            )
 
         manifest_sha = sha256_file(program_dir / "production_program.json")
         try:

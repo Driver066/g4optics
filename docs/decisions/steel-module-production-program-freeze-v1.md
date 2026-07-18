@@ -1,8 +1,9 @@
 # Steel Module Production Program — Formal Phase-1 Freeze
 
 Status: formal Phase-1 production program frozen and runtime-verified;
-non-submittable; managed `BC-S1` materialization, submission, and downstream
-evidence tooling remain pending
+non-submittable; Phase-2A managed `BC-S1` materialization and read-only gate
+implemented locally; OSC materialization, submission, and downstream evidence
+tooling remain pending
 
 Study preset: `steel-module-scan-v1`
 
@@ -139,9 +140,21 @@ parent or any child directly submittable.
 
 The parent and all five child-plan directories intentionally contain no
 `campaign.json`. The generic campaign submitter must continue to reject them.
-The next engineering gate is managed, non-overwriting materialization of the
-exact `BC-S1` child plus its dedicated submission authorization. The complete
-whole-child finalization, cumulative analysis, static human review, and
-append-only progression-decision workflow must also be implemented and dry-run
-validated before the first production Slurm submission. `FIXED` and
-`BC-S2...BC-S4` remain locked.
+Phase-2A now provides managed, non-overwriting materialization of the exact
+`BC-S1` child plan and a dedicated read-only validation wrapper. The formal CLI
+has no output-path, program, child, seed, or expected-identity override; it
+reads this record's tracked lock and writes one canonical sibling directory.
+The output deliberately contains `managed_child.json` but no `campaign.json`,
+so it cannot be submitted by either current or historical generic campaign
+wrappers. It preserves the frozen program source as the future execution
+source and records the clean Phase-2A checkout separately as the control plane.
+The generic submitter is also restricted to the known non-production stage
+allowlist. The dedicated wrapper is hard-locked to `--check-only` and exposes
+no Slurm, resume, retry, account, or frozen-source option.
+
+This local implementation does not change the authorization boundary. Formal
+OSC child materialization and read-only verification are the next operational
+gate. Whole-child finalization, cumulative analysis, static human review,
+append-only progression decisions, and a managed attempt contract must still
+be implemented and dry-run validated before any production Slurm submission.
+`FIXED` and `BC-S2...BC-S4` remain locked.
