@@ -8,7 +8,7 @@ fail() {
   exit 2
 }
 
-canonical_execution_name="steel-module-production-bc-s1-execution-v3"
+canonical_execution_name="steel-module-production-bc-s1-execution-v4"
 
 # The launcher accepts no caller-controlled paths.  Slurm may copy this file to
 # /var/spool, so every authoritative path is derived from the frozen submit
@@ -30,7 +30,7 @@ canonical_execution_name="steel-module-production-bc-s1-execution-v3"
 execution_root="$(pwd -P)"
 case "${execution_root}" in
   /*/campaigns/"${canonical_execution_name}") ;;
-  *) fail "job working directory is not the canonical execution-v3 path" ;;
+  *) fail "job working directory is not the canonical execution-v4 path" ;;
 esac
 [[ ! -L "${execution_root}" && -d "${execution_root}" ]] || \
   fail "job working directory must be a regular directory"

@@ -9,9 +9,13 @@ managed-child finalization that produced it.
 from __future__ import annotations
 
 import csv
+import ctypes
+import errno
 import json
 import os
+import re
 import shutil
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +32,7 @@ from steel_module_campaign_lib import (
     sha256_file,
 )
 from steel_module_production_program_lib import (
+    load_production_program,
     ordered_task_hash,
     seed_pair_registry_hash,
     seed_set_hash,
@@ -36,12 +41,17 @@ from steel_module_production_program_lib import (
 from steel_module_production_phase2b_lib import (
     EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
     EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
+    EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3,
     EXECUTION_SCHEMA_VERSION_V1,
     EXECUTION_SCHEMA_VERSION_V2,
     FORMAL_EXECUTION_NAME,
     READINESS_LOCK_RELATIVE,
     SUCCESSOR_OBJECT_KIND,
+    base_slurm_state,
     load_execution_companion,
+    load_attempt_intent,
+    load_frozen_accounting,
+    load_managed_task_result,
     load_phase2a_lock,
 )
 
@@ -50,11 +60,15 @@ CHECKPOINT_SCHEMA_VERSION = "steel-module-production-checkpoint-v1"
 MANAGED_FINALIZATION_SCHEMA_VERSION = "steel-module-managed-finalization-v1"
 RECOVERY_LINEAGE_SCHEMA_VERSION = "steel-module-managed-recovery-lineage-v1"
 RECOVERY_LINEAGE_SCHEMA_VERSION_V2 = "steel-module-managed-recovery-lineage-v2"
+RECOVERY_LINEAGE_SCHEMA_VERSION_V3 = "steel-module-managed-recovery-lineage-v3"
 SUCCESSOR_AUTHORITY_SCHEMA_VERSION = (
     "steel-module-production-successor-authority-v1"
 )
 SUCCESSOR_AUTHORITY_SCHEMA_VERSION_V2 = (
     "steel-module-production-successor-authority-v2"
+)
+SUCCESSOR_AUTHORITY_SCHEMA_VERSION_V3 = (
+    "steel-module-production-successor-authority-v3"
 )
 FORMAL_CHECKPOINT_STATE = "BC-ONLY-S1"
 FORMAL_EVIDENCE_MODE = "back-center-only"
@@ -95,6 +109,7 @@ def is_successor_execution_manifest(manifest: dict[str, Any]) -> bool:
     if schema in {
         EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
         EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3,
     }:
         if object_kind != SUCCESSOR_OBJECT_KIND:
             raise ValueError("successor execution schema/object-kind mismatch")
@@ -180,6 +195,8 @@ def recovery_lineage_from_execution(execution: Any) -> dict[str, Any] | None:
     schema = manifest.get("schema_version")
     authority = require_dict(manifest, "recovery_authority")
     predecessor = require_dict(authority, "predecessor_execution")
+    rejected_r3: dict[str, Any] | None = None
+    administrative_r3: dict[str, Any] | None = None
     if schema == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1:
         lineage_schema = RECOVERY_LINEAGE_SCHEMA_VERSION
         incident = require_dict(authority, "incident")
@@ -190,7 +207,10 @@ def recovery_lineage_from_execution(execution: Any) -> dict[str, Any] | None:
             "predecessor_failed_outputs_included": False,
             "predecessor_accounting_included": False,
         }
-    elif schema == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2:
+    elif schema in {
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3,
+    }:
         lineage_schema = RECOVERY_LINEAGE_SCHEMA_VERSION_V2
         incident = require_dict(authority, "original_production_incident")
         failed_r3 = require_dict(authority, "failed_r3_preflight")
@@ -202,6 +222,19 @@ def recovery_lineage_from_execution(execution: Any) -> dict[str, Any] | None:
             "failed_r3_preflight_outputs_included": False,
             "failed_r3_accounting_included": False,
         }
+        if schema == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3:
+            lineage_schema = RECOVERY_LINEAGE_SCHEMA_VERSION_V3
+            rejected_r3 = require_dict(authority, "rejected_r3_preflight")
+            administrative_r3 = require_dict(
+                authority, "administrative_r3_launch_rejection"
+            )
+            result_scope.update(
+                {
+                    "rejected_r3_preflight_outputs_included": False,
+                    "rejected_r3_accounting_included": False,
+                    "administrative_r3_launch_rejection_included_as_compute": False,
+                }
+            )
     else:  # guarded by is_successor_execution_manifest
         raise ValueError("unsupported recovery-successor schema")
     payload: dict[str, Any] = {
@@ -235,6 +268,12 @@ def recovery_lineage_from_execution(execution: Any) -> dict[str, Any] | None:
     }
     if failed_r3 is not None:
         payload["failed_r3_preflight"] = json.loads(json.dumps(failed_r3))
+    if rejected_r3 is not None:
+        payload["rejected_r3_preflight"] = json.loads(json.dumps(rejected_r3))
+    if administrative_r3 is not None:
+        payload["administrative_r3_launch_rejection"] = json.loads(
+            json.dumps(administrative_r3)
+        )
     payload["lineage_hash"] = sha256_bytes(canonical_json(payload))
     return payload
 
@@ -248,17 +287,18 @@ def validate_recovery_lineage(
     if schema not in {
         EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
         EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3,
     }:
         if lineage is not None:
             raise ValueError("historical execution must not carry recovery lineage")
         return None
     if not isinstance(lineage, dict):
         raise ValueError("successor evidence lacks recovery lineage")
-    expected_lineage_schema = (
-        RECOVERY_LINEAGE_SCHEMA_VERSION
-        if schema == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1
-        else RECOVERY_LINEAGE_SCHEMA_VERSION_V2
-    )
+    expected_lineage_schema = {
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1: RECOVERY_LINEAGE_SCHEMA_VERSION,
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2: RECOVERY_LINEAGE_SCHEMA_VERSION_V2,
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3: RECOVERY_LINEAGE_SCHEMA_VERSION_V3,
+    }[schema]
     if lineage.get("schema_version") != expected_lineage_schema:
         raise ValueError("unsupported recovery-lineage schema")
     expected_hash = require_sha256(lineage, "lineage_hash")
@@ -281,11 +321,11 @@ def validate_recovery_lineage(
     authority_hash = require_sha256(authority, "authority_hash")
     unhashed_authority = dict(authority)
     unhashed_authority.pop("authority_hash")
-    expected_authority_schema = (
-        SUCCESSOR_AUTHORITY_SCHEMA_VERSION
-        if schema == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1
-        else SUCCESSOR_AUTHORITY_SCHEMA_VERSION_V2
-    )
+    expected_authority_schema = {
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1: SUCCESSOR_AUTHORITY_SCHEMA_VERSION,
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2: SUCCESSOR_AUTHORITY_SCHEMA_VERSION_V2,
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3: SUCCESSOR_AUTHORITY_SCHEMA_VERSION_V3,
+    }[schema]
     if (
         authority.get("schema_version") != expected_authority_schema
         or sha256_bytes(canonical_json(unhashed_authority)) != authority_hash
@@ -321,9 +361,14 @@ def validate_recovery_lineage(
         )
         unhashed_predecessor_authority = dict(predecessor_authority)
         unhashed_predecessor_authority.pop("authority_hash")
+        expected_predecessor_authority_schema = (
+            SUCCESSOR_AUTHORITY_SCHEMA_VERSION
+            if schema == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2
+            else SUCCESSOR_AUTHORITY_SCHEMA_VERSION_V2
+        )
         if (
             predecessor_authority.get("schema_version")
-            != SUCCESSOR_AUTHORITY_SCHEMA_VERSION
+            != expected_predecessor_authority_schema
             or sha256_bytes(canonical_json(unhashed_predecessor_authority))
             != predecessor_authority_hash
             or predecessor_authority_hash
@@ -333,7 +378,14 @@ def validate_recovery_lineage(
         ):
             raise ValueError("recovery-lineage predecessor authority mismatch")
         incident = require_dict(authority, "original_production_incident")
-        if incident != require_dict(predecessor_authority, "incident"):
+        predecessor_incident_key = (
+            "incident"
+            if schema == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2
+            else "original_production_incident"
+        )
+        if incident != require_dict(
+            predecessor_authority, predecessor_incident_key
+        ):
             raise ValueError("recovery-lineage original incident changed")
     recorded_incident = require_dict(lineage, "predecessor_incident")
     for key in (
@@ -356,7 +408,10 @@ def validate_recovery_lineage(
         "predecessor_failed_outputs_included": False,
         "predecessor_accounting_included": False,
     }
-    if schema == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2:
+    if schema in {
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3,
+    }:
         failure = require_dict(authority, "failed_r3_preflight")
         if lineage.get("failed_r3_preflight") != failure:
             raise ValueError("recovery-lineage failed-R3 binding changed")
@@ -371,10 +426,14 @@ def validate_recovery_lineage(
             or not str(failure_scheduler.get("job_id", "")).isdigit()
         ):
             raise ValueError("recovery-lineage failed-R3 boundary is invalid")
-        original_attempt = require_dict(
-            require_dict(authority, "predecessor_recovery_authority"),
-            "predecessor_attempt",
+        original_authority = require_dict(
+            authority, "predecessor_recovery_authority"
         )
+        if schema == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3:
+            original_authority = require_dict(
+                original_authority, "predecessor_recovery_authority"
+            )
+        original_attempt = require_dict(original_authority, "predecessor_attempt")
         if (
             not isinstance(original_attempt.get("attempt_id"), str)
             or not original_attempt["attempt_id"]
@@ -385,6 +444,50 @@ def validate_recovery_lineage(
             {
                 "failed_r3_preflight_outputs_included": False,
                 "failed_r3_accounting_included": False,
+            }
+        )
+    if schema == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3:
+        rejected = require_dict(authority, "rejected_r3_preflight")
+        administrative = require_dict(
+            authority, "administrative_r3_launch_rejection"
+        )
+        if lineage.get("rejected_r3_preflight") != rejected:
+            raise ValueError("recovery-lineage rejected-R3 binding changed")
+        if lineage.get("administrative_r3_launch_rejection") != administrative:
+            raise ValueError(
+                "recovery-lineage administrative R3 binding changed"
+            )
+        rejected_scheduler = require_dict(rejected, "scheduler")
+        rejected_probe = require_dict(rejected, "probe")
+        rejected_consumption = require_dict(rejected, "consumption")
+        if (
+            rejected.get("accepted_compute_preflight_evidence") is not False
+            or not isinstance(rejected.get("classification"), str)
+            or not rejected["classification"]
+            or not str(rejected_scheduler.get("job_id", "")).isdigit()
+            or rejected_probe.get("apptainer_invoked") is not True
+            or rejected_probe.get("geant4_invoked") is not False
+            or rejected_probe.get("execution_snapshot_unchanged") is not True
+            or rejected_consumption
+            != {"events_consumed": 0, "production_seeds_consumed": 0}
+        ):
+            raise ValueError("recovery-lineage rejected-R3 boundary is invalid")
+        if (
+            administrative.get("compute_preflight") is not False
+            or administrative.get("apptainer_invoked") is not False
+            or administrative.get("geant4_invoked") is not False
+            or administrative.get("events_consumed") != 0
+            or administrative.get("production_seeds_consumed") != 0
+            or not str(administrative.get("job_id", "")).isdigit()
+        ):
+            raise ValueError(
+                "recovery-lineage administrative R3 boundary is invalid"
+            )
+        expected_scope.update(
+            {
+                "rejected_r3_preflight_outputs_included": False,
+                "rejected_r3_accounting_included": False,
+                "administrative_r3_launch_rejection_included_as_compute": False,
             }
         )
     scope = require_dict(lineage, "result_scope")
@@ -414,6 +517,26 @@ def recovery_lineage_exclusions(
             str(attempt.get("job_id", "")),
             str(require_dict(failed_r3, "scheduler").get("job_id", "")),
         }
+    elif lineage.get("schema_version") == RECOVERY_LINEAGE_SCHEMA_VERSION_V3:
+        predecessor_authority = require_dict(
+            authority, "predecessor_recovery_authority"
+        )
+        original_authority = require_dict(
+            predecessor_authority, "predecessor_recovery_authority"
+        )
+        attempt = require_dict(original_authority, "predecessor_attempt")
+        failed_r3 = require_dict(authority, "failed_r3_preflight")
+        rejected_r3 = require_dict(authority, "rejected_r3_preflight")
+        administrative_r3 = require_dict(
+            authority, "administrative_r3_launch_rejection"
+        )
+        attempts = {require_string(attempt, "attempt_id")}
+        jobs = {
+            str(attempt.get("job_id", "")),
+            str(require_dict(failed_r3, "scheduler").get("job_id", "")),
+            str(require_dict(rejected_r3, "scheduler").get("job_id", "")),
+            str(administrative_r3.get("job_id", "")),
+        }
     else:
         raise ValueError("unsupported recovery-lineage exclusion schema")
     if any(not value or not value.isdigit() for value in jobs):
@@ -442,6 +565,244 @@ def _tasks_from_finalized_rows(
         )
         for row in rows
     )
+
+
+def _load_canonical_successor_for_finalization(
+    execution_record: dict[str, Any],
+) -> Any:
+    """Reload the exact frozen successor named by formal finalization evidence."""
+
+    raw_directory = require_string(execution_record, "directory")
+    requested = Path(raw_directory)
+    if not requested.is_absolute() or requested.is_symlink():
+        raise ValueError("formal successor execution directory is unsafe")
+    directory = requested.resolve()
+    if str(directory) != raw_directory:
+        raise ValueError("formal successor execution directory is not canonical")
+    from steel_module_production_successor_lib import load_successor_execution
+
+    execution = load_successor_execution(
+        directory,
+        repo_root=directory / "sources/control",
+        allow_test_mode=False,
+        require_readiness=False,
+        verify_runtime=True,
+        verify_phase2a_control_plane=False,
+        verify_live_predecessor=False,
+        allow_closed_v2=True,
+    )
+    expected = {
+        "directory": str(execution.directory),
+        "schema_version": execution.manifest.get("schema_version"),
+        "object_kind": execution.manifest.get("object_kind"),
+        "execution_generation": execution.manifest.get("execution_generation"),
+        "execution_id": execution.execution_id,
+        "execution_hash": execution.execution_hash,
+    }
+    for key, value in expected.items():
+        if execution_record.get(key) != value:
+            raise ValueError(f"formal finalization execution {key} mismatch")
+    authority = require_dict(execution.manifest, "recovery_authority")
+    if execution_record.get("recovery_authority_hash") != authority.get(
+        "authority_hash"
+    ):
+        raise ValueError("formal finalization recovery authority mismatch")
+    return execution
+
+
+def _validate_canonical_selected_artifacts(
+    execution: Any, rows: tuple[dict[str, str], ...]
+) -> None:
+    """Rebind every selected row to its immutable canonical task marker."""
+
+    tasks = _tasks_from_finalized_rows(rows)
+    if tasks != execution.tasks:
+        raise ValueError("formal finalization task rows differ from execution plan")
+    for row in rows:
+        attempt_id = row.get("attempt_id", "")
+        logical_id = row.get("logical_task_id", "")
+        if not attempt_id or not logical_id:
+            raise ValueError("formal finalization task identity is incomplete")
+        marker_path = (
+            execution.directory
+            / "attempts"
+            / attempt_id
+            / "tasks"
+            / logical_id
+            / "task_result.json"
+        ).resolve()
+        marker = load_managed_task_result(execution, attempt_id, logical_id)
+        if (
+            row.get("task_result") != str(marker_path)
+            or marker_path.is_symlink()
+            or not marker_path.is_file()
+            or row.get("task_result_sha256") != sha256_file(marker_path)
+        ):
+            raise ValueError("formal finalization task-result binding mismatch")
+        artifacts = require_dict(marker, "artifacts")
+        for label in (
+            "run_config",
+            "macro",
+            "simulation_log",
+            "root",
+            "summary",
+            "efficiency_map",
+        ):
+            record = require_dict(artifacts, label)
+            relative = Path(require_string(record, "path"))
+            expected_path = (execution.directory / relative).resolve()
+            if (
+                row.get(label) != str(expected_path)
+                or row.get(f"{label}_sha256") != record.get("sha256")
+                or expected_path.is_symlink()
+                or not expected_path.is_file()
+                or sha256_file(expected_path) != record.get("sha256")
+            ):
+                raise ValueError(
+                    f"formal finalization canonical artifact mismatch: {label}"
+                )
+
+
+def _validate_canonical_pilot_seed_registry(
+    execution: Any, seed_audit: dict[str, Any]
+) -> None:
+    """Recompute the sealed-pilot exclusion set from the canonical program."""
+
+    program_record = require_dict(execution.managed_child.binding, "program")
+    program_dir = Path(require_string(program_record, "program_directory"))
+    program = load_production_program(
+        program_dir, verify_runtime_artifacts=False
+    )
+    if program.child_tasks.get("BC-S1") != execution.tasks:
+        raise ValueError("formal finalization differs from canonical BC-S1 registry")
+    pilot_seeds = tuple(record.seed for record in program.excluded_seeds)
+    if (
+        len(pilot_seeds) != 240
+        or len(set(pilot_seeds)) != 240
+        or seed_audit.get("sealed_pilot_seed_count") != 240
+        or seed_audit.get("sealed_pilot_unique_seed_count") != 240
+        or seed_audit.get("sealed_pilot_seed_set_hash")
+        != seed_set_hash(pilot_seeds)
+    ):
+        raise ValueError("formal finalization sealed-pilot seed registry mismatch")
+
+
+def _canonical_successful_array_indexes(
+    execution: Any,
+    attempt_id: str,
+    intent: dict[str, Any],
+    accounting: dict[str, Any],
+) -> set[int]:
+    """Recompute successful array indexes from canonical intent/accounting bytes."""
+
+    selected = require_dict(intent, "selected")
+    logical_ids = selected.get("logical_task_ids")
+    task_count = selected.get("task_count")
+    if (
+        not isinstance(logical_ids, list)
+        or not all(isinstance(value, str) and value for value in logical_ids)
+        or not isinstance(task_count, int)
+        or isinstance(task_count, bool)
+        or task_count < 1
+        or len(logical_ids) != task_count
+        or len(set(logical_ids)) != task_count
+    ):
+        raise ValueError("canonical intent selected-task order is invalid")
+    job_id = str(accounting.get("job_id", ""))
+    if not job_id.isdigit() or accounting.get("accepted_terminal") is not True:
+        raise ValueError("canonical accounting is not accepted terminal evidence")
+    expected_indexes = set(range(1, task_count + 1))
+    expected_keys = {str(index) for index in expected_indexes}
+    task_states = accounting.get("task_states")
+    task_exit_codes = accounting.get("task_exit_codes")
+    if (
+        not isinstance(task_states, dict)
+        or not isinstance(task_exit_codes, dict)
+        or set(task_states) != expected_keys
+        or set(task_exit_codes) != expected_keys
+    ):
+        raise ValueError("canonical accounting task maps are incomplete")
+
+    field_order = accounting.get("sacct_field_order")
+    if field_order == [
+        "JobID",
+        "JobIDRaw",
+        "State",
+        "ExitCode",
+        "ElapsedRaw",
+        "MaxRSS",
+        "MaxVMSize",
+    ]:
+        fields = tuple(field_order)
+        logical_field = "JobID"
+        raw_field = "JobIDRaw"
+        task_job_ids = accounting.get("task_job_ids")
+        task_job_ids_raw = accounting.get("task_job_ids_raw")
+        if (
+            not isinstance(task_job_ids, dict)
+            or not isinstance(task_job_ids_raw, dict)
+            or set(task_job_ids) != expected_keys
+            or set(task_job_ids_raw) != expected_keys
+        ):
+            raise ValueError("canonical accounting job-ID maps are incomplete")
+    elif field_order is None:
+        fields = (
+            "JobIDRaw",
+            "State",
+            "ExitCode",
+            "ElapsedRaw",
+            "MaxRSS",
+            "MaxVMSize",
+        )
+        logical_field = "JobIDRaw"
+        raw_field = "JobIDRaw"
+        task_job_ids = task_job_ids_raw = None
+    else:
+        raise ValueError("canonical accounting sacct field order is unsupported")
+
+    sacct_path = (
+        execution.directory / "attempts" / attempt_id / "accounting" / "sacct.psv"
+    )
+    if sacct_path.is_symlink() or not sacct_path.is_file():
+        raise ValueError("canonical accounting sacct evidence is missing")
+    rows: list[dict[str, str]] = []
+    for number, raw in enumerate(
+        sacct_path.read_text(encoding="utf-8").splitlines(), 1
+    ):
+        if not raw:
+            continue
+        values = raw.split("|")
+        if values and values[-1] == "":
+            values.pop()
+        if len(values) != len(fields):
+            raise ValueError(f"invalid canonical sacct row {number}: {raw!r}")
+        rows.append(dict(zip(fields, values)))
+    task_pattern = re.compile(rf"{re.escape(job_id)}_([1-9][0-9]*)")
+    task_rows: dict[int, dict[str, str]] = {}
+    for row in rows:
+        match = task_pattern.fullmatch(row[logical_field])
+        if match is None:
+            continue
+        index = int(match.group(1))
+        if index in task_rows:
+            raise ValueError("canonical accounting has duplicate array-task rows")
+        task_rows[index] = row
+    if set(task_rows) != expected_indexes:
+        raise ValueError("canonical accounting lacks the exact array-task set")
+
+    successful: set[int] = set()
+    for index, row in task_rows.items():
+        key = str(index)
+        if task_states[key] != row["State"] or task_exit_codes[key] != row["ExitCode"]:
+            raise ValueError("canonical accounting maps disagree with sacct rows")
+        if field_order is not None and (
+            task_job_ids[key] != row[logical_field]
+            or task_job_ids_raw[key] != row[raw_field]
+        ):
+            raise ValueError("canonical accounting job IDs disagree with sacct rows")
+        if base_slurm_state(row["State"]) == "COMPLETED" and row["ExitCode"] == "0:0":
+            successful.add(index)
+    return successful
 
 
 def _successor_task_identity(tasks: tuple[CampaignTask, ...]) -> dict[str, Any]:
@@ -483,6 +844,7 @@ def validate_successor_seed_lineage(
     if execution_record.get("schema_version") not in {
         EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
         EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3,
     }:
         return
     if lineage is None:
@@ -544,12 +906,15 @@ def validate_successor_selection_and_accounting(
     lineage: dict[str, Any] | None,
     rows: tuple[dict[str, str], ...],
     selection: dict[str, Any],
+    *,
+    canonical_execution: Any | None = None,
 ) -> None:
     """Bind selected rows and every copied accounting snapshot to the successor."""
 
     if execution_record.get("schema_version") not in {
         EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
         EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3,
     }:
         return
     if lineage is None:
@@ -577,12 +942,14 @@ def validate_successor_selection_and_accounting(
     if selected_attempts & forbidden_attempts:
         raise ValueError("successor selection contains predecessor attempt")
     selected_jobs_by_attempt: dict[str, set[str]] = {}
+    selected_rows_by_attempt: dict[str, list[dict[str, str]]] = {}
     for row in rows:
         attempt_id = row["attempt_id"]
         job_id = row["slurm_job_id"]
         if job_id in forbidden_jobs:
             raise ValueError("successor selection contains predecessor scheduler job")
         selected_jobs_by_attempt.setdefault(attempt_id, set()).add(job_id)
+        selected_rows_by_attempt.setdefault(attempt_id, []).append(row)
     accounting_attempts = validation.get("accounting_attempts")
     if (
         not isinstance(accounting_attempts, list)
@@ -603,7 +970,8 @@ def validate_successor_selection_and_accounting(
     if actual_attempts != set(accounting_attempts):
         raise ValueError("successor copied accounting set is inconsistent")
     for attempt_id in accounting_attempts:
-        frozen = load_json(accounting_root / attempt_id / "frozen.json")
+        copied_accounting = accounting_root / attempt_id
+        frozen = load_json(copied_accounting / "frozen.json")
         job_id = str(frozen.get("job_id", ""))
         if frozen.get("attempt_id") != attempt_id or not job_id.isdigit():
             raise ValueError("successor copied accounting identity is invalid")
@@ -612,6 +980,56 @@ def validate_successor_selection_and_accounting(
         expected_jobs = selected_jobs_by_attempt.get(attempt_id)
         if expected_jobs is not None and expected_jobs != {job_id}:
             raise ValueError("successor selected rows/accounting job mismatch")
+        if canonical_execution is not None:
+            intent = load_attempt_intent(canonical_execution, attempt_id)
+            selected = require_dict(intent, "selected")
+            logical_ids = selected.get("logical_task_ids")
+            if not isinstance(logical_ids, list) or not all(
+                isinstance(value, str) and value for value in logical_ids
+            ):
+                raise ValueError("canonical intent logical-task order is invalid")
+            array_index_by_id = {
+                logical_id: index
+                for index, logical_id in enumerate(logical_ids, start=1)
+            }
+            if len(array_index_by_id) != len(logical_ids):
+                raise ValueError("canonical intent logical-task order has duplicates")
+            canonical = load_frozen_accounting(
+                canonical_execution, attempt_id, require_event_binding=True
+            )
+            canonical_accounting = (
+                canonical_execution.directory
+                / "attempts"
+                / attempt_id
+                / "accounting"
+            )
+            verify_recursive_checksums(
+                copied_accounting,
+                required={"frozen.json", "sacct.psv", "squeue.psv"},
+            )
+            if (
+                frozen != canonical
+                or recursive_file_records(copied_accounting, exclude=())
+                != recursive_file_records(canonical_accounting, exclude=())
+            ):
+                raise ValueError(
+                    "successor copied accounting differs from canonical evidence"
+                )
+            successful_indexes = _canonical_successful_array_indexes(
+                canonical_execution, attempt_id, intent, canonical
+            )
+            for row in selected_rows_by_attempt.get(attempt_id, ()):
+                logical_id = row["logical_task_id"]
+                expected_index = array_index_by_id.get(logical_id)
+                recorded_index = _require_int(row, "slurm_array_index")
+                if expected_index is None or recorded_index != expected_index:
+                    raise ValueError(
+                        "successor row array index differs from canonical intent"
+                    )
+                if recorded_index not in successful_indexes:
+                    raise ValueError(
+                        "successor selected row is not a canonical successful array task"
+                    )
 
 
 def readiness_identity_for_execution(
@@ -648,7 +1066,10 @@ def readiness_identity_for_execution(
             "predecessor_incident_id": incident.get("incident_id"),
             "predecessor_incident_hash": incident.get("incident_hash"),
         }
-        if schema == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2:
+        if schema in {
+            EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
+            EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3,
+        }:
             failed_r3 = require_dict(authority, "failed_r3_preflight")
             identity.update(
                 {
@@ -657,6 +1078,24 @@ def readiness_identity_for_execution(
                     "failed_r3_job_id": require_dict(
                         failed_r3, "scheduler"
                     ).get("job_id"),
+                }
+            )
+        if schema == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3:
+            rejected_r3 = require_dict(authority, "rejected_r3_preflight")
+            administrative_r3 = require_dict(
+                authority, "administrative_r3_launch_rejection"
+            )
+            identity.update(
+                {
+                    "rejected_r3_id": rejected_r3.get("rejection_id"),
+                    "rejected_r3_hash": rejected_r3.get("rejection_hash"),
+                    "rejected_r3_job_id": require_dict(
+                        rejected_r3, "scheduler"
+                    ).get("job_id"),
+                    "administrative_r3_job_id": administrative_r3.get(
+                        "job_id"
+                    ),
+                    "administrative_r3_compute_preflight": False,
                 }
             )
         return identity
@@ -726,6 +1165,48 @@ def write_recursive_checksums(directory: Path) -> None:
         raise
 
 
+def _rename_directory_no_replace(temporary: Path, target: Path) -> None:
+    """Atomically rename one directory while refusing an existing target.
+
+    Python's :func:`os.rename` may replace an empty destination directory, so
+    an existence check followed by ``os.rename`` is not a no-replace
+    primitive.  Linux/OSC provides ``renameat2(RENAME_NOREPLACE)`` and macOS
+    provides ``renamex_np(RENAME_EXCL)``.  Unsupported platforms fail closed.
+    """
+
+    libc = ctypes.CDLL(None, use_errno=True)
+    source = os.fsencode(temporary)
+    destination = os.fsencode(target)
+    if sys.platform.startswith("linux") and hasattr(libc, "renameat2"):
+        rename = libc.renameat2
+        rename.argtypes = [
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        ]
+        rename.restype = ctypes.c_int
+        result = rename(-100, source, -100, destination, 1)
+    elif sys.platform == "darwin" and hasattr(libc, "renamex_np"):
+        rename = libc.renamex_np
+        rename.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+        rename.restype = ctypes.c_int
+        result = rename(source, destination, 0x00000004)
+    else:
+        raise OSError(
+            errno.ENOTSUP,
+            "atomic no-replace directory publication is unsupported",
+            str(target),
+        )
+    if result == 0:
+        return
+    error = ctypes.get_errno()
+    if error in {errno.EEXIST, errno.ENOTEMPTY}:
+        raise FileExistsError(error, os.strerror(error), str(target))
+    raise OSError(error, os.strerror(error), str(target))
+
+
 def publish_directory_no_replace(temporary: Path, target: Path) -> None:
     """Publish a completed sibling tree without an internal writer race.
 
@@ -741,9 +1222,12 @@ def publish_directory_no_replace(temporary: Path, target: Path) -> None:
     except FileExistsError as exc:
         raise ValueError(f"publication is already active or quarantined: {lock}") from exc
     try:
-        if target.exists() or target.is_symlink():
-            raise ValueError(f"refusing to overwrite evidence directory: {target}")
-        os.rename(temporary, target)
+        try:
+            _rename_directory_no_replace(temporary, target)
+        except FileExistsError as exc:
+            raise ValueError(
+                f"refusing to overwrite evidence directory: {target}"
+            ) from exc
         parent_fd = os.open(target.parent, os.O_RDONLY)
         try:
             os.fsync(parent_fd)
@@ -934,6 +1418,7 @@ def load_managed_finalization(
     event_audit = load_json(directory / "event_audit.json")
     seed_audit = load_json(directory / "seed_audit.json")
     selection = load_json(directory / "selection_record.json")
+    canonical_execution = None
     if lineage is not None:
         for name, value in (
             ("event_audit.json", event_audit),
@@ -948,6 +1433,10 @@ def load_managed_finalization(
             != execution_record.get("execution_hash")
         ):
             raise ValueError("successor event audit execution identity mismatch")
+        if not test_mode:
+            canonical_execution = _load_canonical_successor_for_finalization(
+                execution_record
+            )
     rows = validate_bc_only_s1_rows(
         read_tsv(directory / "task_index.tsv"),
         verify_root_files=verify_root_files,
@@ -955,6 +1444,11 @@ def load_managed_finalization(
     validate_successor_seed_lineage(
         execution_record, lineage, rows, seed_audit
     )
+    if canonical_execution is not None:
+        _validate_canonical_selected_artifacts(canonical_execution, rows)
+        _validate_canonical_pilot_seed_registry(
+            canonical_execution, seed_audit
+        )
     validate_successor_selection_and_accounting(
         directory,
         validation,
@@ -962,6 +1456,7 @@ def load_managed_finalization(
         lineage,
         rows,
         selection,
+        canonical_execution=canonical_execution,
     )
     return validation, rows
 
@@ -1026,15 +1521,25 @@ def load_production_checkpoint(
         successor = execution.get("schema_version") in {
             EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
             EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
+            EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3,
         }
         if successor:
             if execution.get("object_kind") != SUCCESSOR_OBJECT_KIND:
                 raise ValueError("checkpoint successor schema/object-kind mismatch")
             from steel_module_production_successor_lib import (
                 FORMAL_SUCCESSOR_EXECUTION_NAME,
+                FORMAL_SUCCESSOR_EXECUTION_NAME_V2,
+                FORMAL_SUCCESSOR_EXECUTION_NAME_V3,
             )
 
-            execution_name = FORMAL_SUCCESSOR_EXECUTION_NAME
+            execution_name = {
+                EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1:
+                    FORMAL_SUCCESSOR_EXECUTION_NAME_V2,
+                EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2:
+                    FORMAL_SUCCESSOR_EXECUTION_NAME_V3,
+                EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3:
+                    FORMAL_SUCCESSOR_EXECUTION_NAME,
+            }[execution.get("schema_version")]
         else:
             execution_name = FORMAL_EXECUTION_NAME
         canonical_execution = canonical_child.parent / execution_name

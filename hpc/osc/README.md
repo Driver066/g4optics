@@ -607,23 +607,83 @@ R3 bundle. Its 32 task rows, scan arguments, 64 seeds, simulation source,
 executable, image, and Geant4 data identity remain byte-for-byte equivalent to
 Phase-2A/v2. V3 leaves `intents/`, `attempts/`, and `finalized/` empty and
 reports `submission_ready=false`; neither earlier readiness record can
-authorize it. A separately authorized compute-node container preflight and a
-new additive recovery-v2 readiness lock are still required before even
-preparing the one-time `predecessor-retry` intent.
+authorize it.
+
+The first correctly admitted execution-v3 compute probe, Slurm job `50548308`
+(`g4sm-r3-30d01a2a03d9`), did reach Apptainer but rejected its own successful
+read-only result because of a writer-probe instrumentation bug. It did not
+invoke Geant4 or consume an event or production seed. Execution-v3 and that
+job are immutable rejected-preflight history. Preview and then seal their
+exact raw output and externally frozen scheduler evidence before creating the
+next execution generation:
+
+```bash
+V3="$WORK/campaigns/steel-module-production-bc-s1-execution-v3"
+R3ROOT="$WORK/evidence/steel-module-production-r3"
+REJECT_JOB=50548308
+REJECT_NAME=g4sm-r3-30d01a2a03d9
+RAW_REJECT="$R3ROOT/raw/$REJECT_NAME"
+
+python3 hpc/osc/seal_steel_module_production_r3_probe_rejection.py \
+  --execution-dir "$V3" \
+  --raw-workspace "$RAW_REJECT" \
+  --held-scontrol-input "$R3ROOT/held-scontrol-$REJECT_JOB.txt" \
+  --sacct-input "$R3ROOT/sacct-$REJECT_JOB.psv" \
+  --squeue-input "$R3ROOT/squeue-$REJECT_JOB.psv" \
+  --slurm-output-input "$R3ROOT/slurm-$REJECT_JOB.out" \
+  --check-only
+
+python3 hpc/osc/seal_steel_module_production_r3_probe_rejection.py \
+  --execution-dir "$V3" \
+  --raw-workspace "$RAW_REJECT" \
+  --held-scontrol-input "$R3ROOT/held-scontrol-$REJECT_JOB.txt" \
+  --sacct-input "$R3ROOT/sacct-$REJECT_JOB.psv" \
+  --squeue-input "$R3ROOT/squeue-$REJECT_JOB.psv" \
+  --slurm-output-input "$R3ROOT/slurm-$REJECT_JOB.out" \
+  --seal
+```
+
+Both forms perform no scheduler call. The sealer fixes the execution-v3
+identity, job ID/name, all externally recorded SHA-256 values, the exact two
+false writer-report keys, unchanged execution snapshot, and zero event/seed
+consumption. The sealed bundle remains rejected evidence and can never satisfy
+the accepted-preflight gate.
+
+After that bundle exists, preview, materialize, and validate the canonical
+execution-v4 without scheduler contact:
+
+```bash
+python3 hpc/osc/materialize_steel_module_production_successor_v4_execution.py \
+  --check-only
+python3 hpc/osc/materialize_steel_module_production_successor_v4_execution.py \
+  --materialize
+python3 hpc/osc/validate_steel_module_production_successor_v4_execution.py \
+  --check-only
+```
+
+Execution-v4 is the fixed sibling
+`$WORK/campaigns/steel-module-production-bc-s1-execution-v4`. It binds all
+preceding history, including the sealed `50548308` rejection, while preserving
+the 32 tasks, 8,000 events, 64 production seeds, simulation source, runtime,
+and physics inputs. It starts with empty `intents/`, `attempts/`, and
+`finalized/`, and still reports `submission_ready=false`. Job `50544247` and
+job `50548308` are failed compute-preflight history; job `50547698` remains a
+separate administrative launcher rejection and must not be counted as a
+compute preflight.
 
 Replacement R3 is one non-array compute job. It invokes the pinned Apptainer
 image to test the exact production mount boundary but never invokes Geant4.
-The frozen v3 control archive must be used as the job-script source. The shell launcher
-is safe when Slurm copies it into `/var/spool`: it derives authority from the
-scheduler-established `--chdir` working directory, accepts no positional
-arguments, distrusts `SLURM_SUBMIT_DIR`, parses only the top-level execution
-hash in an isolated Python environment, and then runs the frozen Python probe
-by absolute path. A typical reviewed
-submission shape is shown below; `sbatch` and `scontrol release` remain separate
-explicit human actions and are not called by any R3 Python tool:
+The frozen v4 control archive must be used as the job-script source. The shell
+launcher is safe when Slurm copies it into `/var/spool`: it derives authority
+from the scheduler-established `--chdir` working directory, accepts no
+positional arguments, distrusts `SLURM_SUBMIT_DIR`, parses only the top-level
+execution hash in an isolated Python environment, and then runs the frozen
+Python probe by absolute path. A typical reviewed submission shape is shown
+below; `sbatch` and `scontrol release` remain separate explicit human actions
+and are not called by any R3 Python tool:
 
 ```bash
-EXECUTION="$WORK/campaigns/steel-module-production-bc-s1-execution-v3"
+EXECUTION="$WORK/campaigns/steel-module-production-bc-s1-execution-v4"
 CONTROL="$EXECUTION/sources/control"
 R3ROOT="$WORK/evidence/steel-module-production-r3"
 mkdir -p "$R3ROOT/raw" "$R3ROOT/accounting" "$R3ROOT/evidence"
@@ -642,15 +702,46 @@ SUBMISSION=$(sbatch --hold --parsable --no-requeue --export=NONE \
 JOB_ID=${SUBMISSION%%;*}
 [[ "$JOB_ID" =~ ^[1-9][0-9]*$ ]] || { echo "invalid R3 job id" >&2; exit 1; }
 
-# Freeze the exact held command/workdir/output/account identity before release.
-scontrol show job -o "$JOB_ID" > "$R3ROOT/held-scontrol-$JOB_ID.txt"
-# Human-review this row, then perform the only R3 release write.
+# Capture into a private temporary file. A failed/truncated query cannot reach
+# release, and hard-link publication refuses to replace an existing snapshot.
+HELD="$R3ROOT/held-scontrol-$JOB_ID.txt"
+HELD_TMP=$(mktemp "$R3ROOT/.held-scontrol-$JOB_ID.XXXXXX") || exit 1
+if ! scontrol show job -o "$JOB_ID" > "$HELD_TMP"; then
+  rm -f "$HELD_TMP"
+  exit 1
+fi
+if ! python3 hpc/osc/validate_steel_module_production_r3_held_job.py \
+  --job-id "$JOB_ID" --job-name "$JOB_NAME" \
+  --execution-dir "$EXECUTION" \
+  --held-scontrol-input "$HELD_TMP" --check-only; then
+  rm -f "$HELD_TMP"
+  exit 1
+fi
+ln "$HELD_TMP" "$HELD" || { rm -f "$HELD_TMP"; exit 1; }
+rm -f "$HELD_TMP"
+python3 hpc/osc/validate_steel_module_production_r3_held_job.py \
+  --job-id "$JOB_ID" --job-name "$JOB_NAME" \
+  --execution-dir "$EXECUTION" \
+  --held-scontrol-input "$HELD" --check-only
+```
+
+Stop here. The validator must print `PASS`, and a human must independently
+review the captured row for the exact job name, case-insensitive `PAS2524`
+account, `PENDING / JobHeldUser`, `Requeue=0`, non-array shape, execution-v4
+`WorkDir`, frozen launcher `Command`, and requested `StdOut`. If any field
+differs, preserve the held job and stop for review.
+
+Only after that distinct review may the one release write be issued as a
+separate command:
+
+```bash
 scontrol release "$JOB_ID"
 ```
 
-Verify the held job identity before an explicit `scontrol release <job-id>`.
-After the job is terminal, freeze externally collected read-only accounting and
-seal the content-addressed bundle:
+After release, require one terminal parent plus its batch and extern steps,
+all `COMPLETED / 0:0`, and an empty terminal `squeue` result. Then freeze the
+externally collected read-only accounting and seal the content-addressed
+successful bundle:
 
 ```bash
 sacct -n -P -j "$JOB_ID" \
@@ -684,9 +775,9 @@ python3 hpc/osc/generate_steel_module_production_successor_readiness.py \
 ```
 
 The candidate is not authority. It must be reviewed and then committed as
-`hpc/osc/configurations/steel-module-production-phase2b-recovery-v2.lock.json`
-in a clean, non-merge R4 commit whose only delta from the frozen v3
-implementation is that file.
+`hpc/osc/configurations/steel-module-production-phase2b-recovery-v3.lock.json`
+in a clean, non-merge R4 commit whose only delta from the control-plane commit
+frozen into execution-v4 is that file.
 The manager revalidates the tracked lock and the complete R3 bundle before
 intent creation and again before scheduler contact.
 
@@ -694,7 +785,7 @@ After all 32 tasks have one valid selected success, the offline downstream
 sequence is:
 
 ```bash
-EXECUTION="$WORK/campaigns/steel-module-production-bc-s1-execution-v3"
+EXECUTION="$WORK/campaigns/steel-module-production-bc-s1-execution-v4"
 
 python3 hpc/osc/finalize_steel_module_managed_child.py \
   --execution-dir "$EXECUTION" --check-only

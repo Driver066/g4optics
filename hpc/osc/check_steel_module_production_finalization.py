@@ -28,6 +28,7 @@ from steel_module_campaign_lib import (
 from steel_module_production_checkpoint_lib import (
     MANAGED_FINALIZATION_SCHEMA_VERSION,
     RECOVERY_LINEAGE_SCHEMA_VERSION_V2,
+    RECOVERY_LINEAGE_SCHEMA_VERSION_V3,
     SUCCESSOR_FINALIZATION_BUNDLE_NAME,
     load_managed_finalization,
     load_execution_for_downstream,
@@ -42,6 +43,7 @@ from steel_module_production_checkpoint_lib import (
 from steel_module_production_phase2b_lib import (
     EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
     EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
+    EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3,
     EXECUTION_SCHEMA_VERSION_V2,
     SUCCESSOR_OBJECT_KIND,
 )
@@ -220,6 +222,85 @@ def fixture_successor_v3(root: Path) -> SimpleNamespace:
         directory=execution_dir,
         execution_id="fixture-successor-v3",
         execution_hash="e" * 64,
+        manifest=manifest,
+    )
+
+
+def fixture_successor_v4(root: Path) -> SimpleNamespace:
+    """A compact execution-v4 authority with both compute-preflight failures."""
+
+    execution_dir = (root / "successor-v4-execution").resolve()
+    predecessor = fixture_successor_v3(root)
+    predecessor_authority = predecessor.manifest["recovery_authority"]
+    identity = fixture_task_identity(root)
+    authority: dict[str, Any] = {
+        "schema_version": "steel-module-production-successor-authority-v3",
+        "predecessor_execution": {
+            "directory": str(predecessor.directory),
+            "schema_version": predecessor.manifest["schema_version"],
+            "execution_generation": predecessor.manifest["execution_generation"],
+            "execution_id": predecessor.execution_id,
+            "execution_hash": predecessor.execution_hash,
+            "managed_execution_sha256": "1" * 64,
+            "static_checksums_sha256": "2" * 64,
+            "recovery_authority_hash": predecessor_authority["authority_hash"],
+        },
+        "predecessor_recovery_authority": predecessor_authority,
+        "original_production_incident": predecessor_authority[
+            "original_production_incident"
+        ],
+        "failed_r3_preflight": predecessor_authority["failed_r3_preflight"],
+        "administrative_r3_launch_rejection": {
+            "classification": "pre-probe-administrative-launch-rejection",
+            "job_id": "50547698",
+            "manifest_path": str(root / "rejected-launch-50547698.sha256"),
+            "manifest_sha256": "3" * 64,
+            "compute_preflight": False,
+            "apptainer_invoked": False,
+            "geant4_invoked": False,
+            "events_consumed": 0,
+            "production_seeds_consumed": 0,
+        },
+        "rejected_r3_preflight": {
+            "directory": str(root / "rejected-r3"),
+            "schema_version": (
+                "steel-module-production-r3-container-probe-rejection-evidence-v1"
+            ),
+            "rejection_id": "fixture-r3-rejection",
+            "rejection_hash": "4" * 64,
+            "checksum_manifest_sha256": "5" * 64,
+            "recursive_record_count": 8,
+            "accepted_compute_preflight_evidence": False,
+            "classification": "container-isolation-writer-open-rejection-failure",
+            "execution": {
+                "execution_id": predecessor.execution_id,
+                "execution_hash": predecessor.execution_hash,
+            },
+            "scheduler": {"job_id": "50548308"},
+            "probe": {
+                "apptainer_invoked": True,
+                "geant4_invoked": False,
+                "execution_snapshot_unchanged": True,
+            },
+            "consumption": {
+                "events_consumed": 0,
+                "production_seeds_consumed": 0,
+            },
+        },
+        "zero_consumption": predecessor_authority["zero_consumption"],
+        "retry_equivalence": {**identity, "all_equal": True},
+    }
+    authority["authority_hash"] = sha256_bytes(canonical_json(authority))
+    manifest = {
+        "schema_version": EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3,
+        "object_kind": SUCCESSOR_OBJECT_KIND,
+        "execution_generation": "predecessor-retry-successor-v4",
+        "recovery_authority": authority,
+    }
+    return SimpleNamespace(
+        directory=execution_dir,
+        execution_id="fixture-successor-v4",
+        execution_hash="f" * 64,
         manifest=manifest,
     )
 
@@ -459,7 +540,8 @@ def check_execution_dispatch(root: Path) -> None:
         assert old_loader.call_args.kwargs["require_readiness"] is True
     for label, schema in (
         ("v2-history", EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1),
-        ("v3-active", EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2),
+        ("v3-history", EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2),
+        ("v4-active", EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3),
     ):
         successor_dir = root / f"dispatch-successor-{label}"
         successor_dir.mkdir()
@@ -584,6 +666,305 @@ def write_successor_finalization(
     )
     rewrite_recursive_checksums(target)
     return target, lineage
+
+
+def check_canonical_finalization_rebinding(root: Path) -> None:
+    """Bind formal rows to canonical task markers, accounting, and pilot seeds."""
+
+    artifact_root = (root / "canonical-artifact-execution").resolve()
+    rows = tuple(
+        {key: str(value) for key, value in row.items()}
+        for row in fixture_rows(root)
+    )
+    execution = SimpleNamespace(
+        directory=artifact_root,
+        tasks=checkpoint_lib._tasks_from_finalized_rows(rows),
+    )
+    markers: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        logical_id = row["logical_task_id"]
+        task_root = (
+            artifact_root
+            / "attempts"
+            / "fixture-attempt"
+            / "tasks"
+            / logical_id
+        )
+        task_root.mkdir(parents=True)
+        artifacts: dict[str, dict[str, str]] = {}
+        for label in (
+            "run_config",
+            "macro",
+            "simulation_log",
+            "root",
+            "summary",
+            "efficiency_map",
+        ):
+            path = task_root / f"{label}.fixture"
+            path.write_text(f"{logical_id}:{label}\n", encoding="utf-8")
+            digest = sha256_file(path)
+            artifacts[label] = {
+                "path": path.relative_to(artifact_root).as_posix(),
+                "sha256": digest,
+            }
+            row[label] = str(path)
+            row[f"{label}_sha256"] = digest
+        marker_path = task_root / "task_result.json"
+        marker = {"artifacts": artifacts}
+        json_write(marker_path, marker)
+        row["task_result"] = str(marker_path)
+        row["task_result_sha256"] = sha256_file(marker_path)
+        markers[logical_id] = marker
+
+    def load_marker(
+        candidate: Any, attempt_id: str, logical_id: str
+    ) -> dict[str, Any]:
+        assert candidate is execution
+        assert attempt_id == "fixture-attempt"
+        return markers[logical_id]
+
+    with patch.object(
+        checkpoint_lib,
+        "load_managed_task_result",
+        side_effect=load_marker,
+    ):
+        checkpoint_lib._validate_canonical_selected_artifacts(execution, rows)
+
+        # A same-content external ROOT cannot be substituted for the canonical
+        # path merely by preserving/re-signing its digest.
+        external_root = root / "external-same-content.root"
+        shutil.copyfile(Path(rows[0]["root"]), external_root)
+        detached = tuple(dict(row) for row in rows)
+        detached[0]["root"] = str(external_root.resolve())
+        assert detached[0]["root_sha256"] == sha256_file(external_root)
+        expect_failure(
+            checkpoint_lib._validate_canonical_selected_artifacts,
+            execution,
+            detached,
+            contains="canonical artifact mismatch: root",
+        )
+
+        detached_marker = tuple(dict(row) for row in rows)
+        external_marker = root / "external-task-result.json"
+        shutil.copyfile(Path(rows[0]["task_result"]), external_marker)
+        detached_marker[0]["task_result"] = str(external_marker.resolve())
+        expect_failure(
+            checkpoint_lib._validate_canonical_selected_artifacts,
+            execution,
+            detached_marker,
+            contains="task-result binding mismatch",
+        )
+
+        altered_task = tuple(dict(row) for row in rows)
+        altered_task[0]["seed1"] = str(int(altered_task[0]["seed1"]) + 1)
+        expect_failure(
+            checkpoint_lib._validate_canonical_selected_artifacts,
+            execution,
+            altered_task,
+            contains="task rows differ from execution plan",
+        )
+
+    attempt_id = "20260721T120000Z-fixture"
+    accounting_execution = fixture_successor_v4(
+        root / "canonical-accounting-authority"
+    )
+    canonical_accounting = (
+        accounting_execution.directory
+        / "attempts"
+        / attempt_id
+        / "accounting"
+    )
+    copied_finalization = root / "copied-accounting-finalization"
+    copied_accounting = copied_finalization / "accounting" / attempt_id
+    canonical_accounting.mkdir(parents=True)
+    copied_accounting.mkdir(parents=True)
+    accounting_rows = tuple(
+        {
+            **{key: str(value) for key, value in row.items()},
+            "attempt_id": attempt_id,
+        }
+        for row in fixture_rows(root)
+    )
+    logical_ids = [row["logical_task_id"] for row in accounting_rows]
+    frozen = {
+        "attempt_id": attempt_id,
+        "job_id": "12345",
+        "accepted_terminal": True,
+        "task_states": {str(index): "COMPLETED" for index in range(1, 33)},
+        "task_exit_codes": {str(index): "0:0" for index in range(1, 33)},
+    }
+    sacct_text = "".join(
+        f"12345_{index}|COMPLETED|0:0|1|||\n" for index in range(1, 33)
+    )
+    for directory in (canonical_accounting, copied_accounting):
+        json_write(directory / "frozen.json", frozen)
+        (directory / "sacct.psv").write_text(sacct_text, encoding="utf-8")
+        (directory / "squeue.psv").write_text("", encoding="utf-8")
+        write_recursive_checksums(directory)
+
+    lineage = recovery_lineage_from_execution(accounting_execution)
+    assert lineage is not None
+    execution_record = {
+        "schema_version": accounting_execution.manifest["schema_version"],
+        "execution_id": accounting_execution.execution_id,
+        "directory": str(accounting_execution.directory),
+    }
+    validation = {"accounting_attempts": [attempt_id]}
+    selection = {
+        "schema_version": "steel-module-managed-selection-v1",
+        "selected_task_count": 32,
+        "source_execution_id": accounting_execution.execution_id,
+        "source_execution_directory": str(accounting_execution.directory),
+        "selected_results": "successor-successes-only",
+        "predecessor_failed_outputs_included": False,
+        "selected_attempts": {
+            row["logical_task_id"]: attempt_id
+            for row in accounting_rows
+        },
+        "explicit_selection": {},
+        "duplicate_successes_resolved": [],
+    }
+    intent = {
+        "selected": {
+            "task_count": 32,
+            "logical_task_ids": logical_ids,
+        }
+    }
+    with patch.object(
+        checkpoint_lib, "load_frozen_accounting", return_value=frozen
+    ), patch.object(
+        checkpoint_lib, "load_attempt_intent", return_value=intent
+    ):
+        checkpoint_lib.validate_successor_selection_and_accounting(
+            copied_finalization,
+            validation,
+            execution_record,
+            lineage,
+            accounting_rows,
+            selection,
+            canonical_execution=accounting_execution,
+        )
+
+        detached_index = tuple(dict(row) for row in accounting_rows)
+        detached_index[0]["slurm_array_index"] = "999"
+        expect_failure(
+            checkpoint_lib.validate_successor_selection_and_accounting,
+            copied_finalization,
+            validation,
+            execution_record,
+            lineage,
+            detached_index,
+            selection,
+            canonical_execution=accounting_execution,
+            contains="array index differs from canonical intent",
+        )
+
+        # Re-signing the copied snapshot after changing one byte must not make
+        # it equivalent to the execution's canonical accounting directory.
+        (copied_accounting / "sacct.psv").write_text(
+            "12345_1|COMPLETED|0:0|extra\n", encoding="utf-8"
+        )
+        rewrite_recursive_checksums(copied_accounting)
+        expect_failure(
+            checkpoint_lib.validate_successor_selection_and_accounting,
+            copied_finalization,
+            validation,
+            execution_record,
+            lineage,
+            accounting_rows,
+            selection,
+            canonical_execution=accounting_execution,
+            contains="copied accounting differs from canonical evidence",
+        )
+
+    # Even with a byte-identical, re-signed accounting copy, a selected row
+    # cannot point at an array index whose canonical terminal row failed.
+    failed = json.loads(json.dumps(frozen))
+    failed["task_states"]["1"] = "FAILED"
+    failed["task_exit_codes"]["1"] = "1:0"
+    failed_sacct = sacct_text.replace(
+        "12345_1|COMPLETED|0:0|1|||\n",
+        "12345_1|FAILED|1:0|1|||\n",
+        1,
+    )
+    for directory in (canonical_accounting, copied_accounting):
+        if (directory / "SHA256SUMS").exists():
+            (directory / "SHA256SUMS").unlink()
+        json_write(directory / "frozen.json", failed)
+        (directory / "sacct.psv").write_text(failed_sacct, encoding="utf-8")
+        write_recursive_checksums(directory)
+    with patch.object(
+        checkpoint_lib, "load_frozen_accounting", return_value=failed
+    ), patch.object(
+        checkpoint_lib, "load_attempt_intent", return_value=intent
+    ):
+        expect_failure(
+            checkpoint_lib.validate_successor_selection_and_accounting,
+            copied_finalization,
+            validation,
+            execution_record,
+            lineage,
+            accounting_rows,
+            selection,
+            canonical_execution=accounting_execution,
+            contains="not a canonical successful array task",
+        )
+
+    pilot_tasks = fixture_tasks(root)
+    pilot_seeds = tuple(range(20_000, 20_240))
+    pilot_execution = SimpleNamespace(
+        tasks=pilot_tasks,
+        managed_child=SimpleNamespace(
+            binding={
+                "program": {
+                    "program_directory": str((root / "canonical-program").resolve())
+                }
+            }
+        ),
+    )
+    program = SimpleNamespace(
+        child_tasks={"BC-S1": pilot_tasks},
+        excluded_seeds=tuple(
+            SimpleNamespace(seed=seed) for seed in pilot_seeds
+        ),
+    )
+    seed_audit = {
+        "sealed_pilot_seed_count": 240,
+        "sealed_pilot_unique_seed_count": 240,
+        "sealed_pilot_seed_set_hash": seed_set_hash(pilot_seeds),
+    }
+    with patch.object(
+        checkpoint_lib, "load_production_program", return_value=program
+    ):
+        checkpoint_lib._validate_canonical_pilot_seed_registry(
+            pilot_execution, seed_audit
+        )
+        resigned_bad_hash = dict(seed_audit)
+        resigned_bad_hash["sealed_pilot_seed_set_hash"] = "0" * 64
+        expect_failure(
+            checkpoint_lib._validate_canonical_pilot_seed_registry,
+            pilot_execution,
+            resigned_bad_hash,
+            contains="sealed-pilot seed registry mismatch",
+        )
+    drifted_program = SimpleNamespace(
+        child_tasks={"BC-S1": pilot_tasks},
+        excluded_seeds=tuple(
+            SimpleNamespace(seed=seed)
+            for seed in (*pilot_seeds[:-1], 99_999)
+        ),
+    )
+    with patch.object(
+        checkpoint_lib,
+        "load_production_program",
+        return_value=drifted_program,
+    ):
+        expect_failure(
+            checkpoint_lib._validate_canonical_pilot_seed_registry,
+            pilot_execution,
+            seed_audit,
+            contains="sealed-pilot seed registry mismatch",
+        )
 
 
 def check_successor_finalization_publish_contract(
@@ -1082,6 +1463,117 @@ def check_successor_v3_provenance(finalization: Path, root: Path) -> None:
         )
 
 
+def check_successor_v4_provenance(finalization: Path, root: Path) -> None:
+    """Exercise the v4 rejected-probe lineage through finalization/checkpoint."""
+
+    successor = fixture_successor_v4(root)
+    successor_finalization, lineage = write_successor_finalization(
+        finalization,
+        root,
+        successor=successor,
+    )
+    assert lineage["schema_version"] == RECOVERY_LINEAGE_SCHEMA_VERSION_V3
+    assert lineage["failed_r3_preflight"]["scheduler"]["job_id"] == "50544247"
+    assert lineage["rejected_r3_preflight"]["scheduler"]["job_id"] == "50548308"
+    assert (
+        lineage["administrative_r3_launch_rejection"]["job_id"] == "50547698"
+    )
+    assert (
+        lineage["administrative_r3_launch_rejection"]["compute_preflight"]
+        is False
+    )
+    validation, rows = load_managed_finalization(
+        successor_finalization,
+        allow_test_mode=True,
+        verify_root_files=False,
+    )
+    assert validation["recovery_lineage"] == lineage and len(rows) == 32
+    checkpoint = build_checkpoint(
+        successor_finalization,
+        root / "successor-v4-checkpoints",
+        allow_test_mode=True,
+        verify_root_files=False,
+    )
+    loaded = load_production_checkpoint(
+        checkpoint,
+        allow_test_mode=True,
+        verify_root_files=False,
+    )
+    assert loaded.manifest["recovery_lineage"] == lineage
+
+    # Even after re-signing the containing records, neither rejected compute
+    # evidence nor the administrative/non-compute classification may drift.
+    for label, mutate, expected in (
+        (
+            "rejected-job",
+            lambda value: value["recovery_lineage"]["rejected_r3_preflight"][
+                "scheduler"
+            ].__setitem__("job_id", "59999999"),
+            "rejected-R3 binding changed",
+        ),
+        (
+            "admin-compute",
+            lambda value: value["recovery_lineage"][
+                "administrative_r3_launch_rejection"
+            ].__setitem__("compute_preflight", True),
+            "administrative R3 binding changed",
+        ),
+    ):
+        tampered = root / f"successor-v4-{label}-tamper"
+        shutil.copytree(successor_finalization, tampered)
+        for name in (
+            "validation_report.json",
+            "event_audit.json",
+            "seed_audit.json",
+            "selection_record.json",
+        ):
+            path = tampered / name
+            value = json.loads(path.read_text(encoding="utf-8"))
+            mutate(value)
+            changed = value["recovery_lineage"]
+            unhashed = dict(changed)
+            unhashed.pop("lineage_hash")
+            changed["lineage_hash"] = sha256_bytes(canonical_json(unhashed))
+            json_write(path, value)
+        rewrite_recursive_checksums(tampered)
+        expect_failure(
+            load_managed_finalization,
+            tampered,
+            allow_test_mode=True,
+            verify_root_files=False,
+            contains=expected,
+        )
+
+    valid = SimpleNamespace(
+        attempt={"attempt_id": "20260721T120000Z-predecessor-retry"},
+        job_id="60000001",
+        marker_path=successor.directory / "attempts/new/task_result.json",
+        paths={"root": successor.directory / "attempts/new/output.root"},
+    )
+    with patch.object(
+        finalizer,
+        "load_frozen_accounting",
+        return_value={"job_id": "60000001"},
+    ):
+        assert finalizer.validate_selected_result_lineage(
+            successor, [valid], ["20260721T120000Z-predecessor-retry"]
+        ) == lineage
+    for forbidden_job in ("50532143", "50544247", "50547698", "50548308"):
+        forbidden = SimpleNamespace(
+            attempt={"attempt_id": "20260721T120000Z-predecessor-retry"},
+            job_id=forbidden_job,
+            marker_path=successor.directory / "attempts/new/task_result.json",
+            paths={"root": successor.directory / "attempts/new/output.root"},
+        )
+        expect_failure(
+            finalizer.validate_selected_result_lineage,
+            successor,
+            [forbidden],
+            [],
+            contains="selected predecessor scheduler job",
+        )
+
+
 def check_candidate_selection(root: Path) -> None:
     tasks = tuple(
         CampaignTask(
@@ -1354,6 +1846,25 @@ def check_publish_safety(scratch: Path) -> None:
     assert not list(failure_root.glob(".bc-only-s1.tmp-*"))
     assert not list(failure_root.glob("bc-only-s1-*"))
 
+    # A non-cooperating writer may create the destination without taking our
+    # sibling lock.  The kernel rename primitive itself must still refuse to
+    # replace even an empty destination directory.
+    no_replace_root = scratch / "kernel-no-replace"
+    no_replace_root.mkdir()
+    source = no_replace_root / "source"
+    target = no_replace_root / "target"
+    source.mkdir()
+    (source / "sentinel.txt").write_text("source\n", encoding="utf-8")
+    target.mkdir()
+    expect_failure(
+        checkpoint_lib.publish_directory_no_replace,
+        source,
+        target,
+        contains="refusing to overwrite",
+    )
+    assert source.is_dir() and (source / "sentinel.txt").is_file()
+    assert target.is_dir() and not any(target.iterdir())
+
     concurrency_root = scratch / "concurrent-publish"
     concurrency_root.mkdir()
     context = multiprocessing.get_context("spawn")
@@ -1399,6 +1910,12 @@ def main() -> int:
         check_successor_provenance(finalization, scratch)
         check_successor_v3_provenance(
             finalization, scratch / "successor-v3-provenance"
+        )
+        check_successor_v4_provenance(
+            finalization, scratch / "successor-v4-provenance"
+        )
+        check_canonical_finalization_rebinding(
+            scratch / "canonical-finalization-rebinding"
         )
 
         validation, rows = load_managed_finalization(

@@ -13,6 +13,7 @@ import tempfile
 from pathlib import Path
 
 import steel_module_production_successor_lib as successor_lib
+import steel_module_production_r3_probe_lib as r3_probe_lib
 from check_steel_module_production_phase2b_control import FakeSlurm
 from check_steel_module_production_successor import (
     _fixture_r3_failure_identity,
@@ -20,6 +21,7 @@ from check_steel_module_production_successor import (
     _make_v3_fixture,
     _successor_inputs,
 )
+from check_steel_module_production_successor_v4 import _v4_inputs
 from steel_module_campaign_lib import canonical_json, sha256_bytes, sha256_file
 from steel_module_production_container_contract import (
     AdditionalBind,
@@ -53,12 +55,13 @@ from steel_module_production_r3_probe_lib import (
     write_terminal_accounting_input,
 )
 from steel_module_production_successor_lib import (
-    RECOVERY_READINESS_LOCK_RELATIVE,
+    RECOVERY_READINESS_LOCK_RELATIVE_V3,
     _validate_formal_r3_held_job_paths,
     _validate_successor_mutable_state_after_intent,
     _verify_r4_git_gate,
     materialize_successor_execution_companion,
     materialize_successor_v3_execution_companion,
+    materialize_successor_v4_execution_companion,
     successor_r3_preflight_binding,
 )
 from manage_steel_module_production_attempt import submit_intent
@@ -254,7 +257,9 @@ def _test_writer_open_rejection_shell_contract(scratch: Path) -> None:
     assert inherited_fd.read_bytes() == b"preserved"
 
 
-def _write_raw_workspace(workspace: Path, successor: object) -> Path:
+def _write_raw_workspace(
+    workspace: Path, successor: object, *, validate_success: bool = True
+) -> Path:
     workspace.mkdir()
     challenge = workspace / "challenge.bin"
     roundtrip = workspace / "container-roundtrip.bin"
@@ -350,7 +355,8 @@ def _write_raw_workspace(workspace: Path, successor: object) -> Path:
     (workspace / "probe_result.json").write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    validate_raw_probe_workspace(workspace, allow_test_mode=True)
+    if validate_success:
+        validate_raw_probe_workspace(workspace, allow_test_mode=True)
     return workspace
 
 
@@ -361,8 +367,17 @@ def _test_accounting_and_evidence(repo_root: Path, scratch: Path) -> None:
         repo_root, scratch / "lineage"
     )
     with _fixture_r3_failure_identity(predecessor_v2):
-        successor = materialize_successor_v3_execution_companion(
+        predecessor_v3 = materialize_successor_v3_execution_companion(
             **inputs, out_dir=scratch / "successor-v3"
+        )
+        v4_inputs, _, _, _ = _v4_inputs(
+            repo_root, scratch, predecessor_v3, inputs
+        )
+        v4_parent = scratch / "active-work" / "campaigns"
+        v4_parent.mkdir(parents=True)
+        successor = materialize_successor_v4_execution_companion(
+            **v4_inputs,
+            out_dir=v4_parent / "steel-module-production-bc-s1-execution-v4",
         )
     raw = _write_raw_workspace(scratch / "raw", successor)
     job_id = "70000123"
@@ -426,6 +441,52 @@ def _test_accounting_and_evidence(repo_root: Path, scratch: Path) -> None:
         ),
         "formal R3 held-job command drift",
     )
+    successor_held = (
+        f"JobId={job_id} JobName={job_name} Account=pas2524 "
+        "JobState=PENDING Reason=JobHeldUser Requeue=0 "
+        f"Command={successor.directory}/sources/control/hpc/osc/"
+        "run_steel_module_production_r3_probe.sbatch "
+        f"WorkDir={successor.directory} "
+        f"StdOut={canonical_r3_evidence_root(successor.directory)}/"
+        f"slurm-{job_id}.out\n"
+    )
+    held_path = scratch / "held-before-release.txt"
+    held_path.write_text(successor_held, encoding="utf-8")
+    original_successor_loader = r3_probe_lib.load_successor_execution
+
+    def held_fixture_loader(*args: object, **kwargs: object) -> object:
+        kwargs["rejection_validator"] = v4_inputs["rejection_validator"]
+        return original_successor_loader(*args, **kwargs)
+
+    r3_probe_lib.load_successor_execution = held_fixture_loader
+    try:
+        held_identity = r3_probe_lib.validate_held_r3_job_snapshot(
+            execution_dir=successor.directory,
+            control_root=repo_root,
+            held_scontrol_input=held_path,
+            job_id=job_id,
+            job_name=job_name,
+            test_mode=True,
+        )
+        assert held_identity["scheduler_contact_performed_by_tool"] is False
+        assert held_identity["release_performed_by_tool"] is False
+        held_path.write_text(
+            successor_held.replace("Reason=JobHeldUser", "Reason=None"),
+            encoding="utf-8",
+        )
+        _expect_value_error(
+            lambda: r3_probe_lib.validate_held_r3_job_snapshot(
+                execution_dir=successor.directory,
+                control_root=repo_root,
+                held_scontrol_input=held_path,
+                job_id=job_id,
+                job_name=job_name,
+                test_mode=True,
+            ),
+            "pre-release held-state drift",
+        )
+    finally:
+        r3_probe_lib.load_successor_execution = original_successor_loader
     accounting = write_terminal_accounting_input(
         output_dir=scratch / "accounting",
         job_id=job_id,
@@ -439,14 +500,24 @@ def _test_accounting_and_evidence(repo_root: Path, scratch: Path) -> None:
     assert accounting_value["scheduler_query_performed_by_tool"] is False
     output_root = scratch / "evidence"
     output_root.mkdir()
-    evidence = seal_r3_probe_evidence(
-        raw_workspace=raw,
-        terminal_accounting_dir=accounting,
-        output_root=output_root,
-        execution_dir=successor.directory,
-        control_root=repo_root,
-        test_mode=True,
-    )
+    original_successor_loader = r3_probe_lib.load_successor_execution
+
+    def fixture_successor_loader(*args: object, **kwargs: object) -> object:
+        kwargs["rejection_validator"] = v4_inputs["rejection_validator"]
+        return original_successor_loader(*args, **kwargs)
+
+    r3_probe_lib.load_successor_execution = fixture_successor_loader
+    try:
+        evidence = seal_r3_probe_evidence(
+            raw_workspace=raw,
+            terminal_accounting_dir=accounting,
+            output_root=output_root,
+            execution_dir=successor.directory,
+            control_root=repo_root,
+            test_mode=True,
+        )
+    finally:
+        r3_probe_lib.load_successor_execution = original_successor_loader
     value = validate_r3_probe_evidence(evidence, allow_test_mode=True)
     assert value["accepted_compute_preflight_evidence"] is False
     assert value["test_mode"] is True
@@ -668,6 +739,7 @@ def _test_source_boundaries(repo_root: Path) -> None:
     assert '"hostfs,cwd"' not in worker
     for name in (
         "run_steel_module_production_r3_container_probe.py",
+        "validate_steel_module_production_r3_held_job.py",
         "freeze_steel_module_production_r3_probe_accounting.py",
         "seal_steel_module_production_r3_probe_evidence.py",
         "generate_steel_module_production_successor_readiness.py",
@@ -682,7 +754,7 @@ def _test_source_boundaries(repo_root: Path) -> None:
     assert "PYTHONPATH" not in launcher
     assert "/usr/bin/env -i" in launcher
     assert '[[ "$#" -eq 0 ]]' in launcher
-    assert "steel-module-production-bc-s1-execution-v3" in launcher
+    assert "steel-module-production-bc-s1-execution-v4" in launcher
     assert "run_steel_module_production_r3_container_probe.py" in launcher
 
 
@@ -691,7 +763,7 @@ def _test_spool_copy_safe_launcher(repo_root: Path, scratch: Path) -> None:
 
     scratch.mkdir(parents=True)
     scratch = scratch.resolve()
-    canonical_name = "steel-module-production-bc-s1-execution-v3"
+    canonical_name = "steel-module-production-bc-s1-execution-v4"
     work_root = scratch / "users/PAS2524/fixture/g4optics-rn"
     execution = work_root / "campaigns" / canonical_name
     control = execution / "sources/control/hpc/osc"
@@ -924,17 +996,18 @@ def _test_r4_git_gate(scratch: Path) -> None:
     git("commit", "-q", "-m", "R2")
     control_commit = git("rev-parse", "HEAD")
     control_tree = git("rev-parse", "HEAD^{tree}")
-    lock = scratch / RECOVERY_READINESS_LOCK_RELATIVE
+    lock = scratch / RECOVERY_READINESS_LOCK_RELATIVE_V3
     lock.parent.mkdir(parents=True)
     lock.write_text("{}\n", encoding="utf-8")
     lock.chmod(0o644)
-    git("add", RECOVERY_READINESS_LOCK_RELATIVE.as_posix())
+    git("add", RECOVERY_READINESS_LOCK_RELATIVE_V3.as_posix())
     git("commit", "-q", "-m", "R4 lock only")
     _verify_r4_git_gate(
         path=lock,
         live_root=scratch,
         control_commit=control_commit,
         source={"git_tree": control_tree},
+        relative=RECOVERY_READINESS_LOCK_RELATIVE_V3,
     )
     dirty = scratch / "untracked"
     dirty.write_text("dirty\n", encoding="utf-8")
@@ -944,6 +1017,7 @@ def _test_r4_git_gate(scratch: Path) -> None:
             live_root=scratch,
             control_commit=control_commit,
             source={"git_tree": control_tree},
+            relative=RECOVERY_READINESS_LOCK_RELATIVE_V3,
         ),
         "dirty R4 checkout",
     )
@@ -957,6 +1031,7 @@ def _test_r4_git_gate(scratch: Path) -> None:
             live_root=scratch,
             control_commit=control_commit,
             source={"git_tree": control_tree},
+            relative=RECOVERY_READINESS_LOCK_RELATIVE_V3,
         ),
         "multi-commit R4 history",
     )

@@ -66,12 +66,16 @@ from steel_module_production_r3_failure_lib import (
 from steel_module_production_successor_lib import (
     FORMAL_SUCCESSOR_EXECUTION_NAME,
     FORMAL_SUCCESSOR_EXECUTION_NAME_V2,
+    FORMAL_SUCCESSOR_EXECUTION_NAME_V3,
     RECOVERY_READINESS_LOCK_RELATIVE,
     RECOVERY_READINESS_LOCK_RELATIVE_V2,
+    RECOVERY_READINESS_LOCK_RELATIVE_V3,
     SUCCESSOR_EXECUTION_GENERATION,
     SUCCESSOR_EXECUTION_GENERATION_V2,
+    SUCCESSOR_EXECUTION_GENERATION_V3,
     SUCCESSOR_EXECUTION_SCHEMA_VERSION,
     SUCCESSOR_EXECUTION_SCHEMA_VERSION_V2,
+    SUCCESSOR_EXECUTION_SCHEMA_VERSION_V3,
     SUCCESSOR_OBJECT_KIND,
     build_successor_recovery_readiness_candidate,
     load_execution_for_frozen_worker,
@@ -794,8 +798,8 @@ def test_v3_failure_bound_successor(repo_root: Path, scratch: Path) -> None:
         v3 = materialize_successor_v3_execution_companion(
             **inputs, out_dir=target
         )
-        assert v3.manifest["schema_version"] == SUCCESSOR_EXECUTION_SCHEMA_VERSION
-        assert v3.manifest["execution_generation"] == SUCCESSOR_EXECUTION_GENERATION
+        assert v3.manifest["schema_version"] == SUCCESSOR_EXECUTION_SCHEMA_VERSION_V3
+        assert v3.manifest["execution_generation"] == SUCCESSOR_EXECUTION_GENERATION_V3
         assert v3.tasks == v2.tasks
         assert v3.scan_args == v2.scan_args
         assert v3.manifest["runtime"] == v2.manifest["runtime"]
@@ -1000,7 +1004,7 @@ def test_v3_recovery_readiness_job_lineage(
             accepted_job_id,
         ]
 
-        lock = git_root / RECOVERY_READINESS_LOCK_RELATIVE
+        lock = git_root / RECOVERY_READINESS_LOCK_RELATIVE_V3
         lock.parent.mkdir(parents=True)
         lock.write_text(
             json.dumps(candidate, indent=2, sort_keys=True) + "\n",
@@ -1008,7 +1012,7 @@ def test_v3_recovery_readiness_job_lineage(
         )
         lock.chmod(0o644)
         _git_checked(
-            git_root, "add", "--", RECOVERY_READINESS_LOCK_RELATIVE.as_posix()
+            git_root, "add", "--", RECOVERY_READINESS_LOCK_RELATIVE_V3.as_posix()
         )
         _git_checked(git_root, "commit", "-q", "-m", "add R4 readiness lock")
         verified_path, verified = verify_successor_recovery_readiness(
@@ -1034,7 +1038,7 @@ def test_v3_recovery_readiness_job_lineage(
         )
         lock.chmod(0o644)
         _git_checked(
-            git_root, "add", "--", RECOVERY_READINESS_LOCK_RELATIVE.as_posix()
+            git_root, "add", "--", RECOVERY_READINESS_LOCK_RELATIVE_V3.as_posix()
         )
         _git_checked(git_root, "commit", "-q", "--amend", "--no-edit")
         try:
@@ -1141,7 +1145,7 @@ def test_live_and_frozen_root_routing_contracts(
     # submitted.
     v3_calls: list[dict[str, object]] = []
     v3_boundaries: list[tuple[object, Path]] = []
-    v3_execution_dir = child.parent / FORMAL_SUCCESSOR_EXECUTION_NAME
+    v3_execution_dir = child.parent / FORMAL_SUCCESSOR_EXECUTION_NAME_V3
     v3_execution = SimpleNamespace(
         directory=v3_execution_dir,
         execution_id="fixture-v3-id",
@@ -1316,9 +1320,12 @@ def test_atomicity_and_concurrency(repo_root: Path, scratch: Path) -> None:
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[2]
     assert FORMAL_SUCCESSOR_EXECUTION_NAME_V2 != phase2b_lib.FORMAL_EXECUTION_NAME
-    assert FORMAL_SUCCESSOR_EXECUTION_NAME != FORMAL_SUCCESSOR_EXECUTION_NAME_V2
-    assert SUCCESSOR_EXECUTION_SCHEMA_VERSION != SUCCESSOR_EXECUTION_SCHEMA_VERSION_V2
-    assert SUCCESSOR_EXECUTION_GENERATION != SUCCESSOR_EXECUTION_GENERATION_V2
+    assert FORMAL_SUCCESSOR_EXECUTION_NAME_V3 != FORMAL_SUCCESSOR_EXECUTION_NAME_V2
+    assert FORMAL_SUCCESSOR_EXECUTION_NAME != FORMAL_SUCCESSOR_EXECUTION_NAME_V3
+    assert SUCCESSOR_EXECUTION_SCHEMA_VERSION_V3 != SUCCESSOR_EXECUTION_SCHEMA_VERSION_V2
+    assert SUCCESSOR_EXECUTION_SCHEMA_VERSION != SUCCESSOR_EXECUTION_SCHEMA_VERSION_V3
+    assert SUCCESSOR_EXECUTION_GENERATION_V3 != SUCCESSOR_EXECUTION_GENERATION_V2
+    assert SUCCESSOR_EXECUTION_GENERATION != SUCCESSOR_EXECUTION_GENERATION_V3
     assert RECOVERY_READINESS_LOCK_RELATIVE != phase2b_lib.READINESS_LOCK_RELATIVE
     worker_source = (
         repo_root / "hpc/osc/run_steel_module_production_phase2b_task.py"
@@ -1365,7 +1372,7 @@ def main() -> int:
             _assert_no_scheduler_contact(markers)
         finally:
             os.environ["PATH"] = original_path
-    print("steel-module production successor R2/v3: PASS")
+    print("steel-module production successor v2/v3/v4 dispatch: PASS")
     print("scheduler: forbidden command sentinels; real Slurm calls: 0")
     return 0
 

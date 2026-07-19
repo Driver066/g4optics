@@ -46,6 +46,7 @@ from steel_module_production_container_contract import (
 )
 from steel_module_production_successor_lib import (
     SUCCESSOR_EXECUTION_SCHEMA_VERSION,
+    SUCCESSOR_EXECUTION_SCHEMA_VERSION_V3,
     load_successor_execution,
     validate_successor_r2_boundary,
 )
@@ -535,7 +536,7 @@ def run_r3_container_probe(
     return workspace
 
 
-def validate_raw_probe_workspace(
+def _validate_raw_probe_workspace_common(
     workspace: Path,
     *,
     allow_test_mode: bool = False,
@@ -604,9 +605,10 @@ def validate_raw_probe_workspace(
         payload.get("schema_version") != RAW_PROBE_SCHEMA_VERSION
         or not isinstance(test_mode, bool)
         or (test_mode and not allow_test_mode)
-        or payload.get("accepted_compute_preflight_evidence")
-        is not (not test_mode)
-        or payload.get("probe_passed") is not True
+        or not isinstance(
+            payload.get("accepted_compute_preflight_evidence"), bool
+        )
+        or not isinstance(payload.get("probe_passed"), bool)
         or payload.get("scheduler_submission_performed_by_tool") is not False
         or payload.get("scheduler_contact_performed_by_tool") is not False
         or payload.get("apptainer_invoked") is not True
@@ -617,7 +619,7 @@ def validate_raw_probe_workspace(
         or recorded_hash != actual_hash
         or not isinstance(report, dict)
         or set(report) != set(REPORT_KEYS)
-        or any(value is not True for value in report.values())
+        or any(not isinstance(value, bool) for value in report.values())
         or not isinstance(contract, dict)
         or set(contract)
         != {
@@ -710,7 +712,10 @@ def validate_raw_probe_workspace(
             "sanitized_environment_used": True,
         }
         or payload.get("execution_schema_version")
-        != SUCCESSOR_EXECUTION_SCHEMA_VERSION
+        not in {
+            SUCCESSOR_EXECUTION_SCHEMA_VERSION_V3,
+            SUCCESSOR_EXECUTION_SCHEMA_VERSION,
+        }
         or not _is_sha256(payload.get("execution_hash"))
         or not _is_sha256(recorded_hash)
         or not TOKEN_RE.fullmatch(str(payload.get("probe_token", "")))
@@ -743,6 +748,71 @@ def validate_raw_probe_workspace(
     parsed_report = _parse_container_report(directory / "container-report.tsv")
     if parsed_report != report:
         raise ValueError("raw R3 container report disagrees with result")
+    return payload
+
+
+def validate_raw_probe_workspace(
+    workspace: Path,
+    *,
+    allow_test_mode: bool = False,
+    require_recorded_location: bool = True,
+) -> dict[str, Any]:
+    """Validate a successful raw R3 probe workspace."""
+
+    payload = _validate_raw_probe_workspace_common(
+        workspace,
+        allow_test_mode=allow_test_mode,
+        require_recorded_location=require_recorded_location,
+    )
+    test_mode = payload["test_mode"]
+    report = payload["container_report"]
+    if (
+        payload.get("accepted_compute_preflight_evidence")
+        is not (not test_mode)
+        or payload.get("probe_passed") is not True
+        or payload.get("execution_schema_version")
+        != SUCCESSOR_EXECUTION_SCHEMA_VERSION
+        or any(value is not True for value in report.values())
+    ):
+        raise ValueError("raw R3 probe did not pass every isolation check")
+    return payload
+
+
+def validate_rejected_raw_probe_workspace(
+    workspace: Path,
+    *,
+    expected_false_keys: frozenset[str],
+    allow_test_mode: bool = False,
+    require_recorded_location: bool = True,
+) -> dict[str, Any]:
+    """Validate one explicitly classified failed raw R3 probe workspace.
+
+    A caller must supply the complete expected false-key set.  Keeping that
+    classification outside this generic probe module prevents a future failed
+    check from being silently admitted as the historical rejection.
+    """
+
+    if not expected_false_keys or not expected_false_keys <= set(REPORT_KEYS):
+        raise ValueError("rejected R3 probe false-key policy is invalid")
+    payload = _validate_raw_probe_workspace_common(
+        workspace,
+        allow_test_mode=allow_test_mode,
+        require_recorded_location=require_recorded_location,
+    )
+    report = payload["container_report"]
+    false_keys = {name for name, value in report.items() if value is False}
+    if (
+        payload.get("accepted_compute_preflight_evidence") is not False
+        or payload.get("probe_passed") is not False
+        or payload.get("execution_schema_version")
+        != SUCCESSOR_EXECUTION_SCHEMA_VERSION_V3
+        or false_keys != set(expected_false_keys)
+        or any(
+            value is not (name not in expected_false_keys)
+            for name, value in report.items()
+        )
+    ):
+        raise ValueError("raw R3 probe rejection classification mismatch")
     return payload
 
 
@@ -832,6 +902,55 @@ def _held_scheduler_identity(
         "stdout": fields["StdOut"],
         "non_array": True,
         "scontrol_sha256": sha256_bytes(text.encode("utf-8")),
+    }
+
+
+def validate_held_r3_job_snapshot(
+    *,
+    execution_dir: Path,
+    control_root: Path,
+    held_scontrol_input: Path,
+    job_id: str,
+    job_name: str,
+    test_mode: bool = False,
+) -> dict[str, Any]:
+    """Validate a held R3 job before release without contacting Slurm."""
+
+    requested = held_scontrol_input.expanduser()
+    if requested.is_symlink() or not requested.is_file():
+        raise ValueError("R3 held-job snapshot must be a regular non-symlink file")
+    snapshot = requested.resolve()
+    execution = load_successor_execution(
+        execution_dir,
+        repo_root=None if test_mode else control_root,
+        allow_test_mode=test_mode,
+        require_readiness=False,
+        verify_runtime=not test_mode,
+        verify_live_predecessor=not test_mode,
+    )
+    if execution.manifest.get("schema_version") != SUCCESSOR_EXECUTION_SCHEMA_VERSION:
+        raise ValueError("held R3 validation requires the active successor-v4")
+    validate_successor_r2_boundary(execution, repo_root=control_root)
+    if (
+        not JOB_ID_RE.fullmatch(job_id)
+        or job_name != expected_r3_job_name(execution.execution_hash)
+    ):
+        raise ValueError("held R3 job ID/name differs from successor-v4")
+    identity = _held_scheduler_identity(
+        snapshot.read_text(encoding="utf-8"),
+        job_id=job_id,
+        job_name=job_name,
+        formal_execution_dir=execution.directory,
+    )
+    return {
+        **identity,
+        "execution_id": execution.execution_id,
+        "execution_hash": execution.execution_hash,
+        "execution_directory": str(execution.directory),
+        "held_scontrol_input": str(snapshot),
+        "scheduler_contact_performed_by_tool": False,
+        "release_performed_by_tool": False,
+        "geant4_invoked": False,
     }
 
 
@@ -1059,6 +1178,10 @@ def seal_r3_probe_evidence(
         verify_runtime=not test_mode,
         verify_live_predecessor=True,
     )
+    if execution.manifest.get("schema_version") != SUCCESSOR_EXECUTION_SCHEMA_VERSION:
+        raise ValueError(
+            "successful R3 probe evidence requires the active successor-v4"
+        )
     validate_successor_r2_boundary(execution, repo_root=control_root)
     if (
         raw.get("slurm_job_id") != accounting.get("job_id")
@@ -1066,6 +1189,8 @@ def seal_r3_probe_evidence(
         or raw.get("test_mode") is not test_mode
         or raw.get("execution_id") != execution.execution_id
         or raw.get("execution_hash") != execution.execution_hash
+        or raw.get("execution_schema_version")
+        != execution.manifest.get("schema_version")
         or raw.get("execution_directory") != str(execution.directory)
     ):
         raise ValueError("R3 probe execution/accounting identity mismatch")
@@ -1224,6 +1349,8 @@ def validate_r3_probe_evidence(
         or not isinstance(test_mode, bool)
         or (test_mode and not allow_test_mode)
         or test_mode != raw.get("test_mode")
+        or raw.get("execution_schema_version")
+        != SUCCESSOR_EXECUTION_SCHEMA_VERSION
         or payload.get("accepted_compute_preflight_evidence")
         is not (not test_mode)
         or payload.get("scheduler_submission_performed_by_tool") is not False
@@ -1254,6 +1381,8 @@ __all__ = [
     "expected_r3_job_name",
     "run_r3_container_probe",
     "seal_r3_probe_evidence",
+    "validate_held_r3_job_snapshot",
+    "validate_rejected_raw_probe_workspace",
     "validate_r3_probe_evidence",
     "validate_raw_probe_workspace",
     "validate_terminal_accounting_input",

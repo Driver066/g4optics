@@ -837,6 +837,29 @@ def finalize(
                         ),
                     }
                 )
+            rejected_r3 = recovery_lineage.get("rejected_r3_preflight")
+            if isinstance(rejected_r3, dict):
+                execution_identity.update(
+                    {
+                        "rejected_r3_id": rejected_r3.get("rejection_id"),
+                        "rejected_r3_hash": rejected_r3.get("rejection_hash"),
+                        "rejected_r3_job_id": rejected_r3.get(
+                            "scheduler", {}
+                        ).get("job_id"),
+                    }
+                )
+            administrative_r3 = recovery_lineage.get(
+                "administrative_r3_launch_rejection"
+            )
+            if isinstance(administrative_r3, dict):
+                execution_identity.update(
+                    {
+                        "administrative_r3_job_id": administrative_r3.get(
+                            "job_id"
+                        ),
+                        "administrative_r3_compute_preflight": False,
+                    }
+                )
         stable_identity = {
             "execution": execution_identity,
             "program": program_identity,
