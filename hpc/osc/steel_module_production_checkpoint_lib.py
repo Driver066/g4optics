@@ -15,6 +15,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -1211,11 +1212,192 @@ def _rename_directory_no_replace(temporary: Path, target: Path) -> None:
     raise OSError(error, os.strerror(error), str(target))
 
 
+def _directory_open_flags() -> int:
+    return (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+
+
+def _directory_identity(result: os.stat_result) -> tuple[int, int]:
+    return result.st_dev, result.st_ino
+
+
+def _stat_name_no_follow(parent_fd: int, name: str) -> os.stat_result:
+    return os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+
+
+def _require_name_absent(parent_fd: int, name: str, *, target: Path) -> None:
+    try:
+        _stat_name_no_follow(parent_fd, name)
+    except FileNotFoundError:
+        return
+    raise ValueError(f"refusing to overwrite evidence directory: {target}")
+
+
+def _authenticated_directory_identity(
+    parent_fd: int, name: str, *, label: str
+) -> tuple[int, int]:
+    result = _stat_name_no_follow(parent_fd, name)
+    if not stat.S_ISDIR(result.st_mode):
+        raise ValueError(f"{label} is not a directory")
+    identity = _directory_identity(result)
+    descriptor = os.open(name, _directory_open_flags(), dir_fd=parent_fd)
+    try:
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(opened.st_mode)
+            or _directory_identity(opened) != identity
+        ):
+            raise ValueError(f"{label} changed while it was opened")
+    finally:
+        os.close(descriptor)
+    return identity
+
+
+def _plain_directory_rename(
+    source_parent_fd: int,
+    source_name: str,
+    destination_parent_fd: int,
+    destination_name: str,
+) -> None:
+    """POSIX rename seam used only by the guarded GPFS fallback."""
+
+    os.rename(
+        source_name,
+        destination_name,
+        src_dir_fd=source_parent_fd,
+        dst_dir_fd=destination_parent_fd,
+    )
+
+
+def _validate_published_directory(
+    parent_fd: int,
+    *,
+    source_name: str,
+    target_name: str,
+    source_identity: tuple[int, int],
+) -> int:
+    """Return an authenticated target fd after proving the source moved."""
+
+    try:
+        _stat_name_no_follow(parent_fd, source_name)
+    except FileNotFoundError:
+        pass
+    else:
+        raise ValueError("published source directory still exists")
+    target_result = _stat_name_no_follow(parent_fd, target_name)
+    if (
+        not stat.S_ISDIR(target_result.st_mode)
+        or _directory_identity(target_result) != source_identity
+    ):
+        raise ValueError("published target is not the original source directory")
+    target_fd = os.open(target_name, _directory_open_flags(), dir_fd=parent_fd)
+    try:
+        opened = os.fstat(target_fd)
+        if (
+            not stat.S_ISDIR(opened.st_mode)
+            or _directory_identity(opened) != source_identity
+        ):
+            raise ValueError("published target changed while it was opened")
+    except BaseException:
+        os.close(target_fd)
+        raise
+    return target_fd
+
+
+def _publish_directory_with_owned_placeholder(
+    parent_fd: int,
+    *,
+    temporary: Path,
+    target: Path,
+    source_identity: tuple[int, int],
+) -> None:
+    """GPFS fallback for an unsupported ``RENAME_NOREPLACE`` flag.
+
+    The caller holds the exclusive sibling publication lock.  We create the
+    target placeholder with ``mkdir`` (the kernel no-replace primitive that
+    GPFS does support), authenticate both source and placeholder through the
+    pinned parent descriptor, and then atomically replace only that owned,
+    empty placeholder with POSIX ``rename``.
+
+    This is intentionally a cooperative-writer protocol.  A process running
+    as the same Unix identity that ignores the sibling lock could swap an
+    empty placeholder in the final syscall race; GPFS offers no directory
+    compare-and-swap primitive to exclude that actor.  Any detectable race or
+    failure leaves residue in place and is never rolled back.
+    """
+
+    if not sys.platform.startswith("linux"):
+        raise OSError(
+            errno.ENOTSUP,
+            "exclusive-placeholder publication is Linux-only",
+            str(target),
+        )
+    _require_name_absent(parent_fd, target.name, target=target)
+    os.mkdir(target.name, 0o700, dir_fd=parent_fd)
+    placeholder_fd: int | None = None
+    try:
+        placeholder_result = _stat_name_no_follow(parent_fd, target.name)
+        placeholder_identity = _directory_identity(placeholder_result)
+        if not stat.S_ISDIR(placeholder_result.st_mode):
+            raise ValueError("publication placeholder is not a directory")
+        placeholder_fd = os.open(
+            target.name, _directory_open_flags(), dir_fd=parent_fd
+        )
+        opened_placeholder = os.fstat(placeholder_fd)
+        if (
+            not stat.S_ISDIR(opened_placeholder.st_mode)
+            or _directory_identity(opened_placeholder) != placeholder_identity
+            or os.listdir(placeholder_fd)
+        ):
+            raise ValueError("publication placeholder is not the owned empty directory")
+
+        current_source = _stat_name_no_follow(parent_fd, temporary.name)
+        if (
+            not stat.S_ISDIR(current_source.st_mode)
+            or _directory_identity(current_source) != source_identity
+        ):
+            raise ValueError("publication source changed before GPFS fallback")
+        current_placeholder = _stat_name_no_follow(parent_fd, target.name)
+        if (
+            not stat.S_ISDIR(current_placeholder.st_mode)
+            or _directory_identity(current_placeholder) != placeholder_identity
+            or os.listdir(placeholder_fd)
+        ):
+            raise ValueError("publication placeholder changed before GPFS fallback")
+
+        os.fsync(placeholder_fd)
+        os.fsync(parent_fd)
+        _plain_directory_rename(
+            parent_fd,
+            temporary.name,
+            parent_fd,
+            target.name,
+        )
+    finally:
+        if placeholder_fd is not None:
+            # GPFS may report ESTALE for this descriptor after its empty inode
+            # has been replaced.  Its pre-rename identity is the ownership
+            # proof; post-rename correctness is established from the source
+            # inode at the target path below.
+            os.close(placeholder_fd)
+
+
 def publish_directory_no_replace(temporary: Path, target: Path) -> None:
     """Publish a completed sibling tree without an internal writer race.
 
     The exclusive sibling lock makes concurrent Phase-2B writers fail closed.
     A stale lock is intentionally not guessed away after a process crash.
+
+    Linux filesystems that reject ``RENAME_NOREPLACE`` with an unsupported-
+    operation errno use an exclusive-placeholder fallback.  That fallback is
+    safe for cooperating writers that honor this lock; it cannot provide a
+    kernel no-overwrite guarantee against an uncooperative process with the
+    same Unix identity.  Failures leave visible residue and are not rolled
+    back.
     """
 
     if temporary.parent != target.parent:
@@ -1226,15 +1408,69 @@ def publish_directory_no_replace(temporary: Path, target: Path) -> None:
     except FileExistsError as exc:
         raise ValueError(f"publication is already active or quarantined: {lock}") from exc
     try:
+        parent_fd = os.open(target.parent, _directory_open_flags())
         try:
-            _rename_directory_no_replace(temporary, target)
-        except FileExistsError as exc:
-            raise ValueError(
-                f"refusing to overwrite evidence directory: {target}"
-            ) from exc
-        parent_fd = os.open(target.parent, os.O_RDONLY)
-        try:
+            parent_result = os.fstat(parent_fd)
+            visible_parent = target.parent.lstat()
+            if (
+                not stat.S_ISDIR(parent_result.st_mode)
+                or _directory_identity(parent_result)
+                != _directory_identity(visible_parent)
+            ):
+                raise ValueError("publication parent changed while it was opened")
+            _require_name_absent(parent_fd, target.name, target=target)
+            source_identity = _authenticated_directory_identity(
+                parent_fd,
+                temporary.name,
+                label="publication source",
+            )
+            try:
+                _rename_directory_no_replace(temporary, target)
+            except FileExistsError as exc:
+                raise ValueError(
+                    f"refusing to overwrite evidence directory: {target}"
+                ) from exc
+            except OSError as exc:
+                unsupported = {
+                    errno.EINVAL,
+                    errno.ENOSYS,
+                    errno.EOPNOTSUPP,
+                }
+                if (
+                    not sys.platform.startswith("linux")
+                    or exc.errno not in unsupported
+                ):
+                    raise
+                _publish_directory_with_owned_placeholder(
+                    parent_fd,
+                    temporary=temporary,
+                    target=target,
+                    source_identity=source_identity,
+                )
+
+            target_fd = _validate_published_directory(
+                parent_fd,
+                source_name=temporary.name,
+                target_name=target.name,
+                source_identity=source_identity,
+            )
+            try:
+                os.fsync(target_fd)
+            finally:
+                os.close(target_fd)
             os.fsync(parent_fd)
+            final_visible_parent = target.parent.lstat()
+            if _directory_identity(final_visible_parent) != _directory_identity(
+                parent_result
+            ):
+                raise ValueError("publication parent changed after publication")
+            final_fd = _validate_published_directory(
+                parent_fd,
+                source_name=temporary.name,
+                target_name=target.name,
+                source_identity=source_identity,
+            )
+            os.close(final_fd)
         finally:
             os.close(parent_fd)
     finally:

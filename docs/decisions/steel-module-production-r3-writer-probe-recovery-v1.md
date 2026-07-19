@@ -1,10 +1,10 @@
 # Steel-module R3 writer-probe recovery v1
 
-Status: root cause fixed in control-plane commit `debfc2d6`; rejected-probe
-sealing, execution-v4, and downstream lineage support are implementation
-complete. Formal OSC rejection sealing, v4 materialization, and the one-job R3
-preflight remain pending. No production intent or Geant4 production task is
-authorized by this document.
+Status: the writer-probe root cause is fixed and the subsequent GPFS
+capability audit requires successful execution-v4 to be retained and closed
+in place. Formal OSC rejection sealing, v4 materialization, and the one-job R3
+preflight remain pending. No production intent, future-successor
+materialization, or Geant4 production task is authorized by this document.
 
 This is an additive amendment to
 `steel-module-production-r3-bootstrap-recovery-v1.md`. It does not modify any
@@ -128,5 +128,41 @@ all compute preflights      [50544247, 50548308, <new execution-v4 job>]
 production intents/jobs     0 / []
 ```
 
-Only after that success may a separate lock-only R4 decision be considered.
-This document does not authorize R4 or the BC-S1 production submission.
+The successful probe writes a content-bound read-only marker through the exact
+leased mountpoint descriptor and leaves that mountpoint in place. A
+byte-identical copy is stored with the raw probe evidence. The resulting
+execution-v4 boundary records:
+
+```text
+execution_closed          true
+future_successor_required true
+rename_performed          false
+directory_entry_removed   false
+deletion_performed        false
+```
+
+This is the terminal state of execution-v4. It must not receive a recovery
+readiness lock, production intent, or production task. Any later BC-S1
+production requires a separately authorized clean successor (expected to be
+execution-v5) that binds the accepted v4 evidence and begins with empty mutable
+roots. Implementing or authorizing that successor is outside this document.
+
+## 6. GPFS publication and mountpoint policy
+
+OSC capability probes showed that GPFS returned `EINVAL` for both
+`renameat2(RENAME_NOREPLACE)` and `renameat2(RENAME_EXCHANGE)`, including the
+same-parent directory-publication shape. Plain rename could replace an empty
+placeholder, but an open descriptor for the replaced placeholder became
+`ESTALE`. These results rule out rename-based strict mountpoint retirement.
+
+The probe mountpoint therefore uses the deletion-free in-place policy above.
+Generic content-addressed evidence publication keeps its no-replace fast path;
+only Linux `EINVAL`, `ENOSYS`, or `EOPNOTSUPP` may enter the GPFS fallback.
+Under the existing exclusive sibling lock, that fallback exclusively creates
+and authenticates an empty target placeholder, atomically moves the
+authenticated source over that owned placeholder, and verifies that the final
+target is the original source inode. Pre-existing targets, source changes,
+non-empty placeholders, unrelated errors, and detectable races all fail closed
+without rollback. This publication fallback is a cooperative-writer protocol;
+GPFS provides no directory compare-and-swap guarantee against a same-UID
+process that deliberately ignores the sibling lock.

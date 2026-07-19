@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import csv
+import errno
 import json
 import multiprocessing
 import os
@@ -1849,10 +1850,9 @@ def check_publish_safety(scratch: Path) -> None:
     assert not list(failure_root.glob(".bc-only-s1.tmp-*"))
     assert not list(failure_root.glob("bc-only-s1-*"))
 
-    # A non-cooperating writer may create the destination without taking our
-    # sibling lock.  The kernel rename primitive itself must still refuse to
-    # replace even an empty destination directory.
-    no_replace_root = scratch / "kernel-no-replace"
+    # A target that already exists before lock-protected publication is
+    # rejected before either the fast path or GPFS fallback can mutate it.
+    no_replace_root = scratch / "preexisting-target"
     no_replace_root.mkdir()
     source = no_replace_root / "source"
     target = no_replace_root / "target"
@@ -1902,6 +1902,235 @@ def check_publish_safety(scratch: Path) -> None:
     assert len(targets) == 1
     verify_recursive_checksums(targets[0])
     assert not list(concurrency_root.glob(".bc-only-s1.tmp-*"))
+
+
+def check_gpfs_publication_fallback(scratch: Path) -> None:
+    """Exercise the cooperative exclusive-placeholder Linux fallback."""
+
+    root = scratch / "gpfs-publication-fallback"
+    root.mkdir()
+
+    def pair(label: str) -> tuple[Path, Path]:
+        case = root / label
+        case.mkdir()
+        source = case / "source"
+        target = case / "target"
+        source.mkdir()
+        (source / "sentinel.txt").write_text("source\n", encoding="utf-8")
+        return source, target
+
+    def unsupported(error: int) -> OSError:
+        return OSError(error, os.strerror(error))
+
+    # The supported renameat2/renamex path remains the preferred path and
+    # never enters the placeholder fallback.
+    source, target = pair("fast-path")
+
+    def fixture_fast_path(temporary: Path, destination: Path) -> None:
+        os.rename(temporary, destination)
+
+    with patch.object(
+        checkpoint_lib,
+        "_rename_directory_no_replace",
+        side_effect=fixture_fast_path,
+    ), patch.object(
+        checkpoint_lib,
+        "_publish_directory_with_owned_placeholder",
+        side_effect=AssertionError("fast path entered GPFS fallback"),
+    ):
+        checkpoint_lib.publish_directory_no_replace(source, target)
+    assert not source.exists()
+    assert (target / "sentinel.txt").read_text(encoding="utf-8") == "source\n"
+
+    # Linux fallback is restricted to the three unsupported-operation errnos.
+    for error in (errno.EINVAL, errno.ENOSYS, errno.EOPNOTSUPP):
+        source, target = pair(f"unsupported-{error}")
+        with patch.object(checkpoint_lib.sys, "platform", "linux"), patch.object(
+            checkpoint_lib,
+            "_rename_directory_no_replace",
+            side_effect=unsupported(error),
+        ):
+            checkpoint_lib.publish_directory_no_replace(source, target)
+        assert not source.exists()
+        assert (target / "sentinel.txt").read_text(encoding="utf-8") == "source\n"
+
+    # A target that predates lock acquisition is rejected before either move
+    # primitive is called, including when it is an empty directory.
+    source, target = pair("preexisting-target")
+    target.mkdir()
+    with patch.object(
+        checkpoint_lib,
+        "_rename_directory_no_replace",
+        side_effect=AssertionError("preexisting target reached rename"),
+    ):
+        expect_failure(
+            checkpoint_lib.publish_directory_no_replace,
+            source,
+            target,
+            contains="refusing to overwrite",
+        )
+    assert source.is_dir() and (source / "sentinel.txt").is_file()
+    assert target.is_dir() and not any(target.iterdir())
+
+    for kind in ("file", "symlink"):
+        source, target = pair(f"preexisting-{kind}")
+        if kind == "file":
+            target.write_text("preexisting\n", encoding="utf-8")
+        else:
+            target.symlink_to(source, target_is_directory=True)
+        with patch.object(
+            checkpoint_lib,
+            "_rename_directory_no_replace",
+            side_effect=AssertionError("preexisting target reached rename"),
+        ):
+            expect_failure(
+                checkpoint_lib.publish_directory_no_replace,
+                source,
+                target,
+                contains="refusing to overwrite",
+            )
+        assert source.is_dir() and (source / "sentinel.txt").is_file()
+        if kind == "file":
+            assert target.read_text(encoding="utf-8") == "preexisting\n"
+        else:
+            assert target.is_symlink()
+
+    original_plain_rename = checkpoint_lib._plain_directory_rename
+
+    # An uncooperative writer making our placeholder nonempty forces rename
+    # to fail.  Both the source and mutated placeholder remain as evidence.
+    source, target = pair("nonempty-placeholder")
+
+    def mutate_placeholder_directory_then_rename(
+        source_parent_fd: int,
+        source_name: str,
+        destination_parent_fd: int,
+        destination_name: str,
+    ) -> None:
+        placeholder_fd = os.open(
+            destination_name,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+            dir_fd=destination_parent_fd,
+        )
+        try:
+            descriptor = os.open(
+                "intruder.txt",
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+                dir_fd=placeholder_fd,
+            )
+            os.close(descriptor)
+        finally:
+            os.close(placeholder_fd)
+        original_plain_rename(
+            source_parent_fd,
+            source_name,
+            destination_parent_fd,
+            destination_name,
+        )
+
+    with patch.object(checkpoint_lib.sys, "platform", "linux"), patch.object(
+        checkpoint_lib,
+        "_rename_directory_no_replace",
+        side_effect=unsupported(errno.EINVAL),
+    ), patch.object(
+        checkpoint_lib,
+        "_plain_directory_rename",
+        side_effect=mutate_placeholder_directory_then_rename,
+    ):
+        expect_failure(checkpoint_lib.publish_directory_no_replace, source, target)
+    assert source.is_dir() and (source / "sentinel.txt").is_file()
+    assert (target / "intruder.txt").is_file()
+
+    # If the source name is swapped in the final syscall race, the replacement
+    # may move but cannot pass the recorded source-inode validation.
+    source, target = pair("source-swap")
+    detached = source.with_name("detached-original")
+
+    def swap_source_then_rename(
+        source_parent_fd: int,
+        source_name: str,
+        destination_parent_fd: int,
+        destination_name: str,
+    ) -> None:
+        os.rename(
+            source_name,
+            detached.name,
+            src_dir_fd=source_parent_fd,
+            dst_dir_fd=source_parent_fd,
+        )
+        os.mkdir(source_name, 0o700, dir_fd=source_parent_fd)
+        original_plain_rename(
+            source_parent_fd,
+            source_name,
+            destination_parent_fd,
+            destination_name,
+        )
+
+    with patch.object(checkpoint_lib.sys, "platform", "linux"), patch.object(
+        checkpoint_lib,
+        "_rename_directory_no_replace",
+        side_effect=unsupported(errno.EINVAL),
+    ), patch.object(
+        checkpoint_lib,
+        "_plain_directory_rename",
+        side_effect=swap_source_then_rename,
+    ):
+        expect_failure(
+            checkpoint_lib.publish_directory_no_replace,
+            source,
+            target,
+            contains="not the original source",
+        )
+    assert (detached / "sentinel.txt").is_file()
+    assert target.is_dir() and not any(target.iterdir())
+
+    # An arbitrary failure of the plain rename is never retried or rolled
+    # back; the owned empty placeholder remains and blocks later publication.
+    source, target = pair("plain-rename-failure")
+    with patch.object(checkpoint_lib.sys, "platform", "linux"), patch.object(
+        checkpoint_lib,
+        "_rename_directory_no_replace",
+        side_effect=unsupported(errno.EINVAL),
+    ), patch.object(
+        checkpoint_lib,
+        "_plain_directory_rename",
+        side_effect=OSError(errno.EIO, os.strerror(errno.EIO)),
+    ):
+        expect_failure(checkpoint_lib.publish_directory_no_replace, source, target)
+    assert source.is_dir() and (source / "sentinel.txt").is_file()
+    assert target.is_dir() and not any(target.iterdir())
+
+    # Errors other than the explicit unsupported-operation set never enter
+    # the fallback and therefore create no target placeholder.
+    source, target = pair("arbitrary-fast-path-error")
+    with patch.object(checkpoint_lib.sys, "platform", "linux"), patch.object(
+        checkpoint_lib,
+        "_rename_directory_no_replace",
+        side_effect=unsupported(errno.EIO),
+    ), patch.object(
+        checkpoint_lib,
+        "_publish_directory_with_owned_placeholder",
+        side_effect=AssertionError("arbitrary errno entered GPFS fallback"),
+    ):
+        expect_failure(checkpoint_lib.publish_directory_no_replace, source, target)
+    assert source.is_dir() and not target.exists()
+
+    # Collision errnos from the fast primitive are never interpreted as an
+    # unsupported filesystem feature and never create a placeholder.
+    for error in (errno.EEXIST, errno.ENOTEMPTY):
+        source, target = pair(f"collision-errno-{error}")
+        with patch.object(checkpoint_lib.sys, "platform", "linux"), patch.object(
+            checkpoint_lib,
+            "_rename_directory_no_replace",
+            side_effect=unsupported(error),
+        ), patch.object(
+            checkpoint_lib,
+            "_publish_directory_with_owned_placeholder",
+            side_effect=AssertionError("collision errno entered GPFS fallback"),
+        ):
+            expect_failure(checkpoint_lib.publish_directory_no_replace, source, target)
+        assert source.is_dir() and not target.exists()
 
 
 def main() -> int:
@@ -1979,11 +2208,13 @@ def main() -> int:
             contains="file set mismatch",
         )
         check_publish_safety(scratch)
+        check_gpfs_publication_fallback(scratch)
         assert sha256_file(checkpoint_dir / "SHA256SUMS")
 
     print(
         "steel-module managed finalization/checkpoint: PASS "
-        "(32 tasks, 8000 events, successor lineage, tamper/concurrency/BC-ONLY-S1 gates)"
+        "(32 tasks, 8000 events, successor lineage, GPFS publication fallback, "
+        "tamper/concurrency/BC-ONLY-S1 gates)"
     )
     return 0
 

@@ -765,61 +765,28 @@ python3 hpc/osc/seal_steel_module_production_r3_probe_evidence.py \
   --execution-dir "$EXECUTION"
 ```
 
-Use the content-addressed evidence path printed by the sealer to create an
-inert R4 candidate outside the repository:
+Successful execution-v4 probe evidence is the end of this recovery phase.
+The exact leased probe mountpoint remains under `attempts/` with a read-only,
+content-bound marker; it is neither deleted nor renamed. The raw workspace
+contains a byte-identical marker copy, and the accepted bundle records
+`execution_closed=true` and `future_successor_required=true`.
 
-```bash
-python3 hpc/osc/generate_steel_module_production_successor_readiness.py \
-  --preflight-evidence-dir "$R3ROOT/evidence/<printed-evidence-id>" \
-  --write-proposal "$WORK/evidence/steel-module-phase2b-recovery-readiness-candidate.json"
-```
+Therefore **do not** run the recovery-readiness generator against
+execution-v4, do not create an intent there, and do not use execution-v4 for
+production, finalization, or checkpoint construction. Its non-empty closed
+boundary is immutable successful-preflight history. Any later BC-S1 production
+requires a separately reviewed and authorized clean successor (expected to be
+execution-v5) that binds the accepted v4 evidence while starting with new,
+empty mutable roots. That future materializer/readiness step is deliberately
+outside this phase and does not yet authorize a scheduler submission.
 
-The candidate is not authority. It must be reviewed and then committed as
-`hpc/osc/configurations/steel-module-production-phase2b-recovery-v3.lock.json`
-in a clean, non-merge R4 commit whose only delta from the control-plane commit
-frozen into execution-v4 is that file.
-The manager revalidates the tracked lock and the complete R3 bundle before
-intent creation and again before scheduler contact.
-
-After all 32 tasks have one valid selected success, the offline downstream
-sequence is:
-
-```bash
-EXECUTION="$WORK/campaigns/steel-module-production-bc-s1-execution-v4"
-
-python3 hpc/osc/finalize_steel_module_managed_child.py \
-  --execution-dir "$EXECUTION" --check-only
-python3 hpc/osc/finalize_steel_module_managed_child.py \
-  --execution-dir "$EXECUTION"
-python3 hpc/osc/build_steel_module_production_checkpoint.py \
-  --execution-dir "$EXECUTION" --state BC-ONLY-S1 --check-only
-python3 hpc/osc/build_steel_module_production_checkpoint.py \
-  --execution-dir "$EXECUTION" --state BC-ONLY-S1
-
-# Copy the content-addressed path printed by the builder, for example:
-CHECKPOINT="$WORK/campaigns/steel-module-production-checkpoints/bc-only-s1-<hash12>"
-
-python3 hpc/osc/analyze_steel_module_production_checkpoint.py \
-  --checkpoint-dir "$CHECKPOINT"
-python3 hpc/osc/render_steel_module_production_review.py \
-  --analysis-dir "${CHECKPOINT}-analysis"
-```
-
-The analyzer uses only the new 4,000 events per endpoint for its observed-net
-`24/4` estimate. It recomputes the sealed pilot only for reconciliation and a
-precision/tail baseline, performs 10,000 PCG64 event bootstraps and exactly 32
-leave-one-block-out evaluations, and emits numeric eligibility rather than a
-decision. The offline HTML/PDF review is mandatory. A human decision uses
-`record_steel_module_progression.py --check-only` first and an explicit
-`--record` second; adverse or indeterminate tail review permits only
-`pause-review`. No analyzer, renderer, or recorder modifies a child or invokes
-Slurm.
-
-The production analyzer must keep pooled scintillation production equally
-weighted across the three layout strata even though their final event counts
-differ. Bootstrap within each stratum at its available sample size and average
-the three means with `1/3` weights; concatenating all events would silently
-overweight the staged `back-center` endpoint sample.
+The downstream finalizer, checkpoint, analyzer, renderer, and progression
+recorder remain applicable only after such a future production successor has
+actually run all 32 tasks and produced valid selected results. The production
+analyzer must then keep pooled scintillation production equally weighted
+across the three layout strata even when their final event counts differ:
+bootstrap within each stratum at its available sample size and average the
+three means with `1/3` weights.
 
 ### Electron differential regression
 

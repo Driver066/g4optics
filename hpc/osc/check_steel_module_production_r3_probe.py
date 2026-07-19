@@ -12,11 +12,11 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import steel_module_production_successor_lib as successor_lib
 import steel_module_production_r3_probe_lib as r3_probe_lib
-from check_steel_module_production_phase2b_control import FakeSlurm
 from check_steel_module_production_successor import (
     _fixture_r3_failure_identity,
     _make_sealed_incident_fixture,
@@ -37,11 +37,6 @@ from steel_module_production_container_contract import (
     validate_apptainer_runtime_identity,
 )
 from steel_module_production_checkpoint_lib import recursive_file_records
-from steel_module_production_phase2b_lib import (
-    attempt_state,
-    prepare_attempt_intent,
-    validate_worker_scheduler_identity,
-)
 from steel_module_production_r3_probe_lib import (
     CONTAINER_PROBE_PREFIX,
     RAW_PROBE_SCHEMA_VERSION,
@@ -60,14 +55,13 @@ from steel_module_production_r3_probe_lib import (
 from steel_module_production_successor_lib import (
     RECOVERY_READINESS_LOCK_RELATIVE_V3,
     _validate_formal_r3_held_job_paths,
-    _validate_successor_mutable_state_after_intent,
     _verify_r4_git_gate,
+    build_successor_recovery_readiness_candidate,
     materialize_successor_execution_companion,
     materialize_successor_v3_execution_companion,
     materialize_successor_v4_execution_companion,
     successor_r3_preflight_binding,
 )
-from manage_steel_module_production_attempt import submit_intent
 
 
 def _canonical_hash(value: object) -> str:
@@ -370,12 +364,6 @@ def _write_raw_workspace(
         mounted["records"] = r3_probe_lib._mountpoint_mutable_records(token_name)
         mounted.pop("snapshot_hash")
         mounted["snapshot_hash"] = _canonical_hash(mounted)
-        retirement_parent = workspace / r3_probe_lib.RETIREMENT_PARENT_NAME
-        retirement_destination = (
-            retirement_parent / r3_probe_lib.RETIREMENT_DESTINATION_NAME
-        )
-        retirement_parent.mkdir(mode=0o700)
-        retirement_destination.mkdir(mode=0o700)
         marker_payload = {
             "schema_version": r3_probe_lib.RETIREMENT_MARKER_SCHEMA_VERSION,
             "probe_token": "1" * 32,
@@ -383,30 +371,42 @@ def _write_raw_workspace(
             "execution_hash": successor.execution_hash,
             "challenge_sha256": sha256_file(challenge),
             "source_relative_path": f"attempts/{token_name}",
-            "quarantine_relative_path": (
-                f"{r3_probe_lib.RETIREMENT_PARENT_NAME}/"
-                f"{r3_probe_lib.RETIREMENT_DESTINATION_NAME}"
+            "retirement_mechanism": "in-place-retained-mountpoint",
+            "raw_marker_copy_name": (
+                r3_probe_lib.RAW_RETIREMENT_MARKER_COPY_NAME
             ),
+            "rename_performed": False,
+            "directory_entry_removed": False,
             "deletion_performed": False,
+            "execution_closed": True,
+            "future_successor_required": True,
         }
-        marker = (
-            retirement_destination / r3_probe_lib.RETIREMENT_MARKER_NAME
-        )
+        mountpoint = successor.directory / "attempts" / token_name
+        mountpoint.mkdir(mode=0o700)
+        marker = mountpoint / r3_probe_lib.RETIREMENT_MARKER_NAME
         marker.write_text(
             json.dumps(marker_payload, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
         marker.chmod(0o400)
+        raw_marker = (
+            workspace / r3_probe_lib.RAW_RETIREMENT_MARKER_COPY_NAME
+        )
+        raw_marker.write_bytes(marker.read_bytes())
+        raw_marker.chmod(0o400)
+        closed = r3_probe_lib._mutable_tree_snapshot(successor.directory)
+        closed_records = recursive_file_records(successor.directory, exclude=())
+        closed_snapshot = _canonical_hash(closed_records)
         payload.update(
             {
+                "closed_execution_snapshot_sha256": closed_snapshot,
+                "closed_execution_snapshot_record_count": len(closed_records),
                 "mutable_tree_snapshot_baseline": baseline,
                 "mutable_tree_snapshot_before_container": mounted,
                 "mutable_tree_snapshot_after_container": json.loads(
                     json.dumps(mounted)
                 ),
-                "mutable_tree_snapshot_after_retirement": json.loads(
-                    json.dumps(baseline)
-                ),
+                "mutable_tree_snapshot_after_retirement": closed,
                 "mountpoint_lifecycle": {
                     "relative_path": f"attempts/{token_name}",
                     "mode": 0o700,
@@ -419,22 +419,24 @@ def _write_raw_workspace(
                     "retirement_mode_verified": True,
                     "retirement_initially_empty_verified": True,
                     "retirement_no_sibling_verified": True,
-                    "quarantine_parent_created_exclusively": True,
-                    "atomic_noreplace_rename": True,
-                    "rename_mechanism": "linux-renameat2-noreplace",
-                    "source_absent_after_rename": True,
-                    "attempts_pristine_after_rename": True,
-                    "retirement_destination_identity_verified": True,
+                    "retirement_mechanism": "in-place-retained-mountpoint",
+                    "rename_performed": False,
+                    "directory_entry_removed": False,
+                    "path_identity_verified_after_marker": True,
                     "retirement_marker_created_through_leaf_fd": True,
                     "retirement_marker_sha256": sha256_file(marker),
-                    "quarantine_relative_path": marker_payload[
-                        "quarantine_relative_path"
-                    ],
-                    "retirement_retained": True,
+                    "retirement_marker_size_bytes": marker.stat().st_size,
+                    "raw_marker_copy_name": (
+                        r3_probe_lib.RAW_RETIREMENT_MARKER_COPY_NAME
+                    ),
+                    "raw_marker_copy_sha256": sha256_file(raw_marker),
+                    "retirement_retained_in_place": True,
+                    "execution_closed": True,
+                    "future_successor_required": True,
                     "deletion_performed": False,
                     "identity_persisted": False,
                 },
-                "generic_v4_boundary_validated_after_retirement": True,
+                "closed_v4_boundary_validated_after_retirement": True,
             }
         )
     payload["raw_result_hash"] = _canonical_hash(payload)
@@ -467,175 +469,169 @@ def _make_active_v4_fixture(repo_root: Path, root: Path) -> object:
 
 
 def _test_mountpoint_lease_adversaries(scratch: Path) -> None:
-    execution = scratch / "execution"
-    for name in ("intents", "attempts", "finalized"):
-        (execution / name).mkdir(parents=True, mode=0o700)
+    with patch.object(r3_probe_lib.sys, "platform", "linux"):
+        assert r3_probe_lib._expected_mountpoint_link_count(entry_count=0) == 2
+        assert r3_probe_lib._expected_mountpoint_link_count(entry_count=1) == 2
+    with patch.object(r3_probe_lib.sys, "platform", "darwin"):
+        assert r3_probe_lib._expected_mountpoint_link_count(entry_count=0) == 2
+        assert r3_probe_lib._expected_mountpoint_link_count(entry_count=1) == 3
+
     token = "a" * 32
     name = ".r3-probe-" + token
-    workspace_index = 0
+    case_index = 0
 
-    def fixture_noreplace(
-        source_parent_fd: int,
-        source_name: str,
-        destination_parent_fd: int,
-        destination_name: str,
-    ) -> str:
-        try:
-            os.stat(
-                destination_name,
-                dir_fd=destination_parent_fd,
-                follow_symlinks=False,
-            )
-        except FileNotFoundError:
-            pass
-        else:
-            raise OSError(errno.EEXIST, "fixture destination exists")
-        os.rename(
-            source_name,
-            destination_name,
-            src_dir_fd=source_parent_fd,
-            dst_dir_fd=destination_parent_fd,
-        )
-        return "linux-renameat2-noreplace"
-
-    def retire(
-        lease: object,
-        *,
-        rename_side_effect: object = fixture_noreplace,
-    ) -> tuple[dict[str, object], Path]:
-        nonlocal workspace_index
-        workspace_index += 1
-        workspace = scratch / f"raw-{workspace_index}"
+    def fresh() -> tuple[Path, Path]:
+        nonlocal case_index
+        case_index += 1
+        root = scratch / f"case-{case_index}"
+        execution = root / "execution"
+        for mutable in ("intents", "attempts", "finalized"):
+            (execution / mutable).mkdir(parents=True, mode=0o700)
+        workspace = root / "raw"
         workspace.mkdir(mode=0o700)
-        marker_payload = {
+        return execution, workspace
+
+    def marker_payload() -> dict[str, object]:
+        return {
             "schema_version": r3_probe_lib.RETIREMENT_MARKER_SCHEMA_VERSION,
             "probe_token": token,
             "execution_id": "fixture-execution",
             "execution_hash": "1" * 64,
             "challenge_sha256": "2" * 64,
             "source_relative_path": f"attempts/{name}",
-            "quarantine_relative_path": (
-                f"{r3_probe_lib.RETIREMENT_PARENT_NAME}/"
-                f"{r3_probe_lib.RETIREMENT_DESTINATION_NAME}"
+            "retirement_mechanism": "in-place-retained-mountpoint",
+            "raw_marker_copy_name": (
+                r3_probe_lib.RAW_RETIREMENT_MARKER_COPY_NAME
             ),
+            "rename_performed": False,
+            "directory_entry_removed": False,
             "deletion_performed": False,
+            "execution_closed": True,
+            "future_successor_required": True,
         }
-        with patch.object(
-            r3_probe_lib,
-            "_rename_directory_no_replace",
-            side_effect=rename_side_effect,
-        ):
-            outcome = r3_probe_lib._retire_probe_mountpoint(
-                lease, workspace=workspace, marker_payload=marker_payload
-            )
-        return outcome, workspace
 
-    baseline = r3_probe_lib._mutable_tree_snapshot(execution)
-    lease = r3_probe_lib._create_probe_mountpoint(execution, token=token)
-    assert r3_probe_lib._mutable_tree_snapshot(execution)["records"] == (
-        r3_probe_lib._mountpoint_mutable_records(name)
+    def seal(execution: Path, workspace: Path) -> dict[str, object]:
+        lease = r3_probe_lib._create_probe_mountpoint(execution, token=token)
+        return r3_probe_lib._seal_probe_mountpoint_in_place(
+            lease,
+            workspace=workspace,
+            marker_payload=marker_payload(),
+        )
+
+    execution, workspace = fresh()
+    forbidden = AssertionError("in-place retirement attempted namespace removal")
+    with (
+        patch.object(r3_probe_lib.os, "rename", side_effect=forbidden),
+        patch.object(r3_probe_lib.os, "rmdir", side_effect=forbidden),
+        patch.object(r3_probe_lib.os, "unlink", side_effect=forbidden),
+    ):
+        outcome = seal(execution, workspace)
+    assert outcome["retained_in_place"] is True, outcome
+    marker = execution / "attempts" / name / r3_probe_lib.RETIREMENT_MARKER_NAME
+    raw_copy = workspace / r3_probe_lib.RAW_RETIREMENT_MARKER_COPY_NAME
+    assert marker.read_bytes() == raw_copy.read_bytes()
+    assert outcome["rename_performed"] is False
+    assert outcome["directory_entry_removed"] is False
+    assert outcome["deletion_performed"] is False
+    r3_probe_lib.validate_closed_successor_v4_probe_boundary(
+        execution,
+        marker_payload=marker_payload(),
+        expected_marker_sha256=sha256_file(marker),
     )
-    second_rejected = False
-    try:
-        r3_probe_lib._create_probe_mountpoint(execution, token="b" * 32)
-    except ValueError:
-        second_rejected = True
-    assert second_rejected
-    outcome, workspace = retire(lease)
-    assert outcome["retained"] is True, outcome
-    assert (
-        workspace
-        / r3_probe_lib.RETIREMENT_PARENT_NAME
-        / r3_probe_lib.RETIREMENT_DESTINATION_NAME
-        / r3_probe_lib.RETIREMENT_MARKER_NAME
-    ).is_file()
-    assert r3_probe_lib._mutable_tree_snapshot(execution) == baseline
+    closed_records = recursive_file_records(execution, exclude=())
+    closed_view = SimpleNamespace(
+        manifest={"test_mode": False}, directory=execution
+    )
+    with patch.object(
+        successor_lib,
+        "successor_r3_preflight_binding",
+        side_effect=AssertionError("closed v4 reached readiness binding"),
+    ):
+        try:
+            build_successor_recovery_readiness_candidate(
+                closed_view, preflight_evidence_dir=workspace
+            )
+        except ValueError as exc:
+            assert "requires a future successor" in str(exc)
+        else:
+            raise AssertionError("closed v4 became recovery-ready")
+    assert recursive_file_records(execution, exclude=()) == closed_records
+    assert not any((execution / "intents").iterdir())
 
+    execution, workspace = fresh()
     collision = execution / "attempts" / name
     collision.mkdir(mode=0o700)
     _expect_value_error(
         lambda: r3_probe_lib._create_probe_mountpoint(execution, token=token),
         "collision",
     )
-    collision.rmdir()
 
+    execution, workspace = fresh()
     lease = r3_probe_lib._create_probe_mountpoint(execution, token=token)
     sibling = execution / "attempts/unexpected-sibling"
     sibling.mkdir(mode=0o700)
-    outcome, _ = retire(lease)
-    assert outcome["retained"] is False and sibling.exists()
-    sibling.rmdir()
-    (execution / "attempts" / name).rmdir()
+    outcome = r3_probe_lib._seal_probe_mountpoint_in_place(
+        lease, workspace=workspace, marker_payload=marker_payload()
+    )
+    assert outcome["retained_in_place"] is False and sibling.exists()
+    assert not (workspace / r3_probe_lib.RAW_RETIREMENT_MARKER_COPY_NAME).exists()
 
+    execution, workspace = fresh()
     lease = r3_probe_lib._create_probe_mountpoint(execution, token=token)
     residue = execution / "attempts" / name / "residue"
     residue.write_text("residue\n", encoding="utf-8")
-    outcome, _ = retire(lease)
-    assert outcome["retained"] is False and residue.exists()
-    residue.unlink()
-    residue.parent.rmdir()
+    outcome = r3_probe_lib._seal_probe_mountpoint_in_place(
+        lease, workspace=workspace, marker_payload=marker_payload()
+    )
+    assert outcome["retained_in_place"] is False and residue.exists()
 
-    detached = scratch / "detached-original"
+    execution, workspace = fresh()
     lease = r3_probe_lib._create_probe_mountpoint(execution, token=token)
+    detached = execution.parent / "detached-original"
     (execution / "attempts" / name).rename(detached)
     (execution / "attempts" / name).mkdir(mode=0o700)
-    outcome, _ = retire(lease)
-    assert outcome["retained"] is False
-    (execution / "attempts" / name).rmdir()
-    detached.rmdir()
-
-    detached = scratch / "detached-symlink-original"
-    lease = r3_probe_lib._create_probe_mountpoint(execution, token=token)
-    (execution / "attempts" / name).rename(detached)
-    (execution / "attempts" / name).symlink_to(detached, target_is_directory=True)
-    outcome, _ = retire(lease)
-    assert outcome["retained"] is False
-    (execution / "attempts" / name).unlink()
-    detached.rmdir()
-
-    # Reproduce the final-stat -> name-swap P1.  The no-replace rename moves
-    # the replacement, destination inode verification rejects it, and neither
-    # the replacement nor detached original is deleted.
-    lease = r3_probe_lib._create_probe_mountpoint(execution, token=token)
-    detached = scratch / "final-swap-original"
-
-    def final_swap(
-        source_parent_fd: int,
-        source_name: str,
-        destination_parent_fd: int,
-        destination_name: str,
-    ) -> str:
-        (execution / "attempts" / source_name).rename(detached)
-        (execution / "attempts" / source_name).mkdir(mode=0o700)
-        return fixture_noreplace(
-            source_parent_fd,
-            source_name,
-            destination_parent_fd,
-            destination_name,
-        )
-
-    outcome, swapped_workspace = retire(lease, rename_side_effect=final_swap)
-    assert outcome["retained"] is False and detached.is_dir()
-    replacement = (
-        swapped_workspace
-        / r3_probe_lib.RETIREMENT_PARENT_NAME
-        / r3_probe_lib.RETIREMENT_DESTINATION_NAME
+    outcome = r3_probe_lib._seal_probe_mountpoint_in_place(
+        lease, workspace=workspace, marker_payload=marker_payload()
     )
-    assert replacement.is_dir()
-    replacement.rmdir()
-    replacement.parent.rmdir()
-    detached.rmdir()
+    assert outcome["retained_in_place"] is False and detached.is_dir()
 
+    execution, workspace = fresh()
     lease = r3_probe_lib._create_probe_mountpoint(execution, token=token)
+    original_writer = r3_probe_lib._write_retirement_marker
 
-    def busy_rename(*_: object) -> str:
-        raise OSError(errno.EBUSY, "fixture busy mount")
+    def swap_after_marker(leaf_fd: int, payload: dict[str, object]) -> str:
+        digest = original_writer(leaf_fd, payload)
+        detached_after = execution.parent / "detached-after-marker"
+        (execution / "attempts" / name).rename(detached_after)
+        (execution / "attempts" / name).mkdir(mode=0o700)
+        return digest
 
-    outcome, _ = retire(lease, rename_side_effect=busy_rename)
-    assert outcome["failure"] == f"oserror-{errno.EBUSY}"
+    with patch.object(
+        r3_probe_lib,
+        "_write_retirement_marker",
+        side_effect=swap_after_marker,
+    ):
+        outcome = r3_probe_lib._seal_probe_mountpoint_in_place(
+            lease, workspace=workspace, marker_payload=marker_payload()
+        )
+    assert outcome["retained_in_place"] is False
+    assert (execution.parent / "detached-after-marker").is_dir()
+    assert not (workspace / r3_probe_lib.RAW_RETIREMENT_MARKER_COPY_NAME).exists()
+
+    execution, workspace = fresh()
+    lease = r3_probe_lib._create_probe_mountpoint(execution, token=token)
+    with patch.object(
+        r3_probe_lib,
+        "_write_retirement_marker",
+        side_effect=OSError(errno.EIO, "fixture marker failure"),
+    ):
+        outcome = r3_probe_lib._seal_probe_mountpoint_in_place(
+            lease, workspace=workspace, marker_payload=marker_payload()
+        )
+    assert outcome["failure"] == f"oserror-{errno.EIO}"
+    assert outcome["retained_in_place"] is False
     assert (execution / "attempts" / name).is_dir()
-    (execution / "attempts" / name).rmdir()
-    assert r3_probe_lib._mutable_tree_snapshot(execution) == baseline
+    assert not (workspace / r3_probe_lib.RAW_RETIREMENT_MARKER_COPY_NAME).exists()
 
 
 def _test_active_probe_failure_cleanup(repo_root: Path, scratch: Path) -> None:
@@ -667,30 +663,7 @@ def _test_active_probe_failure_cleanup(repo_root: Path, scratch: Path) -> None:
     }
     token = "c" * 32
     original_marker_writer = r3_probe_lib._write_retirement_marker
-
-    def fixture_noreplace(
-        source_parent_fd: int,
-        source_name: str,
-        destination_parent_fd: int,
-        destination_name: str,
-    ) -> str:
-        try:
-            os.stat(
-                destination_name,
-                dir_fd=destination_parent_fd,
-                follow_symlinks=False,
-            )
-        except FileNotFoundError:
-            pass
-        else:
-            raise OSError(errno.EEXIST, "fixture destination exists")
-        os.rename(
-            source_name,
-            destination_name,
-            src_dir_fd=source_parent_fd,
-            dst_dir_fd=destination_parent_fd,
-        )
-        return "linux-renameat2-noreplace"
+    original_raw_copy_writer = r3_probe_lib._write_raw_marker_copy
 
     def invoke(case: str, *, expect_success: bool = False) -> Path:
         workspace = raw_parent / job_name
@@ -723,13 +696,11 @@ def _test_active_probe_failure_cleanup(repo_root: Path, scratch: Path) -> None:
                 detached = scratch / "container-detached"
                 mountpoint.rename(detached)
                 mountpoint.mkdir(mode=0o700)
-            elif case == "destination-collision":
-                destination = (
-                    workspace
-                    / r3_probe_lib.RETIREMENT_PARENT_NAME
-                    / r3_probe_lib.RETIREMENT_DESTINATION_NAME
+            elif case == "raw-marker-copy-collision":
+                collision = (
+                    workspace / r3_probe_lib.RAW_RETIREMENT_MARKER_COPY_NAME
                 )
-                destination.mkdir(parents=True, mode=0o700)
+                collision.write_text("collision\n", encoding="utf-8")
             return subprocess.CompletedProcess(
                 arguments,
                 9 if case == "container-nonzero" else 0,
@@ -746,41 +717,28 @@ def _test_active_probe_failure_cleanup(repo_root: Path, scratch: Path) -> None:
         def fake_resolve(record: dict[str, object], label: str) -> tuple[Path, str]:
             return runtime_paths[label].resolve(), str(record["sha256"])
 
-        def active_noreplace(
-            source_parent_fd: int,
-            source_name: str,
-            destination_parent_fd: int,
-            destination_name: str,
-        ) -> str:
-            if case == "final-swap":
-                detached = scratch / "active-final-swap-original"
-                (successor.directory / "attempts" / source_name).rename(
-                    detached
-                )
-                (successor.directory / "attempts" / source_name).mkdir(
-                    mode=0o700
-                )
-            if case == "cross-device":
-                raise OSError(errno.EXDEV, "fixture cross-device rename")
-            if case == "destination-race":
-                os.mkdir(
-                    destination_name,
-                    0o700,
-                    dir_fd=destination_parent_fd,
-                )
-            return fixture_noreplace(
-                source_parent_fd,
-                source_name,
-                destination_parent_fd,
-                destination_name,
-            )
-
         def active_marker_writer(
             leaf_fd: int, payload: dict[str, object]
         ) -> str:
             if case == "marker-write-failure":
                 raise OSError(errno.EIO, "fixture marker write failure")
-            return original_marker_writer(leaf_fd, payload)
+            digest = original_marker_writer(leaf_fd, payload)
+            if case == "final-swap":
+                attempts = successor.directory / "attempts"
+                source = next(attempts.glob(".r3-probe-*"))
+                detached = scratch / "active-final-swap-original"
+                source.rename(detached)
+                source.mkdir(mode=0o700)
+            return digest
+
+        def active_raw_copy_writer(
+            workspace_fd: int, *, marker_content: bytes
+        ) -> str:
+            if case == "raw-marker-copy-failure":
+                raise OSError(errno.EIO, "fixture raw marker copy failure")
+            return original_raw_copy_writer(
+                workspace_fd, marker_content=marker_content
+            )
 
         with (
             patch.object(
@@ -804,13 +762,13 @@ def _test_active_probe_failure_cleanup(repo_root: Path, scratch: Path) -> None:
             patch.object(r3_probe_lib.subprocess, "run", side_effect=fake_container),
             patch.object(
                 r3_probe_lib,
-                "_rename_directory_no_replace",
-                side_effect=active_noreplace,
+                "_write_retirement_marker",
+                side_effect=active_marker_writer,
             ),
             patch.object(
                 r3_probe_lib,
-                "_write_retirement_marker",
-                side_effect=active_marker_writer,
+                "_write_raw_marker_copy",
+                side_effect=active_raw_copy_writer,
             ),
             patch.object(r3_probe_lib.Path, "home", return_value=home),
             patch.object(r3_probe_lib.secrets, "token_hex", return_value=token),
@@ -842,37 +800,46 @@ def _test_active_probe_failure_cleanup(repo_root: Path, scratch: Path) -> None:
 
     success = invoke("success", expect_success=True)
     assert (success / "probe_result.json").is_file()
+    success_payload = validate_raw_probe_workspace(success)
+    success_marker_payload = r3_probe_lib._expected_retirement_marker_payload(
+        success_payload
+    )
+    r3_probe_lib.validate_closed_successor_v4_probe_boundary(
+        successor.directory,
+        marker_payload=success_marker_payload,
+        expected_marker_sha256=success_payload["mountpoint_lifecycle"][
+            "retirement_marker_sha256"
+        ],
+    )
+    attempts = successor.directory / "attempts"
+    shutil.rmtree(next(attempts.iterdir()))
     shutil.rmtree(success)
     for case in ("container-nonzero", "parse-failure", "write-failure"):
         workspace = invoke(case)
-        assert not any((successor.directory / "attempts").iterdir())
+        assert not (workspace / "probe_result.json").exists()
+        entries = tuple((successor.directory / "attempts").iterdir())
+        assert len(entries) == 1
+        assert (entries[0] / r3_probe_lib.RETIREMENT_MARKER_NAME).is_file()
+        shutil.rmtree(entries[0])
         shutil.rmtree(workspace)
 
     for case in (
         "extra-sibling",
         "nonempty",
         "inode-replacement",
-        "destination-collision",
         "final-swap",
-        "cross-device",
-        "destination-race",
         "marker-write-failure",
+        "raw-marker-copy-collision",
+        "raw-marker-copy-failure",
     ):
         workspace = invoke(case)
-        if case in {"final-swap", "marker-write-failure"}:
-            if case == "final-swap":
-                assert (scratch / "active-final-swap-original").is_dir()
-            assert not (workspace / "probe_result.json").exists()
-            successor_lib.validate_successor_r2_boundary(
+        assert not (workspace / "probe_result.json").exists()
+        _expect_value_error(
+            lambda: successor_lib.validate_successor_r2_boundary(
                 successor, repo_root=repo_root
-            )
-        else:
-            _expect_value_error(
-                lambda: successor_lib.validate_successor_r2_boundary(
-                    successor, repo_root=repo_root
-                ),
-                "strict boundary residue",
-            )
+            ),
+            "strict boundary residue",
+        )
         attempts = successor.directory / "attempts"
         for entry in list(attempts.iterdir()):
             if entry.is_symlink() or entry.is_file():
@@ -917,14 +884,17 @@ def _test_accounting_and_evidence(repo_root: Path, scratch: Path) -> None:
     raw_v2_result = raw_v2 / "probe_result.json"
     raw_v2_payload = json.loads(raw_v2_result.read_text(encoding="utf-8"))
     for name in (
+        "closed_execution_snapshot_sha256",
+        "closed_execution_snapshot_record_count",
         "mutable_tree_snapshot_baseline",
         "mutable_tree_snapshot_before_container",
         "mutable_tree_snapshot_after_container",
         "mutable_tree_snapshot_after_retirement",
         "mountpoint_lifecycle",
-        "generic_v4_boundary_validated_after_retirement",
+        "closed_v4_boundary_validated_after_retirement",
     ):
         raw_v2_payload.pop(name)
+    (raw_v2 / r3_probe_lib.RAW_RETIREMENT_MARKER_COPY_NAME).unlink()
     raw_v2_payload["schema_version"] = RAW_PROBE_SCHEMA_VERSION_V2
     raw_v2_payload.pop("raw_result_hash")
     raw_v2_payload["raw_result_hash"] = _canonical_hash(raw_v2_payload)
@@ -959,7 +929,7 @@ def _test_accounting_and_evidence(repo_root: Path, scratch: Path) -> None:
     resign_raw_v3(
         "cleanup",
         lambda value: value["mountpoint_lifecycle"].__setitem__(
-            "retirement_retained", False
+            "retirement_retained_in_place", False
         ),
     )
     resign_raw_v3(
@@ -969,10 +939,22 @@ def _test_accounting_and_evidence(repo_root: Path, scratch: Path) -> None:
         ),
     )
     resign_raw_v3(
-        "generic-boundary",
+        "closed-boundary",
         lambda value: value.__setitem__(
-            "generic_v4_boundary_validated_after_retirement", False
+            "closed_v4_boundary_validated_after_retirement", False
         ),
+    )
+
+    marker_tamper = scratch / "raw-v3-tampered-marker-copy"
+    shutil.copytree(raw, marker_tamper)
+    marker_copy = marker_tamper / r3_probe_lib.RAW_RETIREMENT_MARKER_COPY_NAME
+    marker_copy.chmod(0o600)
+    marker_copy.write_text("tampered\n", encoding="utf-8")
+    _expect_value_error(
+        lambda: validate_raw_probe_workspace(
+            marker_tamper, allow_test_mode=True
+        ),
+        "raw-v3 marker-copy tamper",
     )
 
     def tamper_snapshot(value: dict[str, object]) -> None:
@@ -1049,6 +1031,16 @@ def _test_accounting_and_evidence(repo_root: Path, scratch: Path) -> None:
         ),
         "formal R3 held-job command drift",
     )
+    live_mountpoint = (
+        successor.directory / "attempts" / (".r3-probe-" + "1" * 32)
+    )
+    live_marker_bytes = (
+        raw / r3_probe_lib.RAW_RETIREMENT_MARKER_COPY_NAME
+    ).read_bytes()
+    shutil.rmtree(live_mountpoint)
+    successor_lib.validate_successor_r2_boundary(
+        successor, repo_root=repo_root
+    )
     successor_held = (
         f"JobId={job_id} JobName={job_name} Account=pas2524 "
         "JobState=PENDING Reason=JobHeldUser Requeue=0 "
@@ -1095,6 +1087,10 @@ def _test_accounting_and_evidence(repo_root: Path, scratch: Path) -> None:
         )
     finally:
         r3_probe_lib.load_successor_execution = original_successor_loader
+    live_mountpoint.mkdir(mode=0o700)
+    restored_marker = live_mountpoint / r3_probe_lib.RETIREMENT_MARKER_NAME
+    restored_marker.write_bytes(live_marker_bytes)
+    restored_marker.chmod(0o400)
     accounting = write_terminal_accounting_input(
         output_dir=scratch / "accounting",
         job_id=job_id,
@@ -1215,127 +1211,12 @@ def _test_accounting_and_evidence(repo_root: Path, scratch: Path) -> None:
         "unverified held R3 job",
     )
 
-    # Exercise the post-R4 successor manager mechanics with an explicitly
-    # unaccepted test authorization and an in-process fake scheduler.  Formal
-    # loaders can never obtain this test-only override.
-    readiness = scratch / "fixture-recovery-readiness.json"
-    readiness.write_text("fixture recovery readiness\n", encoding="utf-8")
-    original_verifier = successor_lib.verify_successor_recovery_readiness
-
-    def fixture_verifier(execution: object, *, repo_root: Path | None) -> tuple[Path, dict[str, object]]:
-        assert execution.execution_id == successor.execution_id
-        return readiness.resolve(), {"test_mode": True, "binding": binding}
-
-    successor_lib.verify_successor_recovery_readiness = fixture_verifier
-    try:
-        attempt_id = "20260719T170000Z-predecessor-retry"
-        readiness_sha = sha256_file(readiness)
-        preview = prepare_attempt_intent(
-            successor,
-            attempt_id=attempt_id,
-            mode="predecessor-retry",
-            actor="successor-r4-fixture-reviewer",
-            write=False,
-            readiness_lock_sha256=readiness_sha,
-        )
-        assert preview["selected"]["task_count"] == 32
-        assert preview["selected"]["event_count"] == 8000
-        assert not (successor.directory / "intents" / attempt_id).exists()
-        intent = prepare_attempt_intent(
-            successor,
-            attempt_id=attempt_id,
-            mode="predecessor-retry",
-            actor="successor-r4-fixture-reviewer",
-            write=True,
-            readiness_lock_sha256=readiness_sha,
-        )
-        fake = FakeSlurm(successor, attempt_id)
-        job = submit_intent(
-            successor,
-            attempt_id=attempt_id,
-            intent_sha256=intent["intent_sha256"],
-            actor="successor-r4-fixture-reviewer",
-            runner=fake,
-        )
-        assert job == fake.job_id
-        assert attempt_state(successor, attempt_id).status == "released-active"
-        _validate_successor_mutable_state_after_intent(successor)
-        _expect_value_error(
-            lambda: successor_r3_preflight_binding(
-                successor,
-                evidence,
-                allow_test_mode=True,
-                require_current_snapshot=True,
-            ),
-            "intent journal must differ from the pristine R3 snapshot",
-        )
-        orphan = successor.directory / "attempts" / "orphan-attempt"
-        orphan.mkdir()
-        _expect_value_error(
-            lambda: _validate_successor_mutable_state_after_intent(successor),
-            "orphan attempt after R4",
-        )
-        orphan.rmdir()
-        unexplained.write_text("{}\n", encoding="utf-8")
-        _expect_value_error(
-            lambda: _validate_successor_mutable_state_after_intent(successor),
-            "unvalidated finalized state after R4",
-        )
-        unexplained.unlink()
-        _validate_successor_mutable_state_after_intent(successor)
-        assert sum(Path(call[0]).name == "sbatch" for call in fake.calls) == 1
-        assert sum(
-            Path(call[0]).name == "scontrol" and len(call) > 1 and call[1] == "release"
-            for call in fake.calls
-        ) == 1
-        scheduler_environment = {
-            "SLURM_ARRAY_JOB_ID": fake.job_id,
-            "SLURM_JOB_ID": str(int(fake.job_id) + 1),
-            "SLURM_JOB_NAME": intent["scheduler"]["job_name"],
-            "SLURM_ARRAY_TASK_ID": "1",
-            "SLURM_ARRAY_TASK_COUNT": "32",
-            "SLURM_ARRAY_TASK_MIN": "1",
-            "SLURM_ARRAY_TASK_MAX": "32",
-            "SLURM_ARRAY_TASK_STEP": "1",
-            "SLURM_SUBMIT_DIR": str(successor.directory),
-        }
-        validate_worker_scheduler_identity(
-            successor,
-            attempt_id=attempt_id,
-            intent=intent,
-            array_index=1,
-            environment=scheduler_environment,
-        )
-        for name, wrong in (
-            ("SLURM_ARRAY_JOB_ID", "99999999"),
-            ("SLURM_JOB_NAME", "wrong-job"),
-            ("SLURM_ARRAY_TASK_ID", "2"),
-            ("SLURM_ARRAY_TASK_COUNT", "31"),
-            ("SLURM_SUBMIT_DIR", str(scratch)),
-        ):
-            drifted = {**scheduler_environment, name: wrong}
-            _expect_value_error(
-                lambda drifted=drifted: validate_worker_scheduler_identity(
-                    successor,
-                    attempt_id=attempt_id,
-                    intent=intent,
-                    array_index=1,
-                    environment=drifted,
-                ),
-                f"worker scheduler drift: {name}",
-            )
-        _expect_value_error(
-            lambda: validate_worker_scheduler_identity(
-                successor,
-                attempt_id=attempt_id,
-                intent=intent,
-                array_index=1,
-                environment={},
-            ),
-            "direct worker without Slurm",
-        )
-    finally:
-        successor_lib.verify_successor_recovery_readiness = original_verifier
+    _expect_value_error(
+        lambda: successor_lib.validate_successor_r2_boundary(
+            successor, repo_root=repo_root
+        ),
+        "closed v4 can never return to the pristine pre-probe boundary",
+    )
 
 
 def _test_source_boundaries(repo_root: Path) -> None:
@@ -1661,7 +1542,7 @@ def main() -> int:
         _test_spool_copy_safe_launcher(repo_root, scratch / "spool-copy")
     print(
         "steel-module production R3 container probe: PASS "
-        "(raw-v3 deletion-free retirement, adversarial lifecycle, exact mount "
+        "(raw-v3 retained in-place closure, adversarial lifecycle, exact mount "
         "contract, terminal accounting, content-addressed test evidence)"
     )
     return 0

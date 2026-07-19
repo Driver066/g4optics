@@ -1617,7 +1617,10 @@ def successor_r3_preflight_binding(
     # Local imports avoid successor -> R3 -> successor initialization cycles.
     from steel_module_production_r3_probe_lib import (
         EVIDENCE_SCHEMA_VERSION,
+        RAW_RETIREMENT_MARKER_COPY_NAME,
+        RETIREMENT_MARKER_SCHEMA_VERSION,
         canonical_r3_evidence_root,
+        validate_closed_successor_v4_probe_boundary,
         validate_r3_probe_evidence,
         validate_raw_probe_workspace,
         validate_terminal_accounting_input,
@@ -1694,15 +1697,37 @@ def successor_r3_preflight_binding(
     if raw.get("execution_snapshot_after_sha256") != recorded_snapshot:
         raise ValueError("successor changed during the R3 compute-node probe")
     if require_current_snapshot:
-        for name in ("intents", "attempts", "finalized"):
-            root = execution.directory / name
-            if root.is_symlink() or not root.is_dir() or any(root.iterdir()):
-                raise ValueError(f"successor R3 binding requires empty {name}/")
+        lifecycle = require_dict(raw, "mountpoint_lifecycle")
+        marker_payload = {
+            "schema_version": RETIREMENT_MARKER_SCHEMA_VERSION,
+            "probe_token": require_string(raw, "probe_token"),
+            "execution_id": raw.get("execution_id"),
+            "execution_hash": raw.get("execution_hash"),
+            "challenge_sha256": raw.get("challenge_sha256"),
+            "source_relative_path": (
+                "attempts/.r3-probe-" + require_string(raw, "probe_token")
+            ),
+            "retirement_mechanism": "in-place-retained-mountpoint",
+            "raw_marker_copy_name": RAW_RETIREMENT_MARKER_COPY_NAME,
+            "rename_performed": False,
+            "directory_entry_removed": False,
+            "deletion_performed": False,
+            "execution_closed": True,
+            "future_successor_required": True,
+        }
+        validate_closed_successor_v4_probe_boundary(
+            execution.directory,
+            marker_payload=marker_payload,
+            expected_marker_sha256=require_sha256(
+                lifecycle, "retirement_marker_sha256"
+            ),
+        )
         current_records = recursive_file_records(execution.directory, exclude=())
         current_snapshot = sha256_bytes(canonical_json(current_records))
         if (
-            recorded_snapshot != current_snapshot
-            or raw.get("execution_snapshot_record_count") != len(current_records)
+            raw.get("closed_execution_snapshot_sha256") != current_snapshot
+            or raw.get("closed_execution_snapshot_record_count")
+            != len(current_records)
         ):
             raise ValueError("successor changed since the R3 compute-node probe")
     records = verify_recursive_checksums(directory)
@@ -1733,6 +1758,11 @@ def successor_r3_preflight_binding(
         ),
         "raw_result_sha256": sha256_file(directory / "raw" / "probe_result.json"),
         "execution_snapshot_sha256": recorded_snapshot,
+        "closed_execution_snapshot_sha256": require_sha256(
+            raw, "closed_execution_snapshot_sha256"
+        ),
+        "execution_closed": True,
+        "future_successor_required": True,
         "apptainer_path": require_string(raw_runtime, "apptainer_path"),
         "apptainer_sha256": require_sha256(raw_runtime, "apptainer_sha256"),
         "apptainer_version": require_string(raw_runtime, "apptainer_version"),
@@ -1797,6 +1827,31 @@ def build_successor_recovery_readiness_candidate(
 
     if execution.manifest.get("test_mode") is not False:
         raise ValueError("formal recovery readiness cannot use test evidence")
+    attempts_root = execution.directory / "attempts"
+    if not attempts_root.is_symlink() and attempts_root.is_dir():
+        attempt_entries = tuple(attempts_root.iterdir())
+        if len(attempt_entries) == 1:
+            retained = attempt_entries[0]
+            # A successful R3 preflight deliberately seals and retains its
+            # exact leased mountpoint.  That is a terminal execution-v4 state:
+            # never reinterpret it as a reusable readiness boundary.  The
+            # authenticated marker and evidence are validated by the R3
+            # binding path; this structural guard makes the policy explicit
+            # before the generic non-empty-state rejection.
+            from steel_module_production_r3_probe_lib import (
+                RETIREMENT_MARKER_NAME,
+            )
+
+            if (
+                retained.name.startswith(".r3-probe-")
+                and not retained.is_symlink()
+                and retained.is_dir()
+                and (retained / RETIREMENT_MARKER_NAME).is_file()
+            ):
+                raise ValueError(
+                    "closed successor-v4 requires a future successor; "
+                    "recovery readiness cannot reuse this execution"
+                )
     for name in ("intents", "attempts", "finalized"):
         root = execution.directory / name
         if root.is_symlink() or not root.is_dir() or any(root.iterdir()):
