@@ -164,8 +164,9 @@ accounting, the 32-log index, and independent checksums.  It never calls
 
 Before either allowed `sacct`/`squeue` read, the formal sealer verifies the
 readiness-bound canonical companion and byte hashes, the single historical
-intent/attempt lineage, the fixed event chain, all 32 exact failure logs, and
-the absence of task, ROOT, or result output.  Its scheduler gateway accepts
+intent/attempt lineage, the exact six-step hash-valid release path (including
+the account-case scheduler observation), all 32 exact failure logs, and the
+absence of task, ROOT, or result output.  Its scheduler gateway accepts
 only the two fixed read-only command lines recorded by readiness.  Accounting
 publication and the terminal event share one exclusive historical recovery
 lock; a crash after publication can only validate the v2 logical/raw Job-ID

@@ -738,6 +738,308 @@ def test_exact_historical_v1_recovery_lock(
         assert not tuple(historical.directory.rglob("*.root"))
 
 
+def test_exact_historical_event_lineage() -> None:
+    job_id = "9001"
+    job_name = "g4sm-fixed-history"
+    intent = {"scheduler": {"job_name": job_name}}
+    actor = phase2b_seal.FORMAL_RECOVERY_ACTOR
+    waiver = {
+        "field": "Account",
+        "intent_value": "PAS2524",
+        "scheduler_value": "pas2524",
+        "rule": "exact-ASCII-lowercase-equivalence-only",
+    }
+    scontrol_stdout = "fixed scheduler identity\n"
+
+    def event(
+        event_type: str,
+        payload: dict[str, object],
+        *,
+        event_actor: str = "fixture-reviewer",
+        event_sha256: str = "f" * 64,
+    ) -> dict[str, object]:
+        return {
+            "event_type": event_type,
+            "payload": payload,
+            "actor": event_actor,
+            "event_sha256": event_sha256,
+        }
+
+    events = (
+        event(
+            "submission-invoked",
+            {
+                "command_sha256": phase2b_seal.FORMAL_SUBMISSION_COMMAND_SHA256,
+                "job_name": job_name,
+            },
+        ),
+        event("submitted-held", {"job_id": job_id}),
+        event(
+            "release-ambiguous",
+            {"job_id": job_id, "reason": "Slurm held job Account mismatch"},
+            event_sha256="8fd96fa45f98" + "0" * 52,
+        ),
+        event(
+            "release-scheduler-observation",
+            {
+                "job_id": job_id,
+                "match_count": 1,
+                "manual_review": "OSC canonicalized the Slurm account to lowercase",
+                "account_case_waiver": waiver,
+                "submission_command_sha256": (
+                    phase2b_seal.FORMAL_SUBMISSION_COMMAND_SHA256
+                ),
+                "recovery_script_sha256": (
+                    phase2b_seal.FORMAL_RECOVERY_SCRIPT_SHA256
+                ),
+                "squeue_psv": (
+                    f"{job_id}|{job_name}|pas2524|PENDING|JobHeldUser\n"
+                ),
+                "sacct_psv": f"{job_id}|{job_name}|PENDING|0:0\n",
+                "scontrol_stdout": scontrol_stdout,
+                "scontrol_stdout_sha256": hashlib.sha256(
+                    scontrol_stdout.encode()
+                ).hexdigest(),
+                "no_sbatch": True,
+            },
+            event_actor=actor,
+        ),
+        event(
+            "job-verified",
+            {
+                "job_id": job_id,
+                "job_name": job_name,
+                "state": "PENDING",
+                "reason": "JobHeldUser",
+                "reconciled": True,
+                "account_case_waiver": waiver,
+                "scontrol_stdout_sha256": "a" * 64,
+            },
+            event_actor=actor,
+        ),
+        event(
+            "job-released",
+            {
+                "job_id": job_id,
+                "reconciled": True,
+                "manual_account_case_recovery": True,
+                "release_command": ["/usr/bin/scontrol", "release", job_id],
+                "return_code": 0,
+            },
+            event_actor=actor,
+        ),
+    )
+    with mock.patch.object(phase2b_seal, "FORMAL_JOB_ID", job_id):
+        phase2b_seal._validate_formal_event_lineage(
+            intent, SimpleNamespace(status="released-active", events=events)
+        )
+        phase2b_seal._validate_formal_event_lineage(
+            intent,
+            SimpleNamespace(
+                status="terminal-accounting-frozen",
+                events=(
+                    *events,
+                    event("terminal-accounting-frozen", {}),
+                ),
+            ),
+        )
+        for index, replacement in (
+            (3, {**events[3], "actor": "wrong-actor"}),
+            (
+                3,
+                {
+                    **events[3],
+                    "payload": {**events[3]["payload"], "no_sbatch": False},
+                },
+            ),
+            (
+                3,
+                {
+                    **events[3],
+                    "payload": {**events[3]["payload"], "unexpected": True},
+                },
+            ),
+            (
+                4,
+                {
+                    **events[4],
+                    "payload": {**events[4]["payload"], "job_name": "wrong"},
+                },
+            ),
+            (
+                5,
+                {
+                    **events[5],
+                    "payload": {**events[5]["payload"], "return_code": 1},
+                },
+            ),
+        ):
+            tampered = list(events)
+            tampered[index] = replacement
+            try:
+                phase2b_seal._validate_formal_event_lineage(
+                    intent,
+                    SimpleNamespace(status="released-active", events=tuple(tampered)),
+                )
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("invalid historical event lineage was accepted")
+        for wrong_shape in (
+            (*events[:3], *events[4:]),
+            (*events[:4], events[3], *events[4:]),
+            (*events, events[5]),
+        ):
+            try:
+                phase2b_seal._validate_formal_event_lineage(
+                    intent,
+                    SimpleNamespace(status="released-active", events=wrong_shape),
+                )
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("wrong historical event shape was accepted")
+
+
+def test_exact_historical_event_lineage_integration(
+    repo_root: Path, scratch: Path
+) -> None:
+    execution = make_execution(repo_root, scratch, "exact-event-lineage")
+    attempt_id = "20260718T175107Z-lineage-fixture"
+    intent = _prepare(execution, attempt_id)
+    job_id = "9001"
+    job_name = intent["scheduler"]["job_name"]
+    actor = phase2b_seal.FORMAL_RECOVERY_ACTOR
+    waiver = {
+        "field": "Account",
+        "intent_value": "PAS2524",
+        "scheduler_value": "pas2524",
+        "rule": "exact-ASCII-lowercase-equivalence-only",
+    }
+    append_attempt_event(
+        execution,
+        attempt_id,
+        "submission-invoked",
+        {
+            "command_sha256": phase2b_seal.FORMAL_SUBMISSION_COMMAND_SHA256,
+            "job_name": job_name,
+        },
+        actor="fixture-reviewer",
+    )
+    append_attempt_event(
+        execution, attempt_id, "submitted-held", {"job_id": job_id},
+        actor="fixture-reviewer",
+    )
+    append_attempt_event(
+        execution,
+        attempt_id,
+        "release-ambiguous",
+        {"job_id": job_id, "reason": "Slurm held job Account mismatch"},
+        actor="fixture-reviewer",
+    )
+    scontrol_stdout = "fixed scheduler identity\n"
+    append_attempt_event(
+        execution,
+        attempt_id,
+        "release-scheduler-observation",
+        {
+            "job_id": job_id,
+            "match_count": 1,
+            "manual_review": "OSC canonicalized the Slurm account to lowercase",
+            "account_case_waiver": waiver,
+            "submission_command_sha256": (
+                phase2b_seal.FORMAL_SUBMISSION_COMMAND_SHA256
+            ),
+            "recovery_script_sha256": phase2b_seal.FORMAL_RECOVERY_SCRIPT_SHA256,
+            "squeue_psv": f"{job_id}|{job_name}|pas2524|PENDING|JobHeldUser\n",
+            "sacct_psv": f"{job_id}|{job_name}|PENDING|0:0\n",
+            "scontrol_stdout": scontrol_stdout,
+            "scontrol_stdout_sha256": hashlib.sha256(
+                scontrol_stdout.encode()
+            ).hexdigest(),
+            "no_sbatch": True,
+        },
+        actor=actor,
+    )
+    append_attempt_event(
+        execution,
+        attempt_id,
+        "job-verified",
+        {
+            "job_id": job_id,
+            "job_name": job_name,
+            "state": "PENDING",
+            "reason": "JobHeldUser",
+            "reconciled": True,
+            "account_case_waiver": waiver,
+            "scontrol_stdout_sha256": "a" * 64,
+        },
+        actor=actor,
+    )
+    append_attempt_event(
+        execution,
+        attempt_id,
+        "job-released",
+        {
+            "job_id": job_id,
+            "reconciled": True,
+            "manual_account_case_recovery": True,
+            "release_command": ["/usr/bin/scontrol", "release", job_id],
+            "return_code": 0,
+        },
+        actor=actor,
+    )
+    state = attempt_state(execution, attempt_id)
+    assert state.status == "released-active"
+    attempt_dir = execution.directory / "attempts" / attempt_id
+    for index in range(1, 33):
+        (attempt_dir / f"slurm-{job_id}_{index}.out").write_text(
+            EXPECTED_FAILURE_LINE + "\n", encoding="utf-8"
+        )
+    readiness = {
+        "path": "/fixture/readiness.json",
+        "sha256": "a" * 64,
+        "schema_version": "fixture-readiness-v1",
+        "status": "accepted-fixture",
+        "implementation_commit": "f" * 40,
+        "readiness_commit": "e" * 40,
+    }
+    fake = FakeSlurm(execution, attempt_id, mode="all-failed-accounting")
+    with ExitStack() as authority:
+        for name, value in (
+            ("FORMAL_EXECUTION_ID", execution.execution_id),
+            ("FORMAL_EXECUTION_HASH", execution.execution_hash),
+            ("FORMAL_ATTEMPT_ID", attempt_id),
+            ("FORMAL_INTENT_SHA256", intent["intent_sha256"]),
+            ("FORMAL_JOB_ID", job_id),
+            (
+                "FORMAL_RELEASE_AMBIGUOUS_EVENT_PREFIX",
+                state.events[2]["event_sha256"][:12],
+            ),
+        ):
+            authority.enter_context(mock.patch.object(phase2b_seal, name, value))
+        authority.enter_context(
+            mock.patch.object(
+                phase2b_seal,
+                "_historical_readiness_identity",
+                return_value=readiness,
+            )
+        )
+        evidence = collect_incident_evidence(
+            execution,
+            repo_root=repo_root,
+            attempt_id=attempt_id,
+            intent_sha256=intent["intent_sha256"],
+            actor="fixture-reviewer",
+            runner=fake,
+            historical_readiness=readiness,
+        )
+    assert evidence["attempt"]["job_id"] == job_id
+    assert evidence["scheduler"]["states"] == {"FAILED": 32}
+    assert len(fake.calls) == 2
+    assert not (attempt_dir / "accounting").exists()
+
+
 def test_materialization(repo_root: Path, scratch: Path) -> None:
     execution = make_execution(repo_root, scratch, "materialize")
     require_pristine_readiness_workspace(execution)
@@ -2269,6 +2571,8 @@ def main() -> int:
         test_portable_control_lock_v2(repo_root, scratch)
         test_inode_bound_control_lock_v1(repo_root, scratch)
         test_exact_historical_v1_recovery_lock(repo_root, scratch)
+        test_exact_historical_event_lineage()
+        test_exact_historical_event_lineage_integration(repo_root, scratch)
         test_materialization(repo_root, scratch)
         test_readiness_protected_artifact_set(scratch)
         test_intent_contract_tamper(repo_root, scratch)

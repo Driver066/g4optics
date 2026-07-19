@@ -71,6 +71,14 @@ FORMAL_EXECUTION_ID = HISTORICAL_CLOSED_EXECUTION_ID
 FORMAL_EXECUTION_HASH = HISTORICAL_CLOSED_EXECUTION_HASH
 FORMAL_IMPLEMENTATION_COMMIT = "20c9007f8cd3da27fe1b4fbd13cad8bdaefdc292"
 FORMAL_READINESS_COMMIT = "5eaf22a23ee84d3bab3ac2539923d62cb8276bdb"
+FORMAL_RECOVERY_ACTOR = "anolddriver66-account-case-adopt"
+FORMAL_RECOVERY_SCRIPT_SHA256 = (
+    "b608a2fbc04e6f30ee209709c5c9647c6ebe8af665f0e046a9c5e43231359d80"
+)
+FORMAL_SUBMISSION_COMMAND_SHA256 = (
+    "9d4af119247bbf233c16801194bd4a50b92e4c6ea608f6a36c56a28a4115fa68"
+)
+FORMAL_RELEASE_AMBIGUOUS_EVENT_PREFIX = "8fd96fa45f98"
 EXPECTED_FAILURE_LINE = (
     "Cannot run managed steel-module production task: managed execution "
     "control-lock inode identity mismatch"
@@ -359,6 +367,127 @@ def _formal_execution_identity(execution: ManagedExecution) -> bool:
     )
 
 
+def _validate_formal_event_lineage(
+    intent: dict[str, Any], state: Any
+) -> None:
+    """Validate the exact six-step account-case recovery history."""
+
+    events = tuple(state.events)
+    if state.status == "terminal-accounting-frozen":
+        if not events or events[-1]["event_type"] != "terminal-accounting-frozen":
+            raise ValueError("formal incident terminal event lineage is invalid")
+        events = events[:-1]
+    event_types = tuple(event["event_type"] for event in events)
+    if event_types != (
+        "submission-invoked",
+        "submitted-held",
+        "release-ambiguous",
+        "release-scheduler-observation",
+        "job-verified",
+        "job-released",
+    ):
+        raise ValueError("formal incident event lineage is not the six-step history")
+    scheduler = require_dict(intent, "scheduler")
+    job_name = scheduler.get("job_name")
+    waiver = {
+        "field": "Account",
+        "intent_value": "PAS2524",
+        "scheduler_value": "pas2524",
+        "rule": "exact-ASCII-lowercase-equivalence-only",
+    }
+    if require_dict(events[0], "payload") != {
+        "command_sha256": FORMAL_SUBMISSION_COMMAND_SHA256,
+        "job_name": job_name,
+    }:
+        raise ValueError("formal incident submission event changed")
+    if require_dict(events[1], "payload") != {"job_id": FORMAL_JOB_ID}:
+        raise ValueError("formal incident submitted-held event changed")
+    if (
+        not str(events[2].get("event_sha256", "")).startswith(
+            FORMAL_RELEASE_AMBIGUOUS_EVENT_PREFIX
+        )
+        or require_dict(events[2], "payload")
+        != {"job_id": FORMAL_JOB_ID, "reason": "Slurm held job Account mismatch"}
+    ):
+        raise ValueError("formal incident release-ambiguous event changed")
+
+    observation = require_dict(events[3], "payload")
+    observation_stdout = observation.get("scontrol_stdout")
+    if (
+        events[3].get("actor") != FORMAL_RECOVERY_ACTOR
+        or set(observation)
+        != {
+            "job_id",
+            "match_count",
+            "manual_review",
+            "account_case_waiver",
+            "submission_command_sha256",
+            "recovery_script_sha256",
+            "squeue_psv",
+            "sacct_psv",
+            "scontrol_stdout",
+            "scontrol_stdout_sha256",
+            "no_sbatch",
+        }
+        or observation.get("job_id") != FORMAL_JOB_ID
+        or observation.get("match_count") != 1
+        or observation.get("manual_review")
+        != "OSC canonicalized the Slurm account to lowercase"
+        or observation.get("account_case_waiver") != waiver
+        or observation.get("submission_command_sha256")
+        != FORMAL_SUBMISSION_COMMAND_SHA256
+        or observation.get("recovery_script_sha256")
+        != FORMAL_RECOVERY_SCRIPT_SHA256
+        or observation.get("squeue_psv")
+        != f"{FORMAL_JOB_ID}|{job_name}|pas2524|PENDING|JobHeldUser\n"
+        or observation.get("sacct_psv")
+        != f"{FORMAL_JOB_ID}|{job_name}|PENDING|0:0\n"
+        or not isinstance(observation_stdout, str)
+        or observation.get("scontrol_stdout_sha256")
+        != sha256_bytes(observation_stdout.encode())
+        or observation.get("no_sbatch") is not True
+    ):
+        raise ValueError("formal incident scheduler observation changed")
+
+    verified = require_dict(events[4], "payload")
+    if (
+        events[4].get("actor") != FORMAL_RECOVERY_ACTOR
+        or set(verified)
+        != {
+            "job_id",
+            "job_name",
+            "state",
+            "reason",
+            "reconciled",
+            "account_case_waiver",
+            "scontrol_stdout_sha256",
+        }
+        or verified.get("job_id") != FORMAL_JOB_ID
+        or verified.get("job_name") != job_name
+        or verified.get("state") != "PENDING"
+        or verified.get("reason") != "JobHeldUser"
+        or verified.get("reconciled") is not True
+        or verified.get("account_case_waiver") != waiver
+        or not isinstance(verified.get("scontrol_stdout_sha256"), str)
+        or not re.fullmatch(
+            r"[0-9a-f]{64}", str(verified.get("scontrol_stdout_sha256"))
+        )
+    ):
+        raise ValueError("formal incident job-verification event changed")
+    if (
+        events[5].get("actor") != FORMAL_RECOVERY_ACTOR
+        or require_dict(events[5], "payload")
+        != {
+            "job_id": FORMAL_JOB_ID,
+            "reconciled": True,
+            "manual_account_case_recovery": True,
+            "release_command": ["/usr/bin/scontrol", "release", FORMAL_JOB_ID],
+            "return_code": 0,
+        }
+    ):
+        raise ValueError("formal incident job-release event changed")
+
+
 def _validate_incident_authority(
     execution: ManagedExecution,
     *,
@@ -401,19 +530,7 @@ def _validate_incident_authority(
                 raise ValueError(
                     f"formal incident contains unexpected {root_name} lineage"
                 )
-        events = read_attempt_events(execution, FORMAL_ATTEMPT_ID)
-        expected_types = (
-            "submission-invoked",
-            "submitted-held",
-            "release-ambiguous",
-            "job-verified",
-            "job-released",
-        )
-        observed_types = tuple(event["event_type"] for event in events)
-        if state.status == "terminal-accounting-frozen":
-            expected_types += ("terminal-accounting-frozen",)
-        if observed_types != expected_types:
-            raise ValueError("formal incident event lineage is not the fixed history")
+        _validate_formal_event_lineage(intent, state)
     if formal:
         readiness = _historical_readiness_identity(repo_root, execution)
         if historical_readiness is not None and historical_readiness != readiness:
