@@ -256,6 +256,14 @@ def test_happy_path_and_r2_gate(repo_root: Path, scratch: Path) -> None:
         repo_root, scratch
     )
     inputs = _successor_inputs(repo_root, scratch, predecessor, incident)
+    # A real recovery necessarily uses a newer control-plane commit than the
+    # sealed predecessor incident.  Keep the simulation fixture unchanged but
+    # make the successor control archive observably different so the happy path
+    # proves that retry equivalence is physics-only, not control-source equality.
+    successor_control = inputs["fixture_sources"][1]
+    (successor_control / "recovery-control-marker.txt").write_text(
+        "incident-bound successor control plane\n", encoding="utf-8"
+    )
     target = scratch / "successor-execution"
     predecessor_before = _tree_snapshot(predecessor.directory)
     incident_before = _tree_snapshot(incident)
@@ -291,6 +299,12 @@ def test_happy_path_and_r2_gate(repo_root: Path, scratch: Path) -> None:
         )
         _assert_successor_identity(loaded, predecessor, incident_value)
         _assert_exact_task_seed_reuse(loaded, predecessor)
+        assert loaded.manifest["sources"]["simulation"] == (
+            incident_value["source_identities"]["simulation"]
+        )
+        assert loaded.manifest["sources"]["control_plane"] != (
+            incident_value["source_identities"]["control_plane"]
+        )
         assert successor_predecessor_retry_task_ids(loaded) == tuple(
             task.logical_task_id for task in loaded.tasks
         )
@@ -428,6 +442,12 @@ def test_incident_authority_policy(repo_root: Path, scratch: Path) -> None:
             "runtime",
             lambda value: value["runtime_identity"].__setitem__(
                 "executable_sha256", "0" * 64
+            ),
+        ),
+        (
+            "predecessor-control-source",
+            lambda value: value["source_identities"]["control_plane"].__setitem__(
+                "tree_sha256", "0" * 64
             ),
         ),
     )

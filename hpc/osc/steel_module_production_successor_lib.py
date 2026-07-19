@@ -1322,7 +1322,15 @@ def _validate_authority_against_live_incident(
         or retry.get("all_equal") is not True
         or incident.get("task_seed_mapping_hash")
         != current["task_seed_mapping_hash"]
-        or incident.get("source_identities") != execution.manifest.get("sources")
+        # The recovery successor intentionally freezes a new control-plane
+        # source.  Only the simulation source belongs to retry equivalence;
+        # requiring the complete dual-source record to equal the predecessor
+        # would reject every real successor even though its physics inputs are
+        # unchanged.  The predecessor control source is independently bound by
+        # the checksum-valid incident, while the successor control source is
+        # validated as its own frozen archive and by the R4 readiness gate.
+        or require_dict(incident, "source_identities").get("simulation")
+        != require_dict(execution.manifest, "sources").get("simulation")
         or incident.get("runtime_identity") != execution.manifest.get("runtime")
     ):
         raise ValueError("successor retry-equivalence evidence mismatch")
@@ -1358,10 +1366,14 @@ def _validate_authority_against_live_incident(
         )
         validate_incident_bundle(incident_path, execution=predecessor)
         if (
-            predecessor.tasks != execution.tasks
+            incident.get("source_identities")
+            != predecessor.manifest.get("sources")
+            or incident.get("runtime_identity")
+            != predecessor.manifest.get("runtime")
+            or predecessor.tasks != execution.tasks
             or predecessor.scan_args != execution.scan_args
         ):
-            raise ValueError("live predecessor task/scan identity changed")
+            raise ValueError("live predecessor retry identity changed")
 
 
 def load_successor_execution(
