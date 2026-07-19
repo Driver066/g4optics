@@ -90,6 +90,21 @@ RAW_WORKSPACE_FILES = frozenset(
 )
 
 
+WRITER_OPEN_REJECTED_FUNCTION = r"""
+writer_open_rejected() {
+  target="$1"
+  # Keep the tested descriptor inside one subshell.  In particular, do not
+  # append a later successful `exec 9>&-` to this condition: commands executed
+  # as an `if` test are exempt from errexit, so a denied open followed by a
+  # successful close would make the whole group look successful.
+  if (exec 9>>"${target}") 2>/dev/null; then
+    return 1
+  fi
+  return 0
+}
+"""
+
+
 CONTAINER_PROBE_SCRIPT = r"""
 set -euo pipefail
 execution_root="$1"; original_root="$2"; probe_root="$3"
@@ -142,12 +157,6 @@ create_rejected() {
   return 0
 }
 
-writer_open_rejected() {
-  target="$1"
-  if (exec 9>>"${target}"; exec 9>&-) 2>/dev/null; then return 1; fi
-  return 0
-}
-
 directory_create_rejected() {
   target="$1"
   if mkdir -- "${target}" 2>/dev/null; then
@@ -164,6 +173,8 @@ bool_row mountinfo_no_other_execution_rw_submount true
 if create_rejected "${execution_root}/.r3-${token}"; then
   bool_row execution_root_create_rejected true
 else bool_row execution_root_create_rejected false; fi
+""" + WRITER_OPEN_REJECTED_FUNCTION + r"""
+
 if writer_open_rejected "${execution_root}/managed_execution.json"; then
   bool_row static_writer_open_rejected true
 else bool_row static_writer_open_rejected false; fi
@@ -1239,6 +1250,7 @@ __all__ = [
     "EVIDENCE_SCHEMA_VERSION",
     "RAW_PROBE_SCHEMA_VERSION",
     "REPORT_KEYS",
+    "WRITER_OPEN_REJECTED_FUNCTION",
     "expected_r3_job_name",
     "run_r3_container_probe",
     "seal_r3_probe_evidence",

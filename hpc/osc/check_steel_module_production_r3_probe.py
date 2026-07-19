@@ -42,6 +42,7 @@ from steel_module_production_r3_probe_lib import (
     CONTAINER_PROBE_PREFIX,
     RAW_PROBE_SCHEMA_VERSION,
     REPORT_KEYS,
+    WRITER_OPEN_REJECTED_FUNCTION,
     _held_scheduler_identity,
     canonical_r3_evidence_root,
     expected_r3_job_name,
@@ -202,6 +203,55 @@ def _test_environment_and_mount_contract(scratch: Path) -> None:
         ),
         "non-task execution overlay",
     )
+
+
+def _test_writer_open_rejection_shell_contract(scratch: Path) -> None:
+    """Exercise the exact Bash helper that previously masked a denied open."""
+
+    scratch.mkdir(parents=True)
+    locked = scratch / "locked"
+    writable = scratch / "writable"
+    inherited_fd = scratch / "inherited-fd"
+    missing_parent_target = scratch / "missing-parent" / "target"
+    locked.write_bytes(b"locked\n")
+    writable.write_bytes(b"writable\n")
+    inherited_fd.write_bytes(b"")
+    locked.chmod(0o400)
+    writable.chmod(0o600)
+    before_locked = locked.read_bytes()
+    before_writable = writable.read_bytes()
+    bash = shutil.which("bash")
+    assert bash is not None
+    script = (
+        "set -euo pipefail\n"
+        + WRITER_OPEN_REJECTED_FUNCTION
+        + "\n"
+        + 'exec 9>>"$4"\n'
+        + 'writer_open_rejected "$1"\n'
+        + 'writer_open_rejected "$2"\n'
+        + 'if writer_open_rejected "$3"; then exit 41; fi\n'
+        + 'printf preserved >&9\n'
+    )
+    result = subprocess.run(
+        [
+            bash,
+            "-c",
+            script,
+            "bash",
+            str(missing_parent_target),
+            str(locked),
+            str(writable),
+            str(inherited_fd),
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert locked.read_bytes() == before_locked
+    assert writable.read_bytes() == before_writable
+    assert inherited_fd.read_bytes() == b"preserved"
 
 
 def _write_raw_workspace(workspace: Path, successor: object) -> Path:
@@ -740,6 +790,20 @@ def _test_spool_copy_safe_launcher(repo_root: Path, scratch: Path) -> None:
     assert "UNRELATED_INHERITED_SECRET=" not in invocation
     assert str(spool) not in invocation
 
+    # The copied launcher must preserve the frozen runner's nonzero exit code.
+    # This prevents a failed probe from being mistaken for COMPLETED / 0:0.
+    fake_python.write_text(fake_python.read_text(encoding="utf-8") + "exit 1\n")
+    propagated = subprocess.run(
+        [str(launcher)],
+        cwd=execution,
+        env=scheduler_environment,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert propagated.returncode == 1
+
     valid_manifest = (execution / "managed_execution.json").read_text(
         encoding="utf-8"
     )
@@ -903,6 +967,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="steel-module-r3-probe-check-") as raw:
         scratch = Path(raw)
         _test_environment_and_mount_contract(scratch / "contract")
+        _test_writer_open_rejection_shell_contract(scratch / "writer-open")
         _test_accounting_and_evidence(repo_root, scratch / "evidence-case")
         _test_r4_git_gate(scratch / "r4-git")
         _test_source_boundaries(repo_root)
