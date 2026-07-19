@@ -34,7 +34,7 @@ from steel_module_production_phase2b_lib import (
     HISTORICAL_CLOSED_ATTEMPT_ID,
     HISTORICAL_CLOSED_INTENT_SHA256,
     HISTORICAL_CLOSED_JOB_ID,
-    READINESS_LOCK_RELATIVE,
+    SUCCESSOR_OBJECT_KIND,
     TERMINAL_FAILURE_STATES,
     ManagedExecution,
     append_attempt_event,
@@ -90,11 +90,19 @@ def _run_with(
 
 
 def _formal_execution(repo_root: Path, *, readiness: bool) -> ManagedExecution:
+    from steel_module_production_successor_lib import (
+        FORMAL_SUCCESSOR_EXECUTION_NAME,
+        load_successor_execution,
+    )
+
     _, phase2a = load_phase2a_lock(repo_root)
     child = Path(phase2a["canonical_directory"])
-    execution_dir = child.parent / "steel-module-production-bc-s1-execution"
-    return load_execution_companion(
-        execution_dir, repo_root=repo_root, require_readiness=readiness
+    execution_dir = child.parent / FORMAL_SUCCESSOR_EXECUTION_NAME
+    return load_successor_execution(
+        execution_dir,
+        repo_root=repo_root,
+        require_readiness=readiness,
+        verify_live_predecessor=True,
     )
 
 
@@ -109,11 +117,40 @@ def _historical_status_execution(repo_root: Path) -> ManagedExecution:
     )
 
 
-def _readiness_sha(repo_root: Path) -> str:
-    path = repo_root / READINESS_LOCK_RELATIVE
-    if not path.is_file():
-        raise ValueError("tracked Phase-2B readiness lock is missing")
+def _successor_directory(repo_root: Path) -> Path:
+    from steel_module_production_successor_lib import FORMAL_SUCCESSOR_EXECUTION_NAME
+
+    _, phase2a = load_phase2a_lock(repo_root)
+    return Path(phase2a["canonical_directory"]).parent / FORMAL_SUCCESSOR_EXECUTION_NAME
+
+
+def _verify_successor_readiness(
+    execution: ManagedExecution, *, repo_root: Path | None
+) -> tuple[Path, dict[str, Any]]:
+    # Local import avoids manager -> successor -> incident-sealer -> manager at
+    # module initialization while retaining one authoritative R4 verifier.
+    from steel_module_production_successor_lib import (
+        verify_successor_recovery_readiness,
+    )
+
+    return verify_successor_recovery_readiness(execution, repo_root=repo_root)
+
+
+def _readiness_sha(repo_root: Path, execution: ManagedExecution) -> str:
+    if execution.manifest.get("object_kind") != SUCCESSOR_OBJECT_KIND:
+        raise ValueError("the production manager accepts only the recovery successor")
+    path, _ = _verify_successor_readiness(execution, repo_root=repo_root)
     return sha256_file(path)
+
+
+def _intent_readiness_is_current(
+    execution: ManagedExecution, intent: dict[str, Any]
+) -> None:
+    if execution.manifest.get("object_kind") != SUCCESSOR_OBJECT_KIND:
+        return
+    path, _ = _verify_successor_readiness(execution, repo_root=None)
+    if intent.get("readiness_lock_sha256") != sha256_file(path):
+        raise ValueError("intent recovery-readiness digest is stale")
 
 
 def _verify_intent_hash(intent: dict[str, Any], expected: str) -> None:
@@ -258,6 +295,7 @@ def submit_intent(
     require_production_execution_open(execution)
     intent = load_attempt_intent(execution, attempt_id)
     _verify_intent_hash(intent, intent_sha256)
+    _intent_readiness_is_current(execution, intent)
     if attempt_state(execution, attempt_id).status != "prepared":
         raise ValueError("only a prepared intent may be submitted")
     if intent.get("readiness_lock_sha256") is None:
@@ -985,6 +1023,7 @@ def freeze_terminal_accounting(
                 },
                 actor=actor,
                 lock_held=True,
+                historical_incident_recovery=historical_incident_recovery,
             )
             return recovered
         snapshot = preview_terminal_accounting(
@@ -1032,6 +1071,7 @@ def freeze_terminal_accounting(
                 },
                 actor=actor,
                 lock_held=True,
+                historical_incident_recovery=historical_incident_recovery,
             )
             return payload
         finally:
@@ -1046,7 +1086,11 @@ def parse_args() -> argparse.Namespace:
 
     prepare = sub.add_parser("prepare-intent", allow_abbrev=False)
     prepare.add_argument("--attempt-id", required=True)
-    prepare.add_argument("--mode", required=True, choices=("initial", "resume", "retry-failed"))
+    prepare.add_argument(
+        "--mode",
+        required=True,
+        choices=("predecessor-retry", "resume", "retry-failed"),
+    )
     prepare_mode = prepare.add_mutually_exclusive_group(required=True)
     prepare_mode.add_argument("--check-only", action="store_true")
     prepare_mode.add_argument("--write-intent", action="store_true")
@@ -1083,18 +1127,48 @@ def main() -> int:
     args = parse_args()
     repo_root = Path(__file__).resolve().parents[2]
     try:
-        readiness_path = repo_root / READINESS_LOCK_RELATIVE
         if args.command == "status":
-            execution = _historical_status_execution(repo_root)
+            historical = _historical_status_execution(repo_root)
+            successor_dir = _successor_directory(repo_root)
+            if successor_dir.exists() or successor_dir.is_symlink():
+                if successor_dir.is_symlink() or not successor_dir.is_dir():
+                    raise ValueError("canonical recovery-successor path is unsafe")
+                from steel_module_production_successor_lib import (
+                    load_successor_execution,
+                )
+
+                execution = load_successor_execution(
+                    successor_dir,
+                    repo_root=repo_root,
+                    require_readiness=False,
+                    verify_live_predecessor=True,
+                )
+                try:
+                    _verify_successor_readiness(
+                        execution, repo_root=repo_root
+                    )
+                except (OSError, RuntimeError, ValueError):
+                    submission_ready = False
+                else:
+                    submission_ready = True
+                print(f"execution_id: {execution.execution_id}")
+                print(f"execution_hash: {execution.execution_hash}")
+                print(f"submission_ready: {str(submission_ready).lower()}")
+                print("historical_execution_closed: true")
+                print(f"predecessor_execution_id: {historical.execution_id}")
+                print("recovery_successor_present: true")
+                print(f"intents: {len(list_attempt_ids(execution))}")
+                for attempt_id in list_attempt_ids(execution):
+                    state = attempt_state(execution, attempt_id)
+                    print(f"{attempt_id}: {state.status} job={state.job_id or '-'}")
+                return 0
+
+            execution = historical
             print(f"execution_id: {execution.execution_id}")
             print(f"execution_hash: {execution.execution_hash}")
-            closed = False
-            try:
-                require_production_execution_open(execution)
-            except ValueError:
-                closed = True
-            print(f"submission_ready: {str(readiness_path.is_file() and not closed).lower()}")
-            print(f"historical_execution_closed: {str(closed).lower()}")
+            print("submission_ready: false")
+            print("historical_execution_closed: true")
+            print("recovery_successor_present: false")
             print(f"intents: {len(list_attempt_ids(execution))}")
             for attempt_id in list_attempt_ids(execution):
                 state = attempt_state(execution, attempt_id)
@@ -1103,7 +1177,7 @@ def main() -> int:
 
         execution = _formal_execution(repo_root, readiness=True)
         require_manager_command_allowed(execution, args.command)
-        readiness_sha = _readiness_sha(repo_root)
+        readiness_sha = _readiness_sha(repo_root, execution)
         if args.command == "prepare-intent":
             value = prepare_attempt_intent(
                 execution, attempt_id=args.attempt_id, mode=args.mode, actor=args.actor,
@@ -1118,6 +1192,7 @@ def main() -> int:
 
         intent = load_attempt_intent(execution, args.attempt_id)
         _verify_intent_hash(intent, args.intent_sha256)
+        _intent_readiness_is_current(execution, intent)
         if intent.get("readiness_lock_sha256") != readiness_sha:
             raise ValueError("intent readiness-lock digest is stale")
         if args.command == "submit-intent":

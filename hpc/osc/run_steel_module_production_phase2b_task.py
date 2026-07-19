@@ -14,11 +14,22 @@ from pathlib import Path
 
 from record_steel_module_production_task_result import record
 from steel_module_campaign_lib import resolve_recorded_artifact, sha256_file
+from steel_module_production_container_contract import (
+    AdditionalBind,
+    ProductionContainerInputs,
+    build_production_apptainer_prefix,
+    production_apptainer_host_environment,
+    validate_apptainer_runtime_identity,
+)
 from steel_module_production_phase2b_lib import (
     execution_task_by_id,
     load_attempt_intent,
-    load_execution_companion,
-    require_production_execution_open,
+    validate_worker_scheduler_identity,
+)
+from steel_module_production_successor_lib import (
+    SUCCESSOR_EXECUTION_SCHEMA_VERSION,
+    load_execution_for_frozen_worker,
+    verify_successor_recovery_readiness,
 )
 
 
@@ -78,14 +89,26 @@ def parse_args() -> argparse.Namespace:
 def run_task(args: argparse.Namespace) -> Path:
     execution_dir = args.execution_dir.expanduser().resolve()
     control_root = Path(__file__).resolve().parents[2]
-    execution = load_execution_companion(
-        execution_dir, repo_root=control_root, require_readiness=False,
-        verify_phase2a_control_plane=False,
+    execution = load_execution_for_frozen_worker(
+        execution_dir, control_root=control_root
     )
-    require_production_execution_open(execution)
     intent = load_attempt_intent(execution, args.attempt_id)
+    readiness: dict[str, object] | None = None
+    if execution.manifest.get("schema_version") == SUCCESSOR_EXECUTION_SCHEMA_VERSION:
+        readiness_path, readiness = verify_successor_recovery_readiness(
+            execution, repo_root=None
+        )
+        if intent.get("readiness_lock_sha256") != sha256_file(readiness_path):
+            raise ValueError("successor intent/additive-readiness checksum mismatch")
     if intent.get("intent_sha256") != args.intent_sha256:
         raise ValueError("worker intent SHA-256 mismatch")
+    validate_worker_scheduler_identity(
+        execution,
+        attempt_id=args.attempt_id,
+        intent=intent,
+        array_index=args.array_index,
+        environment=os.environ,
+    )
     selected = intent["selected"]["logical_task_ids"]
     if args.array_index < 1 or args.array_index > len(selected):
         raise ValueError("Slurm array index is outside the frozen intent")
@@ -122,18 +145,59 @@ def run_task(args: argparse.Namespace) -> Path:
     apptainer = shutil.which("apptainer")
     if apptainer is None:
         raise ValueError("apptainer is not available")
-    task_root = execution_dir / "attempts" / args.attempt_id / "tasks" / logical_id
-    if task_root.is_symlink() or (task_root.exists() and any(task_root.iterdir())):
-        raise ValueError("managed task output directory already exists and is non-empty")
+    container_environment = production_apptainer_host_environment()
+    if readiness is not None:
+        preflight = readiness.get("compute_preflight")
+        if not isinstance(preflight, dict):
+            raise ValueError("successor readiness lacks R3 compute-preflight identity")
+        validate_apptainer_runtime_identity(
+            Path(apptainer),
+            expected={
+                name: preflight.get(name)
+                for name in (
+                    "apptainer_path",
+                    "apptainer_sha256",
+                    "apptainer_version",
+                )
+            },
+            environment=container_environment,
+            cwd=control_source,
+        )
+    attempt_root = execution_dir / "attempts" / args.attempt_id
+    if attempt_root.is_symlink() or not attempt_root.is_dir():
+        raise ValueError("managed attempt output root is missing or unsafe")
+    tasks_root = attempt_root / "tasks"
+    tasks_root.mkdir(exist_ok=True)
+    if tasks_root.is_symlink() or not tasks_root.is_dir():
+        raise ValueError("managed tasks output root is unsafe")
+    task_root = tasks_root / logical_id
+    try:
+        task_root.mkdir()
+    except FileExistsError as exc:
+        raise ValueError("managed task output directory already exists") from exc
+    if task_root.is_symlink() or task_root.resolve().parent != tasks_root.resolve():
+        raise ValueError("managed task output directory escaped its attempt")
+    container_task_root = (
+        "/work/g4optics-execution/attempts/"
+        f"{args.attempt_id}/tasks/{logical_id}"
+    )
 
     command = [
-        apptainer, "exec", "--cleanenv",
-        "--bind", f"{simulation_root}:/work/g4optics-simulation:ro",
-        "--bind", f"{control_source}:/work/g4optics-control:ro",
-        "--bind", f"{execution_dir}:/work/g4optics-execution",
-        "--bind", f"{data_root}:/opt/geant4-data:ro",
-        "--bind", f"{executable.parent}:/work/g4optics-prebuilt:ro",
-        str(image), "bash", "-lc", CONTAINER_SCRIPT, "bash",
+        *build_production_apptainer_prefix(
+            apptainer=Path(apptainer),
+            inputs=ProductionContainerInputs(
+                image=image,
+                simulation_root=simulation_root,
+                control_root=control_source,
+                execution_root=execution_dir,
+                data_root=data_root,
+                executable_directory=executable.parent,
+            ),
+            additional_binds=(
+                AdditionalBind(task_root, container_task_root, writable=True),
+            ),
+        ),
+        "bash", "-lc", CONTAINER_SCRIPT, "bash",
         "/work/g4optics-simulation", "/work/g4optics-control",
         "/work/g4optics-execution", "/opt/geant4-data",
         f"/work/g4optics-prebuilt/{executable.name}", args.attempt_id,
@@ -141,7 +205,12 @@ def run_task(args: argparse.Namespace) -> Path:
         execution.git_commit, environment["mode"], environment["identity_hash"],
         image_sha, data_manifest_sha, executable_sha, *scan_args,
     ]
-    result = subprocess.run(command, cwd=execution_dir, check=False)
+    result = subprocess.run(
+        command,
+        cwd=control_source,
+        env=container_environment,
+        check=False,
+    )
     if result.returncode:
         raise ValueError(f"managed Apptainer task failed with exit code {result.returncode}")
     recorder_args = argparse.Namespace(

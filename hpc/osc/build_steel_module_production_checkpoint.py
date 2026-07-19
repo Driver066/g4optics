@@ -15,10 +15,13 @@ from steel_module_campaign_lib import canonical_json, require_dict, sha256_bytes
 from steel_module_production_checkpoint_lib import (
     CHECKPOINT_SCHEMA_VERSION,
     FORMAL_CHECKPOINT_STATE,
+    load_execution_for_downstream,
     load_managed_finalization,
+    managed_finalization_directory,
+    recovery_lineage_from_execution,
+    validate_recovery_lineage,
     write_checkpoint_atomic,
 )
-from steel_module_production_phase2b_lib import load_execution_companion
 
 
 def parse_args() -> argparse.Namespace:
@@ -117,6 +120,9 @@ def build_checkpoint(
     }
     program = require_dict(validation, "program")
     execution = require_dict(validation, "execution")
+    recovery_lineage = validate_recovery_lineage(
+        execution, validation.get("recovery_lineage")
+    )
     readiness = require_dict(validation, "readiness")
     pilot_baseline = require_dict(validation, "pilot_baseline")
     source_children: dict[str, Any] = {
@@ -130,6 +136,7 @@ def build_checkpoint(
             }
         ],
         "pilot_baseline": pilot_baseline,
+        "recovery_lineage": recovery_lineage,
     }
     root_records = [
         {
@@ -162,6 +169,7 @@ def build_checkpoint(
         "simulation_commit": execution.get("simulation_commit"),
         "readiness": readiness,
         "pilot_baseline": pilot_baseline,
+        "recovery_lineage": recovery_lineage,
         "source_finalization": source_finalization,
         "source_children": source_children,
         "configuration_shape": {
@@ -203,24 +211,39 @@ def main() -> int:
         print("Cannot build steel-module production checkpoint: execution directory is a symlink", file=sys.stderr)
         return 1
     execution = execution.resolve()
-    finalized = execution / "finalized"
     output_root = execution.parent / "steel-module-production-checkpoints"
     try:
-        if execution.name != "steel-module-production-bc-s1-execution":
-            raise ValueError("formal execution directory is not the canonical BC-S1 companion")
-        loaded_execution = load_execution_companion(
+        loaded_execution = load_execution_for_downstream(
             execution,
             repo_root=repo_root,
             allow_test_mode=False,
             require_readiness=True,
             verify_runtime=True,
+            verify_live_predecessor=True,
         )
         if loaded_execution.directory != execution:
             raise ValueError("formal execution directory identity changed")
+        finalized = managed_finalization_directory(
+            execution, loaded_execution.manifest
+        )
+        validation, rows = load_managed_finalization(
+            finalized, allow_test_mode=False, verify_root_files=True
+        )
+        recorded_execution = require_dict(validation, "execution")
+        for key, actual in (
+            ("directory", str(loaded_execution.directory)),
+            ("execution_id", loaded_execution.execution_id),
+            ("execution_hash", loaded_execution.execution_hash),
+        ):
+            if recorded_execution.get(key) != actual:
+                raise ValueError(
+                    f"finalization/source execution {key} mismatch"
+                )
+        if validation.get("recovery_lineage") != recovery_lineage_from_execution(
+            loaded_execution
+        ):
+            raise ValueError("finalization/source recovery lineage mismatch")
         if args.check_only:
-            _, rows = load_managed_finalization(
-                finalized, allow_test_mode=False, verify_root_files=True
-            )
             event_audit = json.loads(
                 (finalized / "event_audit.json").read_text(encoding="utf-8")
             )

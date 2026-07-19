@@ -26,7 +26,7 @@ from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterator, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 
 from steel_module_campaign_lib import (
     CampaignTask,
@@ -49,6 +49,10 @@ from steel_module_managed_production_lib import (
 
 EXECUTION_SCHEMA_VERSION_V1 = "steel-module-production-managed-execution-v1"
 EXECUTION_SCHEMA_VERSION_V2 = "steel-module-production-managed-execution-v2"
+EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1 = (
+    "steel-module-production-managed-successor-execution-v1"
+)
+SUCCESSOR_OBJECT_KIND = "managed-production-recovery-successor"
 # Keep the public legacy name stable.  The canonical Phase-2B materializer
 # remains v1 unless a successor explicitly selects the portable lock protocol.
 EXECUTION_SCHEMA_VERSION = EXECUTION_SCHEMA_VERSION_V1
@@ -401,7 +405,7 @@ def _validate_portable_lock_record(record: dict[str, Any]) -> bytes:
         raise ValueError("portable control-lock protocol mismatch")
     content = _portable_lock_content(record.get("content_token"))
     if (
-        record.get("mode") != 0o600
+        record.get("mode") not in {0o400, 0o600}
         or record.get("size_bytes") != len(content)
         or record.get("sha256") != sha256_bytes(content)
         or record.get("link_count") != 1
@@ -426,7 +430,10 @@ def _opened_portable_control_lock(
     _validate_portable_lock_stat(before_path, record)
     if not hasattr(os, "O_NOFOLLOW"):
         raise ValueError("portable control lock requires O_NOFOLLOW support")
-    flags = os.O_RDWR | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    # flock does not require write access.  Opening read-only permits successor
+    # executions to make the token-bound lock host-read-only while preserving
+    # the legacy portable-v2 0600 contract.
+    flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
     try:
         descriptor = os.open(lock_path, flags)
     except OSError as exc:
@@ -651,7 +658,10 @@ def _control_lock_record_from_manifest(
     record = require_dict(require_dict(manifest, "artifacts"), "control_lock")
     if schema == EXECUTION_SCHEMA_VERSION_V1:
         return CONTROL_LOCK_PROTOCOL_V1, record
-    if schema == EXECUTION_SCHEMA_VERSION_V2:
+    if schema in {
+        EXECUTION_SCHEMA_VERSION_V2,
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
+    }:
         return CONTROL_LOCK_PROTOCOL_V2, record
     raise ValueError("unsupported managed-execution schema")
 
@@ -1646,9 +1656,10 @@ def load_attempt_intent(execution: ManagedExecution, attempt_id: str) -> dict[st
         created_at = datetime.fromisoformat(require_string(intent, "created_at_utc"))
     except ValueError as exc:
         raise ValueError("attempt intent creation time is invalid") from exc
-    if created_at.tzinfo is None or intent.get("mode") not in {
-        "initial", "resume", "retry-failed",
-    }:
+    allowed_modes = {"initial", "resume", "retry-failed"}
+    if execution.manifest.get("object_kind") == SUCCESSOR_OBJECT_KIND:
+        allowed_modes = {"predecessor-retry", "resume", "retry-failed"}
+    if created_at.tzinfo is None or intent.get("mode") not in allowed_modes:
         raise ValueError("attempt intent creation/mode metadata is invalid")
     expected_identity = {
         "execution_id": execution.execution_id,
@@ -1789,7 +1800,54 @@ def append_attempt_event(
     *,
     actor: str,
     lock_held: bool = False,
+    historical_incident_recovery: bool = False,
 ) -> dict[str, Any]:
+    if historical_incident_recovery:
+        if (
+            execution.execution_id != HISTORICAL_CLOSED_EXECUTION_ID
+            or execution.execution_hash != HISTORICAL_CLOSED_EXECUTION_HASH
+            or attempt_id != HISTORICAL_CLOSED_ATTEMPT_ID
+            or event_type != "terminal-accounting-frozen"
+            or payload.get("job_id") != HISTORICAL_CLOSED_JOB_ID
+            or set(payload)
+            not in (
+                {
+                    "job_id",
+                    "accounting_manifest_sha256",
+                    "all_tasks_completed",
+                },
+                {
+                    "job_id",
+                    "accounting_manifest_sha256",
+                    "all_tasks_completed",
+                    "recovered_after_publish",
+                },
+            )
+        ):
+            raise ValueError("historical incident event authority mismatch")
+        accounting = (
+            execution.directory
+            / "attempts"
+            / attempt_id
+            / "accounting"
+        )
+        rows = verify_checksum_manifest(accounting)
+        frozen_accounting = load_json(accounting / "frozen.json")
+        if (
+            set(rows) != {"frozen.json", "sacct.psv", "squeue.psv"}
+            or payload.get("accounting_manifest_sha256")
+            != sha256_file(accounting / "SHA256SUMS")
+            or frozen_accounting.get("job_id") != HISTORICAL_CLOSED_JOB_ID
+            or payload.get("all_tasks_completed")
+            is not frozen_accounting.get("all_tasks_completed")
+            or (
+                "recovered_after_publish" in payload
+                and payload.get("recovered_after_publish") is not True
+            )
+        ):
+            raise ValueError("historical incident accounting/event binding mismatch")
+    else:
+        require_production_execution_open(execution)
     if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", event_type):
         raise ValueError("unsafe attempt event type")
     _safe_actor(actor)
@@ -1896,6 +1954,56 @@ def attempt_state(execution: ManagedExecution, attempt_id: str) -> AttemptState:
     )
 
 
+def validate_worker_scheduler_identity(
+    execution: ManagedExecution,
+    *,
+    attempt_id: str,
+    intent: dict[str, Any],
+    array_index: int,
+    environment: Mapping[str, str],
+) -> AttemptState:
+    """Bind one worker process to the exact verified Slurm array attempt.
+
+    A checksum-valid intent is necessary but not sufficient authority to spend
+    production seeds.  This check rejects direct/manual worker invocation and
+    jobs from another submission before a task directory or Geant4 process can
+    be created.  ``verified-held`` is accepted to avoid the small race between
+    successful ``scontrol release`` and appending the local ``job-released``
+    event; in both states the exact scheduler job has already been verified.
+    """
+
+    state = attempt_state(execution, attempt_id)
+    if state.status not in {"verified-held", "released-active"}:
+        raise ValueError("managed worker attempt is not verified for execution")
+    if state.job_id is None:
+        raise ValueError("managed worker attempt has no verified Slurm job")
+    selected = require_dict(intent, "selected")
+    task_count = selected.get("task_count")
+    if (
+        not isinstance(task_count, int)
+        or isinstance(task_count, bool)
+        or array_index < 1
+        or array_index > task_count
+    ):
+        raise ValueError("managed worker array index is outside the intent")
+    expected = {
+        "SLURM_ARRAY_JOB_ID": state.job_id,
+        "SLURM_JOB_NAME": require_string(require_dict(intent, "scheduler"), "job_name"),
+        "SLURM_ARRAY_TASK_ID": str(array_index),
+        "SLURM_ARRAY_TASK_COUNT": str(task_count),
+        "SLURM_ARRAY_TASK_MIN": "1",
+        "SLURM_ARRAY_TASK_MAX": str(task_count),
+        "SLURM_ARRAY_TASK_STEP": "1",
+        "SLURM_SUBMIT_DIR": str(execution.directory),
+    }
+    if any(environment.get(name) != value for name, value in expected.items()):
+        raise ValueError("managed worker Slurm environment identity mismatch")
+    raw_job_id = environment.get("SLURM_JOB_ID", "")
+    if not JOB_ID_RE.fullmatch(raw_job_id):
+        raise ValueError("managed worker lacks a valid Slurm task job ID")
+    return state
+
+
 def _intent_directory_ids(execution: ManagedExecution) -> tuple[str, ...]:
     root = execution.directory / "intents"
     values = []
@@ -1928,7 +2036,13 @@ def list_attempt_ids(execution: ManagedExecution) -> tuple[str, ...]:
 def _selected_task_ids_from_prior(
     execution: ManagedExecution, mode: str, prior_attempt_ids: Sequence[str]
 ) -> tuple[str, ...]:
-    if mode not in {"initial", "resume", "retry-failed"}:
+    successor = execution.manifest.get("object_kind") == SUCCESSOR_OBJECT_KIND
+    allowed_modes = (
+        {"predecessor-retry", "resume", "retry-failed"}
+        if successor
+        else {"initial", "resume", "retry-failed"}
+    )
+    if mode not in allowed_modes:
         raise ValueError("unsupported attempt mode")
     attempts = [attempt_state(execution, value) for value in prior_attempt_ids]
     if any(
@@ -1939,6 +2053,23 @@ def _selected_task_ids_from_prior(
             "cannot select tasks while a prior intent is prepared, active, or unresolved"
         )
     all_ids = tuple(task.logical_task_id for task in execution.tasks)
+    if successor and not attempts and mode != "predecessor-retry":
+        raise ValueError(
+            "the first successor intent must use predecessor-retry"
+        )
+    if mode == "predecessor-retry":
+        if attempts:
+            raise ValueError("predecessor-retry requires no prior successor intents")
+        authority = require_dict(execution.manifest, "recovery_authority")
+        disposition = require_dict(authority, "zero_consumption")
+        if (
+            disposition.get("events_consumed") != 0
+            or disposition.get("production_seeds_consumed") != 0
+            or disposition.get("seed_reuse_authorized") is not True
+            or len(all_ids) != 32
+        ):
+            raise ValueError("predecessor-retry lacks exact zero-consumption authority")
+        return all_ids
     if mode == "initial":
         if attempts:
             raise ValueError("initial mode requires no prior intents")
@@ -1980,7 +2111,15 @@ def selected_task_ids(execution: ManagedExecution, mode: str) -> tuple[str, ...]
 
 
 def require_production_execution_open(execution: ManagedExecution) -> None:
-    """Close the failed historical v1 companion to every new production action."""
+    """Require an execution with current, execution-specific production authority.
+
+    The failed historical v1 companion is permanently closed.  Its additive
+    successor is open only while the separately tracked recovery-readiness
+    lock validates against that exact successor and incident lineage.  The
+    import is deliberately local: the successor library builds on this module,
+    while this common mutation guard must also protect direct helper callers
+    that bypass the formal CLI.
+    """
 
     if (
         execution.execution_id == HISTORICAL_CLOSED_EXECUTION_ID
@@ -1990,6 +2129,24 @@ def require_production_execution_open(execution: ManagedExecution) -> None:
             "historical Phase-2B execution is closed after its pre-simulation "
             "incident; use the additive recovery sealer, not a new intent"
         )
+    manifest = getattr(execution, "manifest", {})
+    if (
+        manifest.get("schema_version")
+        == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1
+        or manifest.get("object_kind") == SUCCESSOR_OBJECT_KIND
+    ):
+        try:
+            from steel_module_production_successor_lib import (
+                verify_successor_recovery_readiness,
+            )
+
+            verify_successor_recovery_readiness(execution, repo_root=None)
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise ValueError(
+                "Phase-2B recovery successor cannot create or mutate "
+                "production attempts before valid additive recovery readiness: "
+                f"{exc}"
+            ) from exc
 
 
 def _task_set_hash(tasks: Sequence[CampaignTask]) -> str:
@@ -2006,6 +2163,16 @@ def prepare_attempt_intent(
     readiness_lock_sha256: str | None,
 ) -> dict[str, Any]:
     require_production_execution_open(execution)
+    if execution.manifest.get("object_kind") == SUCCESSOR_OBJECT_KIND:
+        from steel_module_production_successor_lib import (
+            verify_successor_recovery_readiness,
+        )
+
+        readiness_path, _ = verify_successor_recovery_readiness(
+            execution, repo_root=None
+        )
+        if readiness_lock_sha256 != sha256_file(readiness_path):
+            raise ValueError("successor intent recovery-readiness digest is stale")
     _safe_id(attempt_id, "attempt ID")
     _safe_actor(actor)
     require_sha256({"readiness": readiness_lock_sha256}, "readiness")
@@ -2239,7 +2406,8 @@ __all__ = [
     "ACCOUNTING_SCHEMA_VERSION_V2", "AttemptState", "EVENT_SCHEMA_VERSION",
     "CONTROL_LOCK_PROTOCOL_V1", "CONTROL_LOCK_PROTOCOL_V2",
     "EXECUTION_SCHEMA_VERSION", "EXECUTION_SCHEMA_VERSION_V1",
-    "EXECUTION_SCHEMA_VERSION_V2", "FORMAL_ACCOUNT", "FORMAL_EXECUTION_NAME",
+    "EXECUTION_SCHEMA_VERSION_V2", "EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1",
+    "SUCCESSOR_OBJECT_KIND", "FORMAL_ACCOUNT", "FORMAL_EXECUTION_NAME",
     "HISTORICAL_CLOSED_ATTEMPT_ID", "HISTORICAL_CLOSED_EXECUTION_HASH",
     "HISTORICAL_CLOSED_EXECUTION_ID", "HISTORICAL_CLOSED_INTENT_SHA256",
     "HISTORICAL_CLOSED_JOB_ID", "HISTORICAL_CLOSED_LOCK_DEVICE",
@@ -2247,6 +2415,7 @@ __all__ = [
     "INTENT_SCHEMA_VERSION", "ManagedExecution", "READINESS_CRITICAL_ARTIFACTS",
     "READINESS_LOCK_RELATIVE", "READINESS_LOCK_SCHEMA_VERSION",
     "TASK_RESULT_SCHEMA_VERSION", "append_attempt_event", "attempt_state",
+    "validate_worker_scheduler_identity",
     "canonical_execution_directory", "execution_lock", "execution_task_by_id",
     "fsync_directory", "fsync_tree", "historical_recovery_execution_lock",
     "list_attempt_ids", "load_attempt_intent", "load_execution_companion",

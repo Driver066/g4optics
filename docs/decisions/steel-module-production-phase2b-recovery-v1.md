@@ -1,8 +1,8 @@
 # Steel Module Production Phase-2B Recovery Amendment
 
-Status: incident/accounting and portable-lock foundations implemented and
-locally regression-tested; predecessor attempt not yet sealed; successor
-execution, compute preflight, readiness lock, production intent, and retry
+Status: predecessor incident sealed on OSC and R2-R4 recovery infrastructure
+implemented locally; successor execution has not yet been materialized on OSC;
+R3 compute evidence, additive readiness lock, production intent, and retry
 submission remain absent
 
 Incident date: 2026-07-18
@@ -33,6 +33,8 @@ execution hash    d07a32a6afea7d2345b4f4ca45996fd88dde93a7cf8f9d875e0ba0e47e52cf
 attempt ID        20260718T175107Z-initial
 intent SHA-256    1232d0e69302634580b5e6d1ab4d1c725a7d6ede08e4181c717ba71adb494b9d
 Slurm job         50532143
+incident ID       sm-v1-bc-s1-pre-simulation-incident-0d8898f4e1ce
+incident hash     0d8898f4e1ce5d6f4c6a9fede2e6e612f5c7723c7f59efa66abd481b1250ed9e
 ```
 
 The account-case recovery that adopted and released job `50532143` remains
@@ -188,17 +190,57 @@ Geant4 data identity exactly equal Phase-2A.
 The first successor intent mode is `predecessor-retry`, not `initial`.  It may
 select all 32 tasks only from the incident's zero-consumption disposition.
 
-### R3: compute-node loader preflight
+R2 uses a dedicated successor schema, loader, canonical path, and future
+readiness namespace.  The historical Phase-2B readiness lock cannot authorize
+the successor.  The R2 materializer has only explicit `--check-only` and
+`--materialize` modes, exposes no path or scheduler override, and requires the
+future additive readiness file to be absent.  It creates empty `intents/`,
+`attempts/`, and `finalized/` roots and stops with `submission_ready=false`.
+
+The frozen successor worker already understands the incident-bound schema and
+the one-time `predecessor-retry` selection.  Its container view mounts the
+static execution tree read-only and overlays only the exact logical task output
+directory as writable.  R3 must test this permission boundary before any
+successor readiness can be accepted.
+
+Before creating a task directory, the worker also binds its host process to the
+checksum-valid attempt event chain and the exact Slurm array parent, job name,
+array index/count/min/max/step, and submit directory.  A direct/manual worker,
+an unrelated job, or a differently shaped array cannot spend production seeds.
+
+### R3: compute-node loader and container-isolation preflight
 
 Before successor readiness can be accepted, one separately authorized,
-loader-only Slurm job must exercise the frozen successor control source and
-portable lock on an OSC compute node.  It must not invoke Apptainer or Geant4
-and must leave the production `intents/`, `attempts/`, and task-output roots
-empty.
+single-task Slurm job must exercise the frozen successor control source and
+portable lock on an OSC compute node.  It invokes the pinned Apptainer image
+only as a no-Geant4 isolation probe.  The permission to use Geant4 does not
+make a physics run useful at this gate, so R3 still fixes `geant4_invoked=false`.
 
-The preflight job ID, login/compute lock diagnostics, result, terminal
-accounting, and checksums become readiness evidence.  A login-node subprocess
-is not a substitute.
+The production worker and R3 share one frozen mount/environment builder.  It
+uses `--cleanenv`, `--containall`, `--no-home`, disables
+`hostfs,cwd,bind-paths`, and rejects every inherited `APPTAINER_*` or
+`SINGULARITY_*` variable.  The execution root is mounted read-only.  One
+external disposable workspace is overlaid as the only writable leaf under
+`/work/g4optics-execution/attempts/.r3-probe-*`.
+
+Before attempting any negative write, the probe verifies `/proc/self/mountinfo`
+shows the execution alias read-only, that exact leaf read-write, and no other
+read-write submount below the execution alias.  It then proves that the static
+root, lock, `intents/`, non-probe `attempts/`, `finalized/`, the original OSC
+absolute path, and an adjacent leaf are not writable, while the exact probe
+leaf round-trips a checksum-valid challenge.  The production roots and the
+complete execution snapshot must be byte-identical before and after.
+
+The preflight job ID, externally captured held-job command/workdir/output/account
+identity, login-creation and compute-node lock diagnostics, compute hostname,
+result, terminal accounting, Apptainer binary path/hash/version, mount contract,
+and checksums become a content-addressed evidence bundle.  Numeric device/inode
+values are retained only as diagnostics; portable authority remains the lock
+type/mode/link-count/content hash and same-node fd/path checks.  Production must
+use the exact Apptainer identity accepted by R3.  A login-node subprocess or a
+collection of unverified booleans is not a substitute.  R3 tooling does not
+submit/query Slurm itself; the held `scontrol` row and terminal scheduler text
+are supplied to a separate offline freezer and then sealed.
 
 ### R4: additive recovery readiness
 
@@ -216,6 +258,14 @@ automatic submission               false
 
 The old R file is never edited.  The successor remains unsubmittable until the
 new additive lock is reviewed, committed, pushed, pulled, and revalidated.
+R4 recursively revalidates the complete R3 bundle and its held/terminal
+scheduler evidence.  Before the first intent it requires the same pristine
+execution snapshot observed by R3.  After a checksum-valid intent exists it
+permits only explained intent/attempt journals and a checksum-valid finalized
+bundle, rejecting orphan mutable roots without imposing the impossible
+pre-intent snapshot on legitimate task output.  R4 accepts only one clean
+non-merge Git commit whose sole R2-to-R4 delta is the new tracked readiness
+lock.  A syntactically valid evidence hash alone cannot authorize submission.
 
 ## Prohibited shortcuts
 
@@ -233,7 +283,10 @@ new additive lock is reviewed, committed, pushed, pulled, and revalidated.
 
 ## Current stopping point
 
-This amendment currently authorizes implementation and local testing of the
-incident/accounting and portable-lock foundations only.  It does not itself
-seal the OSC incident, create the successor, contact Slurm, authorize seed
-reuse, or permit a production retry.
+The predecessor incident is now sealed as accepted evidence with 32 terminal
+`FAILED / 1:0` tasks, zero committed events, and zero consumed production
+seeds.  The current local implementation contains the R2 successor, the R3
+no-Geant4 container probe and evidence sealer, strict R4 candidate/verifier,
+and the R4-gated `predecessor-retry` manager path.  No formal successor, R3
+job, R4 lock, production intent, or retry exists on OSC yet; none is authorized
+merely by this implementation checkpoint.

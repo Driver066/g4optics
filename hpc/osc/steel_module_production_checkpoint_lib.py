@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from steel_module_campaign_lib import (
+    CampaignTask,
     canonical_json,
     load_json,
     require_dict,
@@ -26,10 +27,19 @@ from steel_module_campaign_lib import (
     sha256_bytes,
     sha256_file,
 )
+from steel_module_production_program_lib import (
+    ordered_task_hash,
+    seed_pair_registry_hash,
+    seed_set_hash,
+    task_set_hash,
+)
 from steel_module_production_phase2b_lib import (
+    EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
+    EXECUTION_SCHEMA_VERSION_V1,
+    EXECUTION_SCHEMA_VERSION_V2,
     FORMAL_EXECUTION_NAME,
     READINESS_LOCK_RELATIVE,
-    READINESS_LOCK_SCHEMA_VERSION,
+    SUCCESSOR_OBJECT_KIND,
     load_execution_companion,
     load_phase2a_lock,
 )
@@ -37,8 +47,13 @@ from steel_module_production_phase2b_lib import (
 
 CHECKPOINT_SCHEMA_VERSION = "steel-module-production-checkpoint-v1"
 MANAGED_FINALIZATION_SCHEMA_VERSION = "steel-module-managed-finalization-v1"
+RECOVERY_LINEAGE_SCHEMA_VERSION = "steel-module-managed-recovery-lineage-v1"
+SUCCESSOR_AUTHORITY_SCHEMA_VERSION = (
+    "steel-module-production-successor-authority-v1"
+)
 FORMAL_CHECKPOINT_STATE = "BC-ONLY-S1"
 FORMAL_EVIDENCE_MODE = "back-center-only"
+SUCCESSOR_FINALIZATION_BUNDLE_NAME = "whole-child"
 CHECKPOINT_REQUIRED_FILES = {
     "checkpoint.json",
     "configuration_summary.csv",
@@ -61,6 +76,451 @@ class ProductionCheckpoint:
     @property
     def checkpoint_hash(self) -> str:
         return require_sha256(self.manifest, "checkpoint_hash")
+
+
+def is_successor_execution_manifest(manifest: dict[str, Any]) -> bool:
+    """Return whether a managed-execution manifest is the recovery successor.
+
+    The schema and object-kind checks stay together so that a self-relabelled
+    historical execution cannot be routed through the successor authority.
+    """
+
+    schema = manifest.get("schema_version")
+    object_kind = manifest.get("object_kind")
+    if schema == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1:
+        if object_kind != SUCCESSOR_OBJECT_KIND:
+            raise ValueError("successor execution schema/object-kind mismatch")
+        return True
+    if schema in {EXECUTION_SCHEMA_VERSION_V1, EXECUTION_SCHEMA_VERSION_V2}:
+        if object_kind == SUCCESSOR_OBJECT_KIND:
+            raise ValueError("historical execution cannot claim successor object-kind")
+        return False
+    raise ValueError("unsupported managed-execution schema")
+
+
+def managed_finalization_directory(
+    execution_dir: Path, manifest: dict[str, Any]
+) -> Path:
+    """Return the schema-specific whole-child evidence directory.
+
+    Historical execution schemas retain their original ``finalized/`` layout.
+    The recovery successor keeps that pre-created directory as its writable
+    publication container and atomically installs the evidence beneath the
+    fixed ``whole-child`` leaf.  Keeping this routing in one helper prevents
+    finalizer/checkpoint consumers from silently disagreeing about authority.
+    """
+
+    requested = execution_dir.expanduser()
+    if requested.is_symlink():
+        raise ValueError("managed execution must not be a symlink")
+    directory = requested.resolve()
+    finalized = directory / "finalized"
+    if is_successor_execution_manifest(manifest):
+        return finalized / SUCCESSOR_FINALIZATION_BUNDLE_NAME
+    return finalized
+
+
+def load_execution_for_downstream(
+    execution_dir: Path,
+    *,
+    repo_root: Path | None,
+    allow_test_mode: bool = False,
+    require_readiness: bool = True,
+    verify_runtime: bool = True,
+    verify_live_predecessor: bool = True,
+) -> Any:
+    """Load old or recovery-successor execution with the correct authority.
+
+    Importing the successor loader lazily avoids a module cycle: the successor
+    implementation itself reuses this module's immutable evidence helpers.
+    """
+
+    requested = execution_dir.expanduser()
+    if requested.is_symlink() or requested.parent.is_symlink():
+        raise ValueError("managed execution must not be a symlink")
+    directory = requested.resolve()
+    manifest_path = directory / "managed_execution.json"
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        raise ValueError("managed execution manifest is missing or unsafe")
+    manifest = load_json(manifest_path)
+    if is_successor_execution_manifest(manifest):
+        from steel_module_production_successor_lib import load_successor_execution
+
+        return load_successor_execution(
+            directory,
+            repo_root=repo_root,
+            allow_test_mode=allow_test_mode,
+            require_readiness=require_readiness,
+            verify_runtime=verify_runtime,
+            verify_live_predecessor=verify_live_predecessor,
+        )
+    return load_execution_companion(
+        directory,
+        repo_root=repo_root,
+        allow_test_mode=allow_test_mode,
+        require_readiness=require_readiness,
+        verify_runtime=verify_runtime,
+    )
+
+
+def recovery_lineage_from_execution(execution: Any) -> dict[str, Any] | None:
+    """Build immutable successor/predecessor provenance for downstream evidence."""
+
+    manifest = execution.manifest
+    if not is_successor_execution_manifest(manifest):
+        return None
+    authority = require_dict(manifest, "recovery_authority")
+    incident = require_dict(authority, "incident")
+    predecessor = require_dict(authority, "predecessor_execution")
+    payload: dict[str, Any] = {
+        "schema_version": RECOVERY_LINEAGE_SCHEMA_VERSION,
+        "successor_execution": {
+            "directory": str(execution.directory),
+            "schema_version": manifest.get("schema_version"),
+            "object_kind": manifest.get("object_kind"),
+            "execution_generation": manifest.get("execution_generation"),
+            "execution_id": execution.execution_id,
+            "execution_hash": execution.execution_hash,
+        },
+        # Keep the complete authority record.  Compact incident fields alone
+        # would lose the zero-consumption and exact retry-equivalence proof.
+        "recovery_authority": json.loads(json.dumps(authority)),
+        "predecessor_incident": {
+            "directory": incident.get("directory"),
+            "incident_id": incident.get("incident_id"),
+            "incident_hash": incident.get("incident_hash"),
+            "incident_json_sha256": incident.get("incident_json_sha256"),
+            "checksum_manifest_sha256": incident.get(
+                "checksum_manifest_sha256"
+            ),
+        },
+        "predecessor_execution": {
+            "directory": predecessor.get("directory"),
+            "execution_id": predecessor.get("execution_id"),
+            "execution_hash": predecessor.get("execution_hash"),
+        },
+        "result_scope": {
+            "source_execution_directory": str(execution.directory),
+            "selected_results": "successor-successes-only",
+            "predecessor_failed_outputs_included": False,
+            "predecessor_accounting_included": False,
+        },
+    }
+    payload["lineage_hash"] = sha256_bytes(canonical_json(payload))
+    return payload
+
+
+def validate_recovery_lineage(
+    execution_record: dict[str, Any], lineage: object
+) -> dict[str, Any] | None:
+    """Validate optional lineage, requiring it for every successor output."""
+
+    schema = execution_record.get("schema_version")
+    if schema != EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1:
+        if lineage is not None:
+            raise ValueError("historical execution must not carry recovery lineage")
+        return None
+    if not isinstance(lineage, dict):
+        raise ValueError("successor evidence lacks recovery lineage")
+    if lineage.get("schema_version") != RECOVERY_LINEAGE_SCHEMA_VERSION:
+        raise ValueError("unsupported recovery-lineage schema")
+    expected_hash = require_sha256(lineage, "lineage_hash")
+    unhashed = dict(lineage)
+    unhashed.pop("lineage_hash")
+    if sha256_bytes(canonical_json(unhashed)) != expected_hash:
+        raise ValueError("recovery-lineage semantic hash mismatch")
+    successor = require_dict(lineage, "successor_execution")
+    for key in (
+        "directory",
+        "schema_version",
+        "object_kind",
+        "execution_generation",
+        "execution_id",
+        "execution_hash",
+    ):
+        if successor.get(key) != execution_record.get(key):
+            raise ValueError(f"recovery-lineage successor {key} mismatch")
+    authority = require_dict(lineage, "recovery_authority")
+    authority_hash = require_sha256(authority, "authority_hash")
+    unhashed_authority = dict(authority)
+    unhashed_authority.pop("authority_hash")
+    if (
+        authority.get("schema_version") != SUCCESSOR_AUTHORITY_SCHEMA_VERSION
+        or sha256_bytes(canonical_json(unhashed_authority)) != authority_hash
+        or authority_hash != execution_record.get("recovery_authority_hash")
+    ):
+        raise ValueError("recovery-lineage authority hash mismatch")
+    zero = require_dict(authority, "zero_consumption")
+    expected_zero = {
+        "classification": "pre-simulation-control-plane-failure",
+        "root_cause": "cross-node-control-lock-device-or-inode-mismatch",
+        "accepted_incident_evidence": True,
+        "events_consumed": 0,
+        "production_seed_count": 64,
+        "production_seeds_consumed": 0,
+        "loader_completed": False,
+        "apptainer_invoked": False,
+        "geant4_invoked": False,
+        "task_outputs_created": False,
+        "root_outputs_created": False,
+        "seed_reuse_authorized": True,
+        "reuse_scope": "exact-32-task-phase2a-mapping-only",
+    }
+    if zero != expected_zero:
+        raise ValueError("recovery-lineage does not prove exact zero consumption")
+    incident = require_dict(authority, "incident")
+    recorded_incident = require_dict(lineage, "predecessor_incident")
+    for key in (
+        "directory",
+        "incident_id",
+        "incident_hash",
+        "incident_json_sha256",
+        "checksum_manifest_sha256",
+    ):
+        if recorded_incident.get(key) != incident.get(key):
+            raise ValueError(f"recovery-lineage incident {key} mismatch")
+    predecessor = require_dict(authority, "predecessor_execution")
+    recorded_predecessor = require_dict(lineage, "predecessor_execution")
+    for key in ("directory", "execution_id", "execution_hash"):
+        if recorded_predecessor.get(key) != predecessor.get(key):
+            raise ValueError(f"recovery-lineage predecessor {key} mismatch")
+    scope = require_dict(lineage, "result_scope")
+    if scope != {
+        "source_execution_directory": execution_record.get("directory"),
+        "selected_results": "successor-successes-only",
+        "predecessor_failed_outputs_included": False,
+        "predecessor_accounting_included": False,
+    }:
+        raise ValueError("recovery-lineage result scope is unsafe")
+    return lineage
+
+
+def _tasks_from_finalized_rows(
+    rows: Iterable[dict[str, str]],
+) -> tuple[CampaignTask, ...]:
+    return tuple(
+        CampaignTask(
+            task_index=_require_int(row, "task_index"),
+            logical_task_id=row["logical_task_id"],
+            stage=row["stage"],
+            tile_thickness_mm=_require_int(row, "tile_thickness_mm"),
+            sipm_layout=row["sipm_layout"],
+            absorber_transverse_mm=_require_int(row, "absorber_transverse_mm"),
+            x_mm=_require_int(row, "x_mm"),
+            y_mm=_require_int(row, "y_mm"),
+            seed_block=_require_int(row, "seed_block"),
+            events=_require_int(row, "events"),
+            seed1=_require_int(row, "seed1"),
+            seed2=_require_int(row, "seed2"),
+            configuration_hash=row["configuration_hash"],
+        )
+        for row in rows
+    )
+
+
+def _successor_task_identity(tasks: tuple[CampaignTask, ...]) -> dict[str, Any]:
+    seeds = tuple(seed for task in tasks for seed in (task.seed1, task.seed2))
+    return {
+        "ordered_task_hash": ordered_task_hash(tasks),
+        "task_set_hash": task_set_hash(tasks),
+        "task_seed_mapping_hash": seed_pair_registry_hash(tasks),
+        "seed_set_hash": seed_set_hash(seeds),
+        "ordered_seed_pairs_sha256": sha256_bytes(
+            canonical_json(
+                [
+                    {
+                        "logical_task_id": task.logical_task_id,
+                        "seed1": task.seed1,
+                        "seed2": task.seed2,
+                    }
+                    for task in tasks
+                ]
+            )
+        ),
+        "ordered_production_seeds": list(seeds),
+        "task_count": len(tasks),
+        "event_count": sum(task.events for task in tasks),
+        "seed_count": len(seeds),
+    }
+
+
+def validate_successor_seed_lineage(
+    execution_record: dict[str, Any],
+    lineage: dict[str, Any] | None,
+    rows: Iterable[dict[str, str]],
+    seed_audit: dict[str, Any],
+    *,
+    checkpoint_record: dict[str, Any] | None = None,
+) -> None:
+    """Recompute every successor task/seed identity from the selected rows."""
+
+    if execution_record.get("schema_version") != EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1:
+        return
+    if lineage is None:
+        raise ValueError("successor seed audit lacks recovery lineage")
+    tasks = _tasks_from_finalized_rows(rows)
+    identity = _successor_task_identity(tasks)
+    authority = require_dict(lineage, "recovery_authority")
+    retry = require_dict(authority, "retry_equivalence")
+    for key, expected in identity.items():
+        if retry.get(key) != expected:
+            raise ValueError(f"successor retry-equivalence {key} mismatch")
+    if retry.get("all_equal") is not True:
+        raise ValueError("successor retry-equivalence is not accepted")
+    for key in ("task_set_hash", "task_seed_mapping_hash", "seed_set_hash"):
+        if execution_record.get(key) != identity[key]:
+            raise ValueError(f"successor execution {key} mismatch")
+    if checkpoint_record is not None:
+        for checkpoint_key, identity_key in (
+            ("task_set_hash", "task_set_hash"),
+            ("task_seed_mapping_hash", "task_seed_mapping_hash"),
+            ("production_seed_set_hash", "seed_set_hash"),
+        ):
+            if checkpoint_record.get(checkpoint_key) != identity[identity_key]:
+                raise ValueError(f"checkpoint {checkpoint_key} mismatch")
+    expected_seed_tasks = [
+        {
+            "logical_task_id": task.logical_task_id,
+            "seed_block": task.seed_block,
+            "seed1": task.seed1,
+            "seed2": task.seed2,
+        }
+        for task in tasks
+    ]
+    expected_seed_fields = {
+        "schema_version": "steel-module-managed-seed-audit-v1",
+        "valid": True,
+        "production_seed_count": 64,
+        "production_unique_seed_count": 64,
+        "production_seed_set_hash": identity["seed_set_hash"],
+        "sealed_pilot_seed_count": 240,
+        "sealed_pilot_unique_seed_count": 240,
+        "overlap_count": 0,
+        "overlap": [],
+        "parent_registry_reconciled": True,
+        "phase2a_plan_reconciled": True,
+        "run_config_reconciled": True,
+        "task_result_reconciled": True,
+        "tasks": expected_seed_tasks,
+    }
+    for key, expected in expected_seed_fields.items():
+        if seed_audit.get(key) != expected:
+            raise ValueError(f"successor seed audit {key} mismatch")
+
+
+def validate_successor_selection_and_accounting(
+    directory: Path,
+    validation: dict[str, Any],
+    execution_record: dict[str, Any],
+    lineage: dict[str, Any] | None,
+    rows: tuple[dict[str, str], ...],
+    selection: dict[str, Any],
+) -> None:
+    """Bind selected rows and every copied accounting snapshot to the successor."""
+
+    if execution_record.get("schema_version") != EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1:
+        return
+    if lineage is None:
+        raise ValueError("successor selection lacks recovery lineage")
+    authority = require_dict(lineage, "recovery_authority")
+    predecessor_attempt = require_dict(authority, "predecessor_attempt")
+    forbidden_attempt = predecessor_attempt.get("attempt_id")
+    forbidden_job = str(predecessor_attempt.get("job_id"))
+    expected_selected = {
+        row["logical_task_id"]: row["attempt_id"] for row in rows
+    }
+    explicit = selection.get("explicit_selection")
+    if not isinstance(explicit, dict):
+        raise ValueError("successor selection explicit map is invalid")
+    if (
+        selection.get("schema_version") != "steel-module-managed-selection-v1"
+        or selection.get("selected_task_count") != 32
+        or selection.get("source_execution_id") != execution_record.get("execution_id")
+        or selection.get("source_execution_directory")
+        != execution_record.get("directory")
+        or selection.get("selected_results") != "successor-successes-only"
+        or selection.get("predecessor_failed_outputs_included") is not False
+        or selection.get("selected_attempts") != expected_selected
+        or selection.get("duplicate_successes_resolved") != sorted(explicit)
+    ):
+        raise ValueError("successor selection record is inconsistent")
+    selected_attempts = set(expected_selected.values())
+    if forbidden_attempt in selected_attempts:
+        raise ValueError("successor selection contains predecessor attempt")
+    selected_jobs_by_attempt: dict[str, set[str]] = {}
+    for row in rows:
+        attempt_id = row["attempt_id"]
+        job_id = row["slurm_job_id"]
+        if job_id == forbidden_job:
+            raise ValueError("successor selection contains predecessor scheduler job")
+        selected_jobs_by_attempt.setdefault(attempt_id, set()).add(job_id)
+    accounting_attempts = validation.get("accounting_attempts")
+    if (
+        not isinstance(accounting_attempts, list)
+        or any(not isinstance(value, str) or not value for value in accounting_attempts)
+        or len(set(accounting_attempts)) != len(accounting_attempts)
+        or not selected_attempts.issubset(set(accounting_attempts))
+        or forbidden_attempt in accounting_attempts
+    ):
+        raise ValueError("successor accounting-attempt registry is inconsistent")
+    accounting_root = directory / "accounting"
+    if accounting_root.is_symlink() or not accounting_root.is_dir():
+        raise ValueError("successor finalization lacks accounting evidence")
+    actual_attempts = {
+        path.name
+        for path in accounting_root.iterdir()
+        if path.is_dir() and not path.is_symlink()
+    }
+    if actual_attempts != set(accounting_attempts):
+        raise ValueError("successor copied accounting set is inconsistent")
+    for attempt_id in accounting_attempts:
+        frozen = load_json(accounting_root / attempt_id / "frozen.json")
+        job_id = str(frozen.get("job_id", ""))
+        if frozen.get("attempt_id") != attempt_id or not job_id.isdigit():
+            raise ValueError("successor copied accounting identity is invalid")
+        if job_id == forbidden_job:
+            raise ValueError("successor copied predecessor scheduler accounting")
+        expected_jobs = selected_jobs_by_attempt.get(attempt_id)
+        if expected_jobs is not None and expected_jobs != {job_id}:
+            raise ValueError("successor selected rows/accounting job mismatch")
+
+
+def readiness_identity_for_execution(
+    execution: Any, *, repo_root: Path
+) -> dict[str, Any]:
+    """Return the readiness identity appropriate to this execution generation."""
+
+    if execution.manifest.get("test_mode") is True:
+        return {"required": False, "lock_sha256": None}
+    if is_successor_execution_manifest(execution.manifest):
+        from steel_module_production_successor_lib import (
+            verify_successor_recovery_readiness,
+        )
+
+        path, value = verify_successor_recovery_readiness(
+            execution, repo_root=repo_root
+        )
+        authority = require_dict(execution.manifest, "recovery_authority")
+        incident = require_dict(authority, "incident")
+        return {
+            "required": True,
+            "authority": "recovery-successor",
+            "path": str(path),
+            "schema_version": value.get("schema_version"),
+            "lock_sha256": sha256_file(path),
+            "readiness_hash": value.get("readiness_hash"),
+            "recovery_authority_hash": authority.get("authority_hash"),
+            "predecessor_incident_id": incident.get("incident_id"),
+            "predecessor_incident_hash": incident.get("incident_hash"),
+        }
+    path = repo_root.resolve() / READINESS_LOCK_RELATIVE
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("formal finalization lacks a regular readiness lock")
+    return {
+        "required": True,
+        "path": str(path),
+        "lock_sha256": sha256_file(path),
+    }
 
 
 def _safe_relative_name(raw: str) -> Path:
@@ -320,9 +780,41 @@ def load_managed_finalization(
         or validation.get("seed_audit_integrated") is not True
     ):
         raise ValueError("managed finalization is not the complete BC-S1 child")
+    execution_record = require_dict(validation, "execution")
+    lineage = validate_recovery_lineage(
+        execution_record, validation.get("recovery_lineage")
+    )
+    event_audit = load_json(directory / "event_audit.json")
+    seed_audit = load_json(directory / "seed_audit.json")
+    selection = load_json(directory / "selection_record.json")
+    if lineage is not None:
+        for name, value in (
+            ("event_audit.json", event_audit),
+            ("seed_audit.json", seed_audit),
+            ("selection_record.json", selection),
+        ):
+            if value.get("recovery_lineage") != lineage:
+                raise ValueError(f"managed finalization {name} lost recovery lineage")
+        if (
+            event_audit.get("execution_id") != execution_record.get("execution_id")
+            or event_audit.get("execution_hash")
+            != execution_record.get("execution_hash")
+        ):
+            raise ValueError("successor event audit execution identity mismatch")
     rows = validate_bc_only_s1_rows(
         read_tsv(directory / "task_index.tsv"),
         verify_root_files=verify_root_files,
+    )
+    validate_successor_seed_lineage(
+        execution_record, lineage, rows, seed_audit
+    )
+    validate_successor_selection_and_accounting(
+        directory,
+        validation,
+        execution_record,
+        lineage,
+        rows,
+        selection,
     )
     return validation, rows
 
@@ -369,6 +861,10 @@ def load_production_checkpoint(
     if test_mode and not allow_test_mode:
         raise ValueError("formal loader refuses a test-mode checkpoint")
     readiness = require_dict(manifest, "readiness")
+    execution = require_dict(manifest, "execution")
+    lineage = validate_recovery_lineage(
+        execution, manifest.get("recovery_lineage")
+    )
     if require_readiness and (
         readiness.get("required") is not True
         or not isinstance(readiness.get("lock_sha256"), str)
@@ -378,51 +874,49 @@ def load_production_checkpoint(
     if require_readiness and not test_mode:
         if repo_root is None:
             raise ValueError("formal checkpoint validation requires repo_root")
-        readiness_path = repo_root.expanduser().resolve() / READINESS_LOCK_RELATIVE
-        if readiness_path.is_symlink() or not readiness_path.is_file():
-            raise ValueError("formal checkpoint readiness lock is missing or unsafe")
-        readiness_lock = load_json(readiness_path)
-        if readiness_lock.get("schema_version") != READINESS_LOCK_SCHEMA_VERSION:
-            raise ValueError("unsupported Phase-2B readiness-lock schema")
-        if (
-            readiness_lock.get("status") != "accepted-formal-phase-2b-ready"
-            or readiness_lock.get("managed_submission_ready") is not True
-            or readiness_lock.get("automatic_submission") is not False
-            or readiness_lock.get("real_slurm_submission_performed") is not False
-            or readiness_lock.get("formal_intent_count") != 0
-            or readiness_lock.get("slurm_job_ids") != []
-        ):
-            raise ValueError(
-                "tracked Phase-2B readiness lock is not an accepted zero-submit lock"
-            )
-        if sha256_file(readiness_path) != readiness.get("lock_sha256"):
-            raise ValueError("checkpoint readiness-lock digest is stale")
-        execution = require_dict(manifest, "execution")
-        locked_execution = require_dict(readiness_lock, "execution_companion")
-        for key in ("execution_id", "execution_hash"):
-            if locked_execution.get(key) != execution.get(key):
-                raise ValueError(f"checkpoint readiness execution {key} mismatch")
         _, phase2a = load_phase2a_lock(repo_root)
         canonical_child = Path(require_string(phase2a, "canonical_directory")).resolve()
-        canonical_execution = canonical_child.parent / FORMAL_EXECUTION_NAME
+        successor = execution.get("schema_version") == (
+            EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1
+        )
+        if successor:
+            if execution.get("object_kind") != SUCCESSOR_OBJECT_KIND:
+                raise ValueError("checkpoint successor schema/object-kind mismatch")
+            from steel_module_production_successor_lib import (
+                FORMAL_SUCCESSOR_EXECUTION_NAME,
+            )
+
+            execution_name = FORMAL_SUCCESSOR_EXECUTION_NAME
+        else:
+            execution_name = FORMAL_EXECUTION_NAME
+        canonical_execution = canonical_child.parent / execution_name
         canonical_root = canonical_child.parent / "steel-module-production-checkpoints"
         if directory.parent != canonical_root:
             raise ValueError(f"formal checkpoint path must be under {canonical_root}")
         if execution.get("directory") != str(canonical_execution):
             raise ValueError("checkpoint execution directory is not canonical")
-        loaded_execution = load_execution_companion(
+        loaded_execution = load_execution_for_downstream(
             canonical_execution,
             repo_root=repo_root,
             allow_test_mode=False,
             require_readiness=True,
             verify_runtime=True,
+            verify_live_predecessor=True,
         )
+        current_readiness = readiness_identity_for_execution(
+            loaded_execution, repo_root=repo_root
+        )
+        if readiness != current_readiness:
+            raise ValueError("checkpoint readiness identity is stale")
         for key, actual in (
             ("execution_id", loaded_execution.execution_id),
             ("execution_hash", loaded_execution.execution_hash),
         ):
             if execution.get(key) != actual:
                 raise ValueError(f"checkpoint managed execution {key} mismatch")
+        expected_lineage = recovery_lineage_from_execution(loaded_execution)
+        if lineage != expected_lineage:
+            raise ValueError("checkpoint recovery lineage changed")
         managed_child = require_dict(loaded_execution.manifest, "managed_child")
         for checkpoint_key, child_key in (
             ("task_set_hash", "task_set_hash"),
@@ -451,11 +945,25 @@ def load_production_checkpoint(
         or seed_audit.get("overlap_count") != 0
     ):
         raise ValueError("checkpoint seed audit is invalid")
+    if lineage is not None and (
+        event_audit.get("recovery_lineage") != lineage
+        or seed_audit.get("recovery_lineage") != lineage
+    ):
+        raise ValueError("checkpoint audits lost recovery lineage")
+    validate_successor_seed_lineage(
+        execution,
+        lineage,
+        rows,
+        seed_audit,
+        checkpoint_record=manifest,
+    )
     source = load_json(directory / "source_finalization.json")
     if source != require_dict(manifest, "source_finalization"):
         raise ValueError("checkpoint source-finalization record mismatch")
     if require_readiness and not test_mode:
-        finalized = canonical_execution / "finalized"
+        finalized = managed_finalization_directory(
+            canonical_execution, loaded_execution.manifest
+        )
         if source.get("directory") != str(finalized):
             raise ValueError("checkpoint source finalization is not canonical")
         validation, source_rows = load_managed_finalization(
@@ -463,6 +971,11 @@ def load_production_checkpoint(
             allow_test_mode=False,
             verify_root_files=verify_root_files,
         )
+        if (
+            require_dict(validation, "execution") != execution
+            or validation.get("recovery_lineage") != lineage
+        ):
+            raise ValueError("checkpoint/source finalization lineage mismatch")
         if source_rows != rows:
             raise ValueError("checkpoint rows differ from canonical source finalization")
         if (
@@ -474,6 +987,8 @@ def load_production_checkpoint(
     source_children = load_json(directory / "source_children.json")
     if source_children != require_dict(manifest, "source_children"):
         raise ValueError("checkpoint source-children record mismatch")
+    if source_children.get("recovery_lineage") != lineage:
+        raise ValueError("checkpoint source-children recovery lineage mismatch")
     for name, digest in (
         ("event_audit.json", manifest.get("event_audit_sha256")),
         ("seed_audit.json", manifest.get("seed_audit_sha256")),
@@ -539,13 +1054,21 @@ __all__ = [
     "CHECKPOINT_SCHEMA_VERSION",
     "FORMAL_CHECKPOINT_STATE",
     "MANAGED_FINALIZATION_SCHEMA_VERSION",
+    "RECOVERY_LINEAGE_SCHEMA_VERSION",
+    "SUCCESSOR_FINALIZATION_BUNDLE_NAME",
     "ProductionCheckpoint",
+    "is_successor_execution_manifest",
+    "load_execution_for_downstream",
     "load_managed_finalization",
     "load_production_checkpoint",
+    "managed_finalization_directory",
     "publish_directory_no_replace",
     "read_tsv",
     "recursive_file_records",
+    "readiness_identity_for_execution",
+    "recovery_lineage_from_execution",
     "validate_bc_only_s1_rows",
+    "validate_recovery_lineage",
     "verify_recursive_checksums",
     "write_checkpoint_atomic",
     "write_recursive_checksums",

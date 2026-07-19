@@ -26,18 +26,21 @@ from record_steel_module_task_result import validate_run_config
 from steel_module_campaign_lib import CampaignTask, canonical_json, load_json, sha256_bytes, sha256_file
 from steel_module_production_checkpoint_lib import (
     MANAGED_FINALIZATION_SCHEMA_VERSION,
+    is_successor_execution_manifest,
+    load_execution_for_downstream,
+    managed_finalization_directory,
     publish_directory_no_replace,
+    readiness_identity_for_execution,
+    recovery_lineage_from_execution,
     write_recursive_checksums,
 )
 from steel_module_production_program_lib import load_production_program, seed_set_hash
 from steel_module_production_phase2b_lib import (
-    READINESS_LOCK_RELATIVE,
     attempt_state,
     base_slurm_state,
     execution_task_by_id,
     list_attempt_ids,
     load_attempt_intent,
-    load_execution_companion,
     load_frozen_accounting,
     load_managed_task_result,
 )
@@ -441,6 +444,57 @@ def select_candidates(
     return selected
 
 
+def validate_selected_result_lineage(
+    execution: Any,
+    selected: list[ManagedCandidate],
+    accounting_attempts: Iterable[str],
+) -> dict[str, Any] | None:
+    """Exclude every failed-predecessor artifact from successor evidence.
+
+    Artifact resolution already confines files to ``execution.directory``.
+    This additional gate binds the selected attempt/job set to the successor
+    and explicitly rejects the historical failed attempt identities recorded
+    by the recovery authority.
+    """
+
+    lineage = recovery_lineage_from_execution(execution)
+    if lineage is None:
+        return None
+    authority = lineage["recovery_authority"]
+    predecessor_attempt = authority["predecessor_attempt"]
+    forbidden_attempt = predecessor_attempt["attempt_id"]
+    forbidden_job = str(predecessor_attempt["job_id"])
+    selected_attempts = {item.attempt["attempt_id"] for item in selected}
+    selected_jobs = {item.job_id for item in selected}
+    copied_accounting = set(accounting_attempts)
+    if forbidden_attempt in selected_attempts or forbidden_attempt in copied_accounting:
+        raise ValueError("successor finalization selected predecessor attempt evidence")
+    if forbidden_job in selected_jobs:
+        raise ValueError("successor finalization selected predecessor scheduler job")
+    for attempt_id in copied_accounting:
+        accounting = load_frozen_accounting(execution, attempt_id)
+        accounting_job = str(accounting.get("job_id", ""))
+        if not accounting_job.isdigit():
+            raise ValueError("successor finalization accounting job identity is invalid")
+        if accounting_job == forbidden_job:
+            raise ValueError(
+                "successor finalization copied predecessor scheduler accounting"
+            )
+    for item in selected:
+        try:
+            item.marker_path.relative_to(execution.directory)
+        except ValueError as exc:
+            raise ValueError("selected task result is outside successor execution") from exc
+        for path in item.paths.values():
+            try:
+                path.relative_to(execution.directory)
+            except ValueError as exc:
+                raise ValueError(
+                    "selected task artifact is outside successor execution"
+                ) from exc
+    return lineage
+
+
 def _task_index_rows(selected: Iterable[ManagedCandidate]) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for item in selected:
@@ -560,6 +614,58 @@ def _copy_accounting(execution: Any, target: Path, attempt_ids: Iterable[str]) -
             raise ValueError("accounting snapshot contains a symlink")
 
 
+def _create_finalization_staging(
+    execution: Any, output_dir: Path
+) -> tuple[Path, Path]:
+    """Validate one publication target and create its same-filesystem staging.
+
+    The successor execution root is deliberately 0555, while its pre-created
+    ``finalized/`` container is 0700.  Therefore successor staging must live
+    inside that container and publish to its fixed ``whole-child`` leaf.  The
+    historical schemas retain their original target/staging layout.
+    """
+
+    requested = output_dir.expanduser()
+    if requested.is_symlink():
+        raise ValueError("managed finalization target must not be a symlink")
+    target = requested.resolve()
+    successor = is_successor_execution_manifest(execution.manifest)
+    if successor:
+        expected = managed_finalization_directory(
+            execution.directory, execution.manifest
+        )
+        if target != expected:
+            raise ValueError(
+                f"successor finalization target must be canonical: {expected}"
+            )
+        container = expected.parent
+        if container.is_symlink() or not container.is_dir():
+            raise ValueError("successor finalized container is missing or unsafe")
+        if container.stat().st_mode & 0o777 != 0o700:
+            raise ValueError("successor finalized container mode is unsafe")
+        if target.exists() or target.is_symlink():
+            raise ValueError(
+                f"refusing to overwrite finalization directory: {target}"
+            )
+        entries = tuple(container.iterdir())
+        if entries:
+            raise ValueError(
+                "successor finalized container contains an orphan or staging residue"
+            )
+        staging_parent = container
+    else:
+        if target.exists() or target.is_symlink():
+            raise ValueError(
+                f"refusing to overwrite finalization directory: {target}"
+            )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        staging_parent = target.parent
+    temporary = Path(
+        tempfile.mkdtemp(prefix=f".{target.name}.tmp-", dir=staging_parent)
+    )
+    return target, temporary
+
+
 def finalize(
     execution: Any,
     repo_root: Path,
@@ -571,10 +677,16 @@ def finalize(
     selection: dict[str, str],
     selection_file_sha256: str | None,
 ) -> None:
-    if output_dir.exists() or output_dir.is_symlink():
-        raise ValueError(f"refusing to overwrite finalization directory: {output_dir}")
-    output_dir.parent.mkdir(parents=True, exist_ok=True)
-    temp = Path(tempfile.mkdtemp(prefix=f".{output_dir.name}.tmp-", dir=output_dir.parent))
+    recovery_lineage = validate_selected_result_lineage(
+        execution, selected, accounting_attempts
+    )
+    # Readiness revalidates the successor mutable tree.  Perform it before the
+    # expected staging leaf exists so the verifier can continue to reject every
+    # unexplained/orphan entry under finalized/ without deadlocking publication.
+    readiness = readiness_identity_for_execution(
+        execution, repo_root=repo_root
+    )
+    output_dir, temp = _create_finalization_staging(execution, output_dir)
     try:
         task_rows = _task_index_rows(selected)
         _write_tsv(temp / "task_index.tsv", MANAGED_TASK_INDEX_FIELDS, task_rows)
@@ -594,6 +706,7 @@ def finalize(
             "accepted_statistical_evidence": execution.manifest.get(
                 "accepted_statistical_evidence"
             ),
+            "recovery_lineage": recovery_lineage,
             "tasks": [
                 {
                     "logical_task_id": item.task.logical_task_id,
@@ -609,6 +722,8 @@ def finalize(
             ],
         }
         program_identity, seed_audit = _program_and_seed_audit(execution, selected)
+        if recovery_lineage is not None:
+            seed_audit["recovery_lineage"] = recovery_lineage
         for name, value in (
             ("event_audit.json", event_audit),
             ("seed_audit.json", seed_audit),
@@ -627,6 +742,13 @@ def finalize(
             },
             "selected_task_count": 32,
             "duplicate_successes_resolved": sorted(selection),
+            "source_execution_id": execution.execution_id,
+            "source_execution_directory": str(execution.directory),
+            "selected_results": "successor-successes-only"
+            if recovery_lineage is not None
+            else "managed-execution-successes-only",
+            "predecessor_failed_outputs_included": False,
+            "recovery_lineage": recovery_lineage,
         }
         (temp / "selection_record.json").write_text(
             json.dumps(selection_record, indent=2, sort_keys=True) + "\n",
@@ -659,19 +781,13 @@ def finalize(
             ),
             "analysis_commit": sealed_pilot.get("analysis_commit"),
         }
-        if execution.manifest.get("test_mode") is True:
-            readiness = {"required": False, "lock_sha256": None}
-        else:
-            readiness_path = repo_root.resolve() / READINESS_LOCK_RELATIVE
-            if readiness_path.is_symlink() or not readiness_path.is_file():
-                raise ValueError("formal finalization lacks a regular readiness lock")
-            readiness = {
-                "required": True,
-                "path": str(readiness_path),
-                "lock_sha256": sha256_file(readiness_path),
-            }
         execution_identity = {
             "directory": str(execution.directory),
+            "schema_version": execution.manifest.get("schema_version"),
+            "object_kind": execution.manifest.get("object_kind"),
+            "execution_generation": execution.manifest.get(
+                "execution_generation"
+            ),
             "execution_id": execution.execution_id,
             "execution_hash": execution.execution_hash,
             "campaign_id": execution.campaign_id,
@@ -695,11 +811,26 @@ def finalize(
             ],
             "binding_hash": execution.managed_child.binding["binding_hash"],
         }
+        if recovery_lineage is not None:
+            execution_identity.update(
+                {
+                    "recovery_authority_hash": recovery_lineage[
+                        "recovery_authority"
+                    ]["authority_hash"],
+                    "predecessor_incident_id": recovery_lineage[
+                        "predecessor_incident"
+                    ]["incident_id"],
+                    "predecessor_incident_hash": recovery_lineage[
+                        "predecessor_incident"
+                    ]["incident_hash"],
+                }
+            )
         stable_identity = {
             "execution": execution_identity,
             "program": program_identity,
             "readiness": readiness,
             "pilot_baseline": pilot_baseline,
+            "recovery_lineage": recovery_lineage,
             "task_index_sha256": sha256_file(temp / "task_index.tsv"),
             "event_audit_sha256": sha256_file(temp / "event_audit.json"),
             "seed_audit_sha256": sha256_file(temp / "seed_audit.json"),
@@ -729,6 +860,7 @@ def finalize(
             "execution": execution_identity,
             "readiness": readiness,
             "pilot_baseline": pilot_baseline,
+            "recovery_lineage": recovery_lineage,
             "identity": stable_identity,
         }
         (temp / "validation_report.json").write_text(
@@ -746,17 +878,23 @@ def main() -> int:
     args = parse_args()
     repo_root = Path(__file__).resolve().parents[2]
     try:
-        execution = load_execution_companion(
+        execution = load_execution_for_downstream(
             args.execution_dir,
             repo_root=repo_root,
             allow_test_mode=False,
             require_readiness=True,
             verify_runtime=True,
+            verify_live_predecessor=True,
         )
         candidates, invalid, accounting_attempts = collect_candidates(execution)
         selection, selection_sha = load_selection(args.selection_file)
         selected = select_candidates(execution, candidates, selection)
-        output = execution.directory / "finalized"
+        validate_selected_result_lineage(
+            execution, selected, accounting_attempts
+        )
+        output = managed_finalization_directory(
+            execution.directory, execution.manifest
+        )
         if args.check_only:
             print("managed steel-module child finalization check: PASS")
             print("child: BC-S1")

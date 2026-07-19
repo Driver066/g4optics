@@ -18,7 +18,14 @@ intent_sha256="$3"
 if [[ ! "${execution_root}" = /* ||
       ! "${attempt_id}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ||
       ! "${intent_sha256}" =~ ^[0-9a-f]{64}$ ||
-      ! "${SLURM_ARRAY_TASK_ID:-}" =~ ^[1-9][0-9]*$ ]]; then
+      ! "${SLURM_ARRAY_JOB_ID:-}" =~ ^[1-9][0-9]*$ ||
+      ! "${SLURM_JOB_ID:-}" =~ ^[1-9][0-9]*$ ||
+      ! "${SLURM_ARRAY_TASK_ID:-}" =~ ^[1-9][0-9]*$ ||
+      ! "${SLURM_ARRAY_TASK_COUNT:-}" =~ ^[1-9][0-9]*$ ||
+      ! "${SLURM_ARRAY_TASK_MIN:-}" =~ ^[1-9][0-9]*$ ||
+      ! "${SLURM_ARRAY_TASK_MAX:-}" =~ ^[1-9][0-9]*$ ||
+      ! "${SLURM_ARRAY_TASK_STEP:-}" =~ ^[1-9][0-9]*$ ||
+      -z "${SLURM_JOB_NAME:-}" || -z "${SLURM_SUBMIT_DIR:-}" ]]; then
   echo "Invalid managed worker identity." >&2
   exit 2
 fi

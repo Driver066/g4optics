@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,12 +20,21 @@ from record_realistic_neutron_task_result import (
     write_exclusive_json,
 )
 from record_steel_module_task_result import LAYOUT_CONTRACTS, validate_run_config
-from steel_module_campaign_lib import load_json
+from steel_module_campaign_lib import load_json, sha256_file
 from steel_module_production_phase2b_lib import (
     TASK_RESULT_SCHEMA_VERSION,
     execution_task_by_id,
     load_attempt_intent,
-    load_execution_companion,
+    validate_worker_scheduler_identity,
+)
+from steel_module_production_successor_lib import (
+    SUCCESSOR_EXECUTION_SCHEMA_VERSION,
+    load_execution_for_frozen_worker,
+    verify_successor_recovery_readiness,
+)
+from steel_module_production_container_contract import (
+    production_apptainer_host_environment,
+    validate_apptainer_runtime_identity,
 )
 
 
@@ -45,15 +56,49 @@ def _artifact(path: Path, execution_dir: Path) -> dict[str, object]:
 def record(args: argparse.Namespace) -> Path:
     execution_dir = args.execution_dir.expanduser().resolve()
     control_root = args.control_source_root.expanduser().resolve()
-    execution = load_execution_companion(
-        execution_dir, repo_root=control_root, require_readiness=False,
-        verify_phase2a_control_plane=False,
+    execution = load_execution_for_frozen_worker(
+        execution_dir, control_root=control_root
     )
     intent = load_attempt_intent(execution, args.attempt_id)
+    readiness: dict[str, Any] | None = None
+    if execution.manifest.get("schema_version") == SUCCESSOR_EXECUTION_SCHEMA_VERSION:
+        readiness_path, readiness = verify_successor_recovery_readiness(
+            execution, repo_root=None
+        )
+        if intent.get("readiness_lock_sha256") != sha256_file(readiness_path):
+            raise ValueError("successor intent/additive-readiness checksum mismatch")
     if intent.get("intent_sha256") != args.intent_sha256:
         raise ValueError("worker intent SHA-256 mismatch")
+    if readiness is not None:
+        raw_apptainer = shutil.which("apptainer")
+        preflight = readiness.get("compute_preflight")
+        if raw_apptainer is None or not isinstance(preflight, dict):
+            raise ValueError("successor recorder lacks R3 Apptainer identity")
+        validate_apptainer_runtime_identity(
+            Path(raw_apptainer),
+            expected={
+                name: preflight.get(name)
+                for name in (
+                    "apptainer_path",
+                    "apptainer_sha256",
+                    "apptainer_version",
+                )
+            },
+            environment=production_apptainer_host_environment(),
+            cwd=control_root,
+        )
     if args.logical_task_id not in intent["selected"]["logical_task_ids"]:
         raise ValueError("logical task is outside the frozen intent")
+    array_index = intent["selected"]["logical_task_ids"].index(
+        args.logical_task_id
+    ) + 1
+    validate_worker_scheduler_identity(
+        execution,
+        attempt_id=args.attempt_id,
+        intent=intent,
+        array_index=array_index,
+        environment=os.environ,
+    )
     task = execution_task_by_id(execution).get(args.logical_task_id)
     if task is None:
         raise ValueError("unknown managed logical task")

@@ -555,11 +555,108 @@ validates the readiness-bound companion bytes, unique historical lineage, all
 32 failure logs, and the absence of simulation output. Successor execution
 materialization and retry remain separate, later gates.
 
+After the exact accepted incident has been sealed, R2 can preview and then
+materialize the dedicated successor without scheduler contact:
+
+```bash
+python3 hpc/osc/materialize_steel_module_production_successor_execution.py \
+  --check-only
+python3 hpc/osc/materialize_steel_module_production_successor_execution.py \
+  --materialize
+python3 hpc/osc/validate_steel_module_production_successor_execution.py \
+  --check-only
+```
+
+The successor is the fixed sibling
+`$WORK/campaigns/steel-module-production-bc-s1-execution-v2`. It binds the
+predecessor execution/readiness/attempt/job/event/accounting identities and the
+exact content-addressed incident. Its 32 task rows, scan arguments, 64 seeds,
+simulation source, executable, image, and Geant4 data identity must remain
+byte-for-byte equivalent to Phase-2A. R2 leaves `intents/`, `attempts/`, and
+`finalized/` empty and reports `submission_ready=false`; the historical
+readiness lock cannot authorize it. A separately authorized compute-node
+container preflight and a new additive recovery readiness lock are still
+required before even preparing the one-time `predecessor-retry` intent.
+
+R3 is one non-array compute job. It invokes the pinned Apptainer image to test
+the exact production mount boundary but never invokes Geant4. The frozen R2
+control archive must be used as the job script source. A typical reviewed
+submission shape is shown below; `sbatch` and `scontrol release` remain separate
+explicit human actions and are not called by any R3 Python tool:
+
+```bash
+EXECUTION="$WORK/campaigns/steel-module-production-bc-s1-execution-v2"
+CONTROL="$EXECUTION/sources/control"
+R3ROOT="$WORK/evidence/steel-module-production-r3"
+mkdir -p "$R3ROOT/raw" "$R3ROOT/accounting" "$R3ROOT/evidence"
+
+EXECUTION_HASH=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["execution_hash"])' \
+  "$EXECUTION/managed_execution.json")
+JOB_NAME="g4sm-r3-${EXECUTION_HASH:0:12}"
+RAW="$R3ROOT/raw/$JOB_NAME"
+
+# Review this exact command before running it. It is the only R3 submission.
+SUBMISSION=$(sbatch --hold --parsable --no-requeue --export=NONE \
+  --time=00:10:00 --nodes=1 --ntasks=1 --cpus-per-task=1 --mem=1G \
+  --account PAS2524 --job-name "$JOB_NAME" --chdir "$EXECUTION" \
+  --output "$R3ROOT/slurm-%j.out" \
+  "$CONTROL/hpc/osc/run_steel_module_production_r3_container_probe.py" \
+  --execution-dir "$EXECUTION" --workspace "$RAW")
+JOB_ID=${SUBMISSION%%;*}
+[[ "$JOB_ID" =~ ^[1-9][0-9]*$ ]] || { echo "invalid R3 job id" >&2; exit 1; }
+
+# Freeze the exact held command/workdir/output/account identity before release.
+scontrol show job -o "$JOB_ID" > "$R3ROOT/held-scontrol-$JOB_ID.txt"
+# Human-review this row, then perform the only R3 release write.
+scontrol release "$JOB_ID"
+```
+
+Verify the held job identity before an explicit `scontrol release <job-id>`.
+After the job is terminal, freeze externally collected read-only accounting and
+seal the content-addressed bundle:
+
+```bash
+sacct -n -P -j "$JOB_ID" \
+  --format=JobID,JobName,Account,State,ExitCode,ElapsedRaw \
+  > "$R3ROOT/sacct-$JOB_ID.psv"
+squeue -h --name "$JOB_NAME" -o '%A|%j|%T' \
+  > "$R3ROOT/squeue-$JOB_ID.psv"
+
+python3 hpc/osc/freeze_steel_module_production_r3_probe_accounting.py \
+  --job-id "$JOB_ID" --job-name "$JOB_NAME" \
+  --execution-dir "$EXECUTION" \
+  --sacct-input "$R3ROOT/sacct-$JOB_ID.psv" \
+  --squeue-input "$R3ROOT/squeue-$JOB_ID.psv" \
+  --held-scontrol-input "$R3ROOT/held-scontrol-$JOB_ID.txt" \
+  --output-dir "$R3ROOT/accounting/$JOB_ID"
+
+python3 hpc/osc/seal_steel_module_production_r3_probe_evidence.py \
+  --raw-workspace "$RAW" \
+  --terminal-accounting-dir "$R3ROOT/accounting/$JOB_ID" \
+  --output-root "$R3ROOT/evidence" \
+  --execution-dir "$EXECUTION"
+```
+
+Use the content-addressed evidence path printed by the sealer to create an
+inert R4 candidate outside the repository:
+
+```bash
+python3 hpc/osc/generate_steel_module_production_successor_readiness.py \
+  --preflight-evidence-dir "$R3ROOT/evidence/<printed-evidence-id>" \
+  --write-proposal "$WORK/evidence/steel-module-phase2b-recovery-readiness-candidate.json"
+```
+
+The candidate is not authority. It must be reviewed and then committed as
+`hpc/osc/configurations/steel-module-production-phase2b-recovery-v1.lock.json`
+in a clean, non-merge R4 commit whose only delta from frozen R2 is that file.
+The manager revalidates the tracked lock and the complete R3 bundle before
+intent creation and again before scheduler contact.
+
 After all 32 tasks have one valid selected success, the offline downstream
 sequence is:
 
 ```bash
-EXECUTION="$WORK/campaigns/steel-module-production-bc-s1-execution"
+EXECUTION="$WORK/campaigns/steel-module-production-bc-s1-execution-v2"
 
 python3 hpc/osc/finalize_steel_module_managed_child.py \
   --execution-dir "$EXECUTION" --check-only

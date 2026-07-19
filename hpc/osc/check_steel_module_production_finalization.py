@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 import finalize_steel_module_managed_child as finalizer
 import steel_module_production_checkpoint_lib as checkpoint_lib
+import steel_module_production_phase2b_lib as phase2b_lib
 from build_steel_module_production_checkpoint import build_checkpoint
 from steel_module_campaign_lib import (
     CampaignTask,
@@ -26,16 +27,139 @@ from steel_module_campaign_lib import (
 )
 from steel_module_production_checkpoint_lib import (
     MANAGED_FINALIZATION_SCHEMA_VERSION,
+    SUCCESSOR_FINALIZATION_BUNDLE_NAME,
     load_managed_finalization,
+    load_execution_for_downstream,
     load_production_checkpoint,
+    managed_finalization_directory,
+    recovery_lineage_from_execution,
     validate_bc_only_s1_rows,
     verify_recursive_checksums,
     write_checkpoint_atomic,
     write_recursive_checksums,
 )
+from steel_module_production_phase2b_lib import (
+    EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
+    EXECUTION_SCHEMA_VERSION_V2,
+    SUCCESSOR_OBJECT_KIND,
+)
+from steel_module_production_program_lib import (
+    ordered_task_hash,
+    seed_pair_registry_hash,
+    seed_set_hash,
+    task_set_hash,
+)
+from steel_module_production_successor_lib import (
+    _validate_successor_mutable_state_after_intent,
+)
 
 
 HASH = "a" * 64
+
+
+def fixture_tasks(root: Path) -> tuple[CampaignTask, ...]:
+    return tuple(
+        CampaignTask(
+            task_index=int(row["task_index"]),
+            logical_task_id=row["logical_task_id"],
+            stage=row["stage"],
+            tile_thickness_mm=int(row["tile_thickness_mm"]),
+            sipm_layout=row["sipm_layout"],
+            absorber_transverse_mm=int(row["absorber_transverse_mm"]),
+            x_mm=int(row["x_mm"]),
+            y_mm=int(row["y_mm"]),
+            seed_block=int(row["seed_block"]),
+            events=int(row["events"]),
+            seed1=int(row["seed1"]),
+            seed2=int(row["seed2"]),
+            configuration_hash=row["configuration_hash"],
+        )
+        for row in fixture_rows(root)
+    )
+
+
+def fixture_task_identity(root: Path) -> dict[str, Any]:
+    tasks = fixture_tasks(root)
+    seeds = tuple(seed for task in tasks for seed in (task.seed1, task.seed2))
+    return {
+        "ordered_task_hash": ordered_task_hash(tasks),
+        "task_set_hash": task_set_hash(tasks),
+        "task_seed_mapping_hash": seed_pair_registry_hash(tasks),
+        "seed_set_hash": seed_set_hash(seeds),
+        "ordered_seed_pairs_sha256": sha256_bytes(
+            canonical_json(
+                [
+                    {
+                        "logical_task_id": task.logical_task_id,
+                        "seed1": task.seed1,
+                        "seed2": task.seed2,
+                    }
+                    for task in tasks
+                ]
+            )
+        ),
+        "ordered_production_seeds": list(seeds),
+        "task_count": 32,
+        "event_count": 8000,
+        "seed_count": 64,
+    }
+
+
+def fixture_recovery_authority(root: Path) -> dict[str, Any]:
+    identity = fixture_task_identity(root)
+    authority: dict[str, Any] = {
+        "schema_version": "steel-module-production-successor-authority-v1",
+        "predecessor_execution": {
+            "directory": str(root / "predecessor"),
+            "execution_id": "fixture-predecessor",
+            "execution_hash": "2" * 64,
+        },
+        "predecessor_attempt": {
+            "attempt_id": "20260718T175107Z-initial",
+            "job_id": "50532143",
+        },
+        "incident": {
+            "directory": str(root / "incident"),
+            "incident_id": "fixture-zero-consumption-incident",
+            "incident_hash": "3" * 64,
+            "incident_json_sha256": "4" * 64,
+            "checksum_manifest_sha256": "5" * 64,
+        },
+        "zero_consumption": {
+            "classification": "pre-simulation-control-plane-failure",
+            "root_cause": "cross-node-control-lock-device-or-inode-mismatch",
+            "accepted_incident_evidence": True,
+            "events_consumed": 0,
+            "production_seed_count": 64,
+            "production_seeds_consumed": 0,
+            "loader_completed": False,
+            "apptainer_invoked": False,
+            "geant4_invoked": False,
+            "task_outputs_created": False,
+            "root_outputs_created": False,
+            "seed_reuse_authorized": True,
+            "reuse_scope": "exact-32-task-phase2a-mapping-only",
+        },
+        "retry_equivalence": {**identity, "all_equal": True},
+    }
+    authority["authority_hash"] = sha256_bytes(canonical_json(authority))
+    return authority
+
+
+def fixture_successor(root: Path) -> SimpleNamespace:
+    execution_dir = (root / "successor-execution").resolve()
+    manifest = {
+        "schema_version": EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
+        "object_kind": SUCCESSOR_OBJECT_KIND,
+        "execution_generation": "predecessor-retry-successor-v2",
+        "recovery_authority": fixture_recovery_authority(root),
+    }
+    return SimpleNamespace(
+        directory=execution_dir,
+        execution_id="fixture-successor",
+        execution_hash="6" * 64,
+        manifest=manifest,
+    )
 
 
 def expect_failure(function: Any, *args: Any, contains: str | None = None, **kwargs: Any) -> None:
@@ -248,6 +372,553 @@ def write_finalization(root: Path) -> Path:
     )
     write_recursive_checksums(finalization)
     return finalization
+
+
+def check_execution_dispatch(root: Path) -> None:
+    old_dir = root / "dispatch-old"
+    successor_dir = root / "dispatch-successor"
+    old_dir.mkdir()
+    successor_dir.mkdir()
+    json_write(
+        old_dir / "managed_execution.json",
+        {"schema_version": EXECUTION_SCHEMA_VERSION_V2},
+    )
+    json_write(
+        successor_dir / "managed_execution.json",
+        {
+            "schema_version": EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
+            "object_kind": SUCCESSOR_OBJECT_KIND,
+        },
+    )
+    old_sentinel = object()
+    successor_sentinel = object()
+    with patch.object(
+        checkpoint_lib, "load_execution_companion", return_value=old_sentinel
+    ) as old_loader:
+        assert (
+            load_execution_for_downstream(
+                old_dir,
+                repo_root=root,
+                require_readiness=True,
+                verify_live_predecessor=True,
+            )
+            is old_sentinel
+        )
+        assert old_loader.call_args.kwargs["require_readiness"] is True
+    with patch(
+        "steel_module_production_successor_lib.load_successor_execution",
+        return_value=successor_sentinel,
+    ) as successor_loader:
+        assert (
+            load_execution_for_downstream(
+                successor_dir,
+                repo_root=root,
+                require_readiness=True,
+                verify_live_predecessor=True,
+            )
+            is successor_sentinel
+        )
+        kwargs = successor_loader.call_args.kwargs
+        assert kwargs["require_readiness"] is True
+        assert kwargs["verify_live_predecessor"] is True
+
+
+def write_successor_finalization(source: Path, root: Path) -> tuple[Path, dict[str, Any]]:
+    target = (
+        root
+        / "successor-finalization"
+        / "finalized"
+        / SUCCESSOR_FINALIZATION_BUNDLE_NAME
+    )
+    target.parent.mkdir(parents=True)
+    shutil.copytree(source, target)
+    successor = fixture_successor(root)
+    lineage = recovery_lineage_from_execution(successor)
+    assert lineage is not None
+    identity = fixture_task_identity(root)
+    validation_path = target / "validation_report.json"
+    validation = json.loads(validation_path.read_text(encoding="utf-8"))
+    validation["execution"] = {
+        "directory": str(successor.directory),
+        "schema_version": successor.manifest["schema_version"],
+        "object_kind": successor.manifest["object_kind"],
+        "execution_generation": successor.manifest["execution_generation"],
+        "execution_id": successor.execution_id,
+        "execution_hash": successor.execution_hash,
+        "recovery_authority_hash": lineage["recovery_authority"]["authority_hash"],
+        "task_set_hash": identity["task_set_hash"],
+        "task_seed_mapping_hash": identity["task_seed_mapping_hash"],
+        "seed_set_hash": identity["seed_set_hash"],
+    }
+    validation["recovery_lineage"] = lineage
+    validation["accounting_attempts"] = ["fixture-attempt"]
+    json_write(validation_path, validation)
+
+    event_path = target / "event_audit.json"
+    event = json.loads(event_path.read_text(encoding="utf-8"))
+    event["execution_id"] = successor.execution_id
+    event["execution_hash"] = successor.execution_hash
+    event["recovery_lineage"] = lineage
+    json_write(event_path, event)
+
+    tasks = fixture_tasks(root)
+    seed_path = target / "seed_audit.json"
+    seed = json.loads(seed_path.read_text(encoding="utf-8"))
+    seed.update(
+        {
+            "production_seed_set_hash": identity["seed_set_hash"],
+            "overlap": [],
+            "parent_registry_reconciled": True,
+            "phase2a_plan_reconciled": True,
+            "run_config_reconciled": True,
+            "task_result_reconciled": True,
+            "tasks": [
+                {
+                    "logical_task_id": task.logical_task_id,
+                    "seed_block": task.seed_block,
+                    "seed1": task.seed1,
+                    "seed2": task.seed2,
+                }
+                for task in tasks
+            ],
+            "recovery_lineage": lineage,
+        }
+    )
+    json_write(seed_path, seed)
+
+    rows = checkpoint_lib.read_tsv(target / "task_index.tsv")
+    selection_path = target / "selection_record.json"
+    selection = json.loads(selection_path.read_text(encoding="utf-8"))
+    selection.update(
+        {
+            "explicit_selection": {},
+            "selected_attempts": {
+                row["logical_task_id"]: row["attempt_id"] for row in rows
+            },
+            "duplicate_successes_resolved": [],
+            "source_execution_id": successor.execution_id,
+            "source_execution_directory": str(successor.directory),
+            "selected_results": "successor-successes-only",
+            "predecessor_failed_outputs_included": False,
+            "recovery_lineage": lineage,
+        }
+    )
+    json_write(selection_path, selection)
+
+    accounting = target / "accounting" / "fixture-attempt"
+    accounting.mkdir(parents=True)
+    json_write(
+        accounting / "frozen.json",
+        {"attempt_id": "fixture-attempt", "job_id": "12345"},
+    )
+    rewrite_recursive_checksums(target)
+    return target, lineage
+
+
+def check_successor_finalization_publish_contract(
+    source: Path, root: Path
+) -> None:
+    """Exercise the real successor publication topology under 0555/0700."""
+
+    manifest = fixture_successor(root).manifest
+
+    def execution_at(directory: Path) -> SimpleNamespace:
+        return SimpleNamespace(directory=directory.resolve(), manifest=manifest)
+
+    publish_execution = root / "publish-successor"
+    finalized_root = publish_execution / "finalized"
+    finalized_root.mkdir(parents=True)
+    finalized_root.chmod(0o700)
+    publish_execution.chmod(0o555)
+    execution = execution_at(publish_execution)
+    expected = managed_finalization_directory(publish_execution, manifest)
+    assert expected == finalized_root / SUCCESSOR_FINALIZATION_BUNDLE_NAME
+    old_manifest = {"schema_version": EXECUTION_SCHEMA_VERSION_V2}
+    assert managed_finalization_directory(
+        root / "historical-execution", old_manifest
+    ) == (root / "historical-execution" / "finalized").resolve()
+    try:
+        target, staging = finalizer._create_finalization_staging(
+            execution, expected
+        )
+        assert target == expected
+        assert staging.parent == finalized_root
+        assert staging.name.startswith(".whole-child.tmp-")
+        shutil.copytree(source, staging, dirs_exist_ok=True)
+        checkpoint_lib.publish_directory_no_replace(staging, target)
+        assert not staging.exists()
+        validation, rows = load_managed_finalization(
+            target, allow_test_mode=True, verify_root_files=False
+        )
+        assert validation["task_count"] == 32 and len(rows) == 32
+        expect_failure(
+            finalizer._create_finalization_staging,
+            execution,
+            expected,
+            contains="refusing to overwrite",
+        )
+    finally:
+        publish_execution.chmod(0o755)
+
+    for label, residue_name, make_directory in (
+        ("orphan", "orphan.json", False),
+        ("staging", ".whole-child.tmp-stale", True),
+        ("publish-lock", ".whole-child.publish.lock", False),
+    ):
+        candidate = root / f"publish-successor-{label}"
+        container = candidate / "finalized"
+        container.mkdir(parents=True)
+        container.chmod(0o700)
+        residue = container / residue_name
+        if make_directory:
+            residue.mkdir()
+        else:
+            residue.write_text("residue\n", encoding="utf-8")
+        candidate.chmod(0o555)
+        try:
+            candidate_execution = execution_at(candidate)
+            expect_failure(
+                finalizer._create_finalization_staging,
+                candidate_execution,
+                managed_finalization_directory(candidate, manifest),
+                contains="orphan or staging residue",
+            )
+        finally:
+            candidate.chmod(0o755)
+
+    order: list[str] = []
+
+    def readiness_before_staging(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        order.append("readiness")
+        assert not tuple((root / "ordering-successor" / "finalized").iterdir())
+        return {"required": True, "lock_sha256": "b" * 64}
+
+    def stop_at_staging(*_args: Any, **_kwargs: Any) -> tuple[Path, Path]:
+        order.append("staging")
+        raise RuntimeError("ordering sentinel")
+
+    ordering_root = root / "ordering-successor"
+    (ordering_root / "finalized").mkdir(parents=True)
+    ordering_execution = execution_at(ordering_root)
+    with patch.object(
+        finalizer, "validate_selected_result_lineage", return_value=None
+    ), patch.object(
+        finalizer,
+        "readiness_identity_for_execution",
+        side_effect=readiness_before_staging,
+    ), patch.object(
+        finalizer,
+        "_create_finalization_staging",
+        side_effect=stop_at_staging,
+    ):
+        try:
+            finalizer.finalize(
+                ordering_execution,
+                root,
+                managed_finalization_directory(ordering_root, manifest),
+                [],
+                [],
+                [],
+                selection={},
+                selection_file_sha256=None,
+            )
+        except RuntimeError as exc:
+            assert str(exc) == "ordering sentinel"
+        else:
+            raise AssertionError("finalization ordering sentinel was not reached")
+    assert order == ["readiness", "staging"]
+
+
+def check_r4_whole_child_mutable_state(source: Path, root: Path) -> None:
+    """Require empty finalized/ or exactly one validated whole-child leaf."""
+
+    execution_root = root / "r4-successor"
+    (execution_root / "intents" / "fixture-attempt").mkdir(parents=True)
+    (execution_root / "attempts" / "fixture-attempt").mkdir(parents=True)
+    finalized = execution_root / "finalized"
+    finalized.mkdir()
+    execution = SimpleNamespace(directory=execution_root.resolve())
+    state = SimpleNamespace(status="prepared")
+    with patch.object(
+        phase2b_lib, "list_attempt_ids", return_value=("fixture-attempt",)
+    ), patch.object(phase2b_lib, "attempt_state", return_value=state):
+        _validate_successor_mutable_state_after_intent(execution)
+
+        whole_child = finalized / SUCCESSOR_FINALIZATION_BUNDLE_NAME
+        shutil.copytree(source, whole_child)
+        with patch.object(
+            checkpoint_lib,
+            "load_managed_finalization",
+            return_value=({"valid": True}, ()),
+        ) as loader:
+            _validate_successor_mutable_state_after_intent(execution)
+            loader.assert_called_once_with(
+                whole_child, allow_test_mode=False
+            )
+
+        orphan = finalized / "orphan.json"
+        orphan.write_text("{}\n", encoding="utf-8")
+        expect_failure(
+            _validate_successor_mutable_state_after_intent,
+            execution,
+            contains="exact whole-child",
+        )
+        orphan.unlink()
+        shutil.rmtree(whole_child)
+
+        partial = finalized / SUCCESSOR_FINALIZATION_BUNDLE_NAME
+        partial.mkdir()
+        expect_failure(
+            _validate_successor_mutable_state_after_intent,
+            execution,
+            contains="checksum manifest",
+        )
+        partial.rmdir()
+
+        partial.symlink_to(source, target_is_directory=True)
+        expect_failure(
+            _validate_successor_mutable_state_after_intent,
+            execution,
+            contains="exact whole-child",
+        )
+        partial.unlink()
+
+        for residue_name, directory in (
+            (".whole-child.tmp-stale", True),
+            (".whole-child.publish.lock", False),
+        ):
+            residue = finalized / residue_name
+            if directory:
+                residue.mkdir()
+            else:
+                residue.write_text("residue\n", encoding="utf-8")
+            expect_failure(
+                _validate_successor_mutable_state_after_intent,
+                execution,
+                contains="exact whole-child",
+            )
+            if directory:
+                residue.rmdir()
+            else:
+                residue.unlink()
+
+
+def check_successor_provenance(finalization: Path, root: Path) -> None:
+    successor_finalization, lineage = write_successor_finalization(
+        finalization, root
+    )
+    assert successor_finalization.name == SUCCESSOR_FINALIZATION_BUNDLE_NAME
+    check_successor_finalization_publish_contract(
+        successor_finalization, root / "successor-publish-contract"
+    )
+    check_r4_whole_child_mutable_state(
+        successor_finalization, root / "successor-r4-finalized-state"
+    )
+    validation, rows = load_managed_finalization(
+        successor_finalization,
+        allow_test_mode=True,
+        verify_root_files=False,
+    )
+    assert validation["recovery_lineage"] == lineage
+    successor_checkpoint = build_checkpoint(
+        successor_finalization,
+        root / "successor-checkpoints",
+        allow_test_mode=True,
+        verify_root_files=False,
+    )
+    loaded = load_production_checkpoint(
+        successor_checkpoint,
+        allow_test_mode=True,
+        verify_root_files=False,
+    )
+    assert loaded.manifest["recovery_lineage"] == lineage
+    assert loaded.manifest["source_children"]["recovery_lineage"] == lineage
+    assert loaded.manifest["source_finalization"]["directory"] == str(
+        successor_finalization
+    )
+    assert len(rows) == 32
+
+    tampered = root / "successor-lineage-tamper"
+    shutil.copytree(successor_finalization, tampered)
+    selection_path = tampered / "selection_record.json"
+    selection = json.loads(selection_path.read_text(encoding="utf-8"))
+    del selection["recovery_lineage"]
+    json_write(selection_path, selection)
+    rewrite_recursive_checksums(tampered)
+    expect_failure(
+        load_managed_finalization,
+        tampered,
+        allow_test_mode=True,
+        verify_root_files=False,
+        contains="lost recovery lineage",
+    )
+
+    authority_tamper = root / "successor-authority-tamper"
+    shutil.copytree(successor_finalization, authority_tamper)
+    for name in (
+        "validation_report.json",
+        "event_audit.json",
+        "seed_audit.json",
+        "selection_record.json",
+    ):
+        path = authority_tamper / name
+        value = json.loads(path.read_text(encoding="utf-8"))
+        changed = value["recovery_lineage"]
+        changed["recovery_authority"]["zero_consumption"][
+            "events_consumed"
+        ] = 999
+        unhashed = dict(changed)
+        unhashed.pop("lineage_hash")
+        changed["lineage_hash"] = sha256_bytes(canonical_json(unhashed))
+        json_write(path, value)
+    rewrite_recursive_checksums(authority_tamper)
+    expect_failure(
+        load_managed_finalization,
+        authority_tamper,
+        allow_test_mode=True,
+        verify_root_files=False,
+        contains="authority hash mismatch",
+    )
+
+    zero_tamper = root / "successor-zero-consumption-tamper"
+    shutil.copytree(successor_finalization, zero_tamper)
+    replacement_authority_hash: str | None = None
+    for name in (
+        "validation_report.json",
+        "event_audit.json",
+        "seed_audit.json",
+        "selection_record.json",
+    ):
+        path = zero_tamper / name
+        value = json.loads(path.read_text(encoding="utf-8"))
+        changed = value["recovery_lineage"]
+        authority = changed["recovery_authority"]
+        authority["zero_consumption"]["events_consumed"] = 999
+        unhashed_authority = dict(authority)
+        unhashed_authority.pop("authority_hash")
+        authority["authority_hash"] = sha256_bytes(
+            canonical_json(unhashed_authority)
+        )
+        replacement_authority_hash = authority["authority_hash"]
+        unhashed = dict(changed)
+        unhashed.pop("lineage_hash")
+        changed["lineage_hash"] = sha256_bytes(canonical_json(unhashed))
+        if name == "validation_report.json":
+            value["execution"]["recovery_authority_hash"] = authority[
+                "authority_hash"
+            ]
+        json_write(path, value)
+    assert replacement_authority_hash is not None
+    rewrite_recursive_checksums(zero_tamper)
+    expect_failure(
+        load_managed_finalization,
+        zero_tamper,
+        allow_test_mode=True,
+        verify_root_files=False,
+        contains="does not prove exact zero consumption",
+    )
+
+    seed_tamper = root / "successor-seed-tamper"
+    shutil.copytree(successor_finalization, seed_tamper)
+    seed_path = seed_tamper / "seed_audit.json"
+    seed = json.loads(seed_path.read_text(encoding="utf-8"))
+    seed["production_unique_seed_count"] = 1
+    seed["production_seed_set_hash"] = "f" * 64
+    seed["tasks"][0]["seed1"] = 999999999
+    json_write(seed_path, seed)
+    rewrite_recursive_checksums(seed_tamper)
+    expect_failure(
+        load_managed_finalization,
+        seed_tamper,
+        allow_test_mode=True,
+        verify_root_files=False,
+        contains="successor seed audit",
+    )
+
+    selection_tamper = root / "successor-selection-tamper"
+    shutil.copytree(successor_finalization, selection_tamper)
+    selection_path = selection_tamper / "selection_record.json"
+    selection = json.loads(selection_path.read_text(encoding="utf-8"))
+    selection["predecessor_failed_outputs_included"] = True
+    selection["selected_results"] = "predecessor-failures-allowed"
+    json_write(selection_path, selection)
+    rewrite_recursive_checksums(selection_tamper)
+    expect_failure(
+        load_managed_finalization,
+        selection_tamper,
+        allow_test_mode=True,
+        verify_root_files=False,
+        contains="selection record is inconsistent",
+    )
+
+    accounting_tamper = root / "successor-accounting-tamper"
+    shutil.copytree(successor_finalization, accounting_tamper)
+    frozen_path = accounting_tamper / "accounting" / "fixture-attempt" / "frozen.json"
+    frozen = json.loads(frozen_path.read_text(encoding="utf-8"))
+    frozen["job_id"] = "50532143"
+    json_write(frozen_path, frozen)
+    rewrite_recursive_checksums(accounting_tamper)
+    expect_failure(
+        load_managed_finalization,
+        accounting_tamper,
+        allow_test_mode=True,
+        verify_root_files=False,
+        contains="copied predecessor scheduler accounting",
+    )
+
+    successor = fixture_successor(root)
+    valid = SimpleNamespace(
+        attempt={"attempt_id": "20260719T200000Z-predecessor-retry"},
+        job_id="60000000",
+        marker_path=successor.directory / "attempts/new/task_result.json",
+        paths={"root": successor.directory / "attempts/new/output.root"},
+    )
+    with patch.object(
+        finalizer,
+        "load_frozen_accounting",
+        return_value={"job_id": "60000000"},
+    ):
+        assert finalizer.validate_selected_result_lineage(
+            successor, [valid], ["20260719T200000Z-predecessor-retry"]
+        ) == recovery_lineage_from_execution(successor)
+    with patch.object(
+        finalizer,
+        "load_frozen_accounting",
+        return_value={"job_id": "50532143"},
+    ):
+        expect_failure(
+            finalizer.validate_selected_result_lineage,
+            successor,
+            [valid],
+            ["20260719T200000Z-predecessor-retry"],
+            contains="copied predecessor scheduler accounting",
+        )
+    predecessor_job = SimpleNamespace(
+        attempt={"attempt_id": "20260719T200000Z-predecessor-retry"},
+        job_id="50532143",
+        marker_path=successor.directory / "attempts/new/task_result.json",
+        paths={"root": successor.directory / "attempts/new/output.root"},
+    )
+    expect_failure(
+        finalizer.validate_selected_result_lineage,
+        successor,
+        [predecessor_job],
+        [],
+        contains="selected predecessor scheduler job",
+    )
+    predecessor = SimpleNamespace(
+        attempt={"attempt_id": "20260718T175107Z-initial"},
+        job_id="50532143",
+        marker_path=successor.directory / "attempts/old/task_result.json",
+        paths={},
+    )
+    expect_failure(
+        finalizer.validate_selected_result_lineage,
+        successor,
+        [predecessor],
+        ["20260718T175107Z-initial"],
+        contains="predecessor attempt evidence",
+    )
 
 
 def check_candidate_selection(root: Path) -> None:
@@ -563,6 +1234,8 @@ def main() -> int:
         scratch = Path(raw).resolve()
         finalization = write_finalization(scratch)
         check_candidate_selection(scratch)
+        check_execution_dispatch(scratch)
+        check_successor_provenance(finalization, scratch)
 
         validation, rows = load_managed_finalization(
             finalization, allow_test_mode=True, verify_root_files=False
@@ -626,7 +1299,7 @@ def main() -> int:
 
     print(
         "steel-module managed finalization/checkpoint: PASS "
-        "(32 tasks, 8000 events, tamper/concurrency/BC-ONLY-S1 gates)"
+        "(32 tasks, 8000 events, successor lineage, tamper/concurrency/BC-ONLY-S1 gates)"
     )
     return 0
 
