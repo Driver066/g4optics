@@ -15,7 +15,7 @@ import subprocess
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from seal_steel_module_production_phase2b_incident import (
     FORMAL_IMPLEMENTATION_COMMIT,
@@ -1075,7 +1075,7 @@ def _transform_v3_manifest(
 
 
 R3RejectionValidator = Callable[
-    [Path, ManagedExecution, bool, Path | None], dict[str, Any]
+    [Path, ManagedExecution, bool, Optional[Path]], dict[str, Any]
 ]
 
 
