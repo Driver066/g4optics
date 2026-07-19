@@ -744,6 +744,9 @@ def _validated_r3_failure(
             execution_dir=predecessor.directory,
             require_current_execution=require_current_execution,
             allow_test_mode=test_mode,
+            preloaded_execution=(
+                predecessor if require_current_execution else None
+            ),
         )
 
     if not test_mode:

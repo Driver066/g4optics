@@ -37,6 +37,24 @@ def main() -> int:
             require_readiness=False,
             verify_live_predecessor=True,
         )
+        frozen_execution = load_successor_execution(
+            execution_dir,
+            repo_root=execution_dir / "sources/control",
+            require_readiness=False,
+            verify_phase2a_control_plane=False,
+            verify_live_predecessor=False,
+        )
+        if (
+            frozen_execution.directory != execution.directory
+            or frozen_execution.execution_id != execution.execution_id
+            or frozen_execution.execution_hash != execution.execution_hash
+            or frozen_execution.manifest != execution.manifest
+            or frozen_execution.tasks != execution.tasks
+            or frozen_execution.scan_args != execution.scan_args
+        ):
+            raise ValueError(
+                "live and frozen successor-v3 admission disagree"
+            )
         validate_successor_r2_boundary(execution, repo_root=repo_root)
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
         print(f"Cannot validate Phase-2B successor-v3: {exc}", file=sys.stderr)
@@ -53,6 +71,7 @@ def main() -> int:
     print("tasks: 32")
     print("events: 8000")
     print("production_seeds_reused: 64")
+    print("frozen_worker_admission: true")
     print("submission_ready: false")
     print("intents: 0")
     print("No scheduler command was invoked.")

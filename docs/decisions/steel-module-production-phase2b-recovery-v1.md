@@ -267,6 +267,17 @@ pre-intent snapshot on legitimate task output.  R4 accepts only one clean
 non-merge Git commit whose sole R2-to-R4 delta is the new tracked readiness
 lock.  A syntactically valid evidence hash alone cannot authorize submission.
 
+Formal admission deliberately has two repository-root policies. Historical
+failure sealing and live successor validation use the canonical live checkout,
+because the Phase-2A binding records absolute lock paths and historical Git
+objects. A frozen compute worker instead uses the checksum-bound
+`sources/control` archive and reuses the predecessor already admitted in that
+frozen context; it must not recursively reinterpret the archive as a live Git
+checkout. Before any R3 submission, the v3 read-only validator performs both
+the live/full admission and the exact frozen-worker admission on the login node
+and requires their execution ID, hash, manifest, tasks, and scan arguments to
+agree.
+
 ## Prohibited shortcuts
 
 - Do not modify or replace the old `.control.lock`, manifest, source archive,

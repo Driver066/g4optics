@@ -30,6 +30,7 @@ from steel_module_production_checkpoint_lib import (
 )
 from steel_module_production_phase2b_lib import (
     EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
+    ManagedExecution,
     ROOT_STATIC_MANIFEST,
     fsync_tree,
     verify_execution_static_checksums,
@@ -101,7 +102,7 @@ def _require_empty_directory(path: Path, label: str) -> None:
         raise ValueError(f"{label} must be an existing empty directory")
 
 
-def _validate_execution(
+def _validate_execution_identity(
     execution_dir: Path, *, test_mode: bool
 ) -> tuple[Path, dict[str, Any]]:
     requested = execution_dir.expanduser()
@@ -122,20 +123,40 @@ def _validate_execution(
         or manifest.get("accepted_statistical_evidence") is not (not test_mode)
     ):
         raise ValueError("fixed R3 failure execution identity or evidence mode mismatch")
+    campaign_path = execution / "campaign.json"
+    if campaign_path.exists() or campaign_path.is_symlink():
+        raise ValueError("successor execution unexpectedly contains campaign.json")
+    for name in ("intents", "attempts", "finalized"):
+        _require_empty_directory(execution / name, f"execution {name}/")
+    return execution, manifest
+
+
+def _validate_execution(
+    execution_dir: Path,
+    *,
+    repo_root: Path | None,
+    test_mode: bool,
+) -> tuple[Path, dict[str, Any]]:
+    execution, manifest = _validate_execution_identity(
+        execution_dir, test_mode=test_mode
+    )
     if not test_mode:
         # A self-consistent STATIC_SHA256SUMS is not sufficient formal
-        # authority: validate the complete frozen v2 successor, its Phase-2A
-        # binding, source/runtime identity, original incident and semantic
-        # execution hash.  Use the immutable control archive because the live
-        # checkout has advanced to the recovery implementation.
+        # authority.  The historical v1 predecessor records absolute Phase-1
+        # and Phase-2A lock paths and needs the live Git object database, so a
+        # frozen source archive is deliberately not accepted as repo_root.
+        if repo_root is None:
+            raise ValueError(
+                "formal R3 failure validation requires the canonical live repo root"
+            )
         from steel_module_production_successor_lib import load_successor_execution
 
         loaded = load_successor_execution(
             execution,
-            repo_root=execution / "sources/control",
+            repo_root=repo_root.expanduser().resolve(),
             require_readiness=False,
             verify_runtime=True,
-            verify_phase2a_control_plane=False,
+            verify_phase2a_control_plane=True,
             verify_live_predecessor=True,
             allow_closed_v2=True,
         )
@@ -145,10 +166,35 @@ def _validate_execution(
             or loaded.directory != execution
         ):
             raise ValueError("formal failed-R3 successor validation disagrees")
-    if (execution / "campaign.json").exists() or (execution / "campaign.json").is_symlink():
-        raise ValueError("successor execution unexpectedly contains campaign.json")
-    for name in ("intents", "attempts", "finalized"):
-        _require_empty_directory(execution / name, f"execution {name}/")
+    return execution, manifest
+
+
+def _validate_preloaded_execution(
+    execution_dir: Path,
+    *,
+    loaded: ManagedExecution,
+    test_mode: bool,
+) -> tuple[Path, dict[str, Any]]:
+    """Bind a failure bundle to an execution already admitted by its caller.
+
+    Live successor admission loads the predecessor with the canonical checkout
+    and complete historical validation.  A frozen worker loads that same
+    predecessor from its checksum-bound control archive.  Reusing the admitted
+    object here avoids inventing a second repo-root policy inside bundle
+    validation while still rechecking the complete current snapshot below.
+    """
+
+    execution, manifest = _validate_execution_identity(
+        execution_dir, test_mode=test_mode
+    )
+    if (
+        not isinstance(loaded, ManagedExecution)
+        or loaded.directory != execution
+        or loaded.execution_id != FORMAL_EXECUTION_ID
+        or loaded.execution_hash != FORMAL_EXECUTION_HASH
+        or loaded.manifest != manifest
+    ):
+        raise ValueError("preloaded failed-R3 successor identity disagrees")
     return execution, manifest
 
 
@@ -399,11 +445,14 @@ def collect_r3_failure_evidence(
     sacct_input: Path,
     squeue_input: Path,
     slurm_output_input: Path,
+    repo_root: Path | None = None,
     test_mode: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Validate external evidence and return deterministic payload + snapshot."""
 
-    execution, manifest = _validate_execution(execution_dir, test_mode=test_mode)
+    execution, manifest = _validate_execution(
+        execution_dir, repo_root=repo_root, test_mode=test_mode
+    )
     r3_root = canonical_r3_failure_evidence_root(execution)
     if r3_root.is_symlink() or not r3_root.is_dir():
         raise ValueError("canonical R3 evidence root is missing or unsafe")
@@ -653,6 +702,7 @@ def seal_r3_failure_evidence(
     sacct_input: Path,
     squeue_input: Path,
     slurm_output_input: Path,
+    repo_root: Path | None = None,
     test_mode: bool = False,
 ) -> Path:
     payload, snapshot = collect_r3_failure_evidence(
@@ -661,6 +711,7 @@ def seal_r3_failure_evidence(
         sacct_input=sacct_input,
         squeue_input=squeue_input,
         slurm_output_input=slurm_output_input,
+        repo_root=repo_root,
         test_mode=test_mode,
     )
     execution = Path(payload["execution"]["directory"])
@@ -699,6 +750,7 @@ def seal_r3_failure_evidence(
             require_current_execution=True,
             allow_test_mode=test_mode,
             require_canonical_location=False,
+            repo_root=repo_root,
         )
         fsync_tree(temporary)
         temporary.chmod(0o555)
@@ -709,6 +761,7 @@ def seal_r3_failure_evidence(
             execution_dir=execution,
             require_current_execution=True,
             allow_test_mode=test_mode,
+            repo_root=repo_root,
         )
         return target
     finally:
@@ -724,6 +777,8 @@ def validate_r3_failure_bundle(
     require_current_execution: bool = False,
     allow_test_mode: bool = False,
     require_canonical_location: bool = True,
+    repo_root: Path | None = None,
+    preloaded_execution: ManagedExecution | None = None,
 ) -> dict[str, Any]:
     """Validate a sealed failure bundle without scheduler contact."""
 
@@ -807,8 +862,23 @@ def validate_r3_failure_bundle(
         }
     ):
         raise ValueError("sealed R3 failure source identity mismatch")
+    if preloaded_execution is not None and not require_current_execution:
+        raise ValueError(
+            "preloaded execution requires current-execution validation"
+        )
+    if preloaded_execution is not None and repo_root is not None:
+        raise ValueError(
+            "preloaded execution and repo-root validation are mutually exclusive"
+        )
     if require_current_execution:
-        current, manifest = _validate_execution(execution, test_mode=test_mode)
+        if preloaded_execution is None:
+            current, manifest = _validate_execution(
+                execution, repo_root=repo_root, test_mode=test_mode
+            )
+        else:
+            current, manifest = _validate_preloaded_execution(
+                execution, loaded=preloaded_execution, test_mode=test_mode
+            )
         current_snapshot = _snapshot_execution(current)
         if current_snapshot != snapshot:
             raise ValueError("successor execution changed since failed R3 evidence capture")

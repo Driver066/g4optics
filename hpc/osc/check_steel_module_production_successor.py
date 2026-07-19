@@ -18,15 +18,21 @@ import stat
 import subprocess
 import sys
 import tempfile
+from argparse import Namespace
 from contextlib import contextmanager
+from contextlib import redirect_stdout
 from concurrent.futures import ThreadPoolExecutor
+from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable
 
 import seal_steel_module_production_phase2b_incident as incident_lib
 import steel_module_production_phase2b_lib as phase2b_lib
 import steel_module_production_r3_failure_lib as failure_lib
 import steel_module_production_successor_lib as successor_lib
+import validate_steel_module_production_successor_execution as v2_validator_cli
+import validate_steel_module_production_successor_v3_execution as v3_validator_cli
 from check_steel_module_production_phase2b_control import (
     FakeSlurm,
     _fixture_sources,
@@ -1079,6 +1085,168 @@ def test_recovery_readiness_proposal_target_policy(scratch: Path) -> None:
             )
 
 
+def test_live_and_frozen_root_routing_contracts(
+    repo_root: Path, scratch: Path
+) -> None:
+    """Lock the two legitimate repo-root policies at their public entries."""
+
+    scratch.mkdir()
+    # The read-only v2 history validator is a live CLI.  It must never pair an
+    # archive root with live-predecessor validation again.
+    v2_calls: list[dict[str, object]] = []
+    child = scratch / "managed-child"
+    original_parse = v2_validator_cli.parse_args
+    original_phase2a = v2_validator_cli.load_phase2a_lock
+    original_load = v2_validator_cli.load_successor_execution
+
+    def v2_load(execution_dir: Path, **kwargs: object) -> SimpleNamespace:
+        v2_calls.append({"execution_dir": execution_dir, **kwargs})
+        return SimpleNamespace(
+            execution_id="fixture-v2-id",
+            execution_hash="c" * 64,
+            manifest={
+                "recovery_authority": {
+                    "authority_hash": "d" * 64,
+                    "incident": {"incident_hash": "e" * 64},
+                }
+            },
+        )
+
+    v2_validator_cli.parse_args = lambda: Namespace(check_only=True)
+    v2_validator_cli.load_phase2a_lock = lambda root: (
+        root / phase2b_lib.PHASE2A_LOCK_RELATIVE,
+        {"canonical_directory": str(child)},
+    )
+    v2_validator_cli.load_successor_execution = v2_load
+    try:
+        with redirect_stdout(StringIO()):
+            assert v2_validator_cli.main() == 0
+    finally:
+        v2_validator_cli.parse_args = original_parse
+        v2_validator_cli.load_phase2a_lock = original_phase2a
+        v2_validator_cli.load_successor_execution = original_load
+    assert v2_calls == [
+        {
+            "execution_dir": child.parent / FORMAL_SUCCESSOR_EXECUTION_NAME_V2,
+            "repo_root": repo_root,
+            "require_readiness": False,
+            "verify_phase2a_control_plane": True,
+            "verify_live_predecessor": True,
+            "allow_closed_v2": True,
+        }
+    ]
+
+    # The v3 pre-submit validator performs both real admission policies on the
+    # login node and rejects any disagreement before a compute preflight can be
+    # submitted.
+    v3_calls: list[dict[str, object]] = []
+    v3_boundaries: list[tuple[object, Path]] = []
+    v3_execution_dir = child.parent / FORMAL_SUCCESSOR_EXECUTION_NAME
+    v3_execution = SimpleNamespace(
+        directory=v3_execution_dir,
+        execution_id="fixture-v3-id",
+        execution_hash="f" * 64,
+        manifest={
+            "recovery_authority": {
+                "authority_hash": "1" * 64,
+                "failed_r3_preflight": {"failure_hash": "2" * 64},
+            }
+        },
+        tasks=("fixture-task",),
+        scan_args=("--fixture",),
+    )
+    original_v3_parse = v3_validator_cli.parse_args
+    original_v3_phase2a = v3_validator_cli.load_phase2a_lock
+    original_v3_load = v3_validator_cli.load_successor_execution
+    original_v3_boundary = v3_validator_cli.validate_successor_r2_boundary
+
+    def v3_load(execution_dir: Path, **kwargs: object) -> object:
+        v3_calls.append({"execution_dir": execution_dir, **kwargs})
+        return v3_execution
+
+    def v3_boundary(execution: object, *, repo_root: Path) -> None:
+        v3_boundaries.append((execution, repo_root))
+
+    v3_validator_cli.parse_args = lambda: Namespace(check_only=True)
+    v3_validator_cli.load_phase2a_lock = lambda root: (
+        root / phase2b_lib.PHASE2A_LOCK_RELATIVE,
+        {"canonical_directory": str(child)},
+    )
+    v3_validator_cli.load_successor_execution = v3_load
+    v3_validator_cli.validate_successor_r2_boundary = v3_boundary
+    try:
+        with redirect_stdout(StringIO()):
+            assert v3_validator_cli.main() == 0
+    finally:
+        v3_validator_cli.parse_args = original_v3_parse
+        v3_validator_cli.load_phase2a_lock = original_v3_phase2a
+        v3_validator_cli.load_successor_execution = original_v3_load
+        v3_validator_cli.validate_successor_r2_boundary = original_v3_boundary
+    assert v3_calls == [
+        {
+            "execution_dir": v3_execution_dir,
+            "repo_root": repo_root,
+            "require_readiness": False,
+            "verify_live_predecessor": True,
+        },
+        {
+            "execution_dir": v3_execution_dir,
+            "repo_root": v3_execution_dir / "sources/control",
+            "require_readiness": False,
+            "verify_phase2a_control_plane": False,
+            "verify_live_predecessor": False,
+        },
+    ]
+    assert v3_boundaries == [(v3_execution, repo_root)]
+
+    # A compute worker has the opposite, explicitly frozen policy.  Admission
+    # uses the checksum-bound control archive and must not recurse into a live
+    # predecessor.  The real test-mode v3 tests separately exercise its full
+    # failure-bundle/preloaded-predecessor binding.
+    frozen = scratch / "frozen-v3"
+    frozen.mkdir()
+    (frozen / "managed_execution.json").write_text(
+        json.dumps({"schema_version": SUCCESSOR_EXECUTION_SCHEMA_VERSION}) + "\n",
+        encoding="utf-8",
+    )
+    control_root = frozen / "sources/control"
+    control_root.mkdir(parents=True)
+    sentinel = SimpleNamespace(
+        manifest={"schema_version": SUCCESSOR_EXECUTION_SCHEMA_VERSION}
+    )
+    frozen_calls: list[dict[str, object]] = []
+    readiness_calls: list[tuple[object, object]] = []
+    original_successor_load = successor_lib.load_successor_execution
+    original_readiness = successor_lib.verify_successor_recovery_readiness
+
+    def frozen_load(execution_dir: Path, **kwargs: object) -> object:
+        frozen_calls.append({"execution_dir": execution_dir, **kwargs})
+        return sentinel
+
+    def frozen_readiness(execution: object, *, repo_root: Path | None) -> None:
+        readiness_calls.append((execution, repo_root))
+
+    successor_lib.load_successor_execution = frozen_load
+    successor_lib.verify_successor_recovery_readiness = frozen_readiness
+    try:
+        assert load_execution_for_frozen_worker(
+            frozen, control_root=control_root
+        ) is sentinel
+    finally:
+        successor_lib.load_successor_execution = original_successor_load
+        successor_lib.verify_successor_recovery_readiness = original_readiness
+    assert frozen_calls == [
+        {
+            "execution_dir": frozen,
+            "repo_root": control_root,
+            "require_readiness": False,
+            "verify_phase2a_control_plane": False,
+            "verify_live_predecessor": False,
+        }
+    ], frozen_calls
+    assert readiness_calls == [(sentinel, None)]
+
+
 def test_atomicity_and_concurrency(repo_root: Path, scratch: Path) -> None:
     scratch.mkdir()
     predecessor, incident, _ = _make_sealed_incident_fixture(repo_root, scratch)
@@ -1189,6 +1357,9 @@ def main() -> int:
             )
             test_recovery_readiness_proposal_target_policy(
                 scratch / "proposal-target"
+            )
+            test_live_and_frozen_root_routing_contracts(
+                repo_root, scratch / "root-routing"
             )
             test_atomicity_and_concurrency(repo_root, scratch / "atomic")
             _assert_no_scheduler_contact(markers)

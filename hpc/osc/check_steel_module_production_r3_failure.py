@@ -8,10 +8,16 @@ import os
 import shutil
 import stat
 import tempfile
+from argparse import Namespace
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Callable
 
 import steel_module_production_r3_failure_lib as failure_lib
+import steel_module_production_successor_lib as successor_lib
+import seal_steel_module_production_r3_failure as failure_cli
 from steel_module_campaign_lib import sha256_file
 from steel_module_production_phase2b_lib import (
     EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
@@ -172,6 +178,135 @@ def _replace(path: Path, old: str, new: str) -> None:
 
 
 def main() -> int:
+    # The public sealer derives its formal root from its tracked file, never
+    # from CWD or from the failed execution's frozen source archive.
+    cli_calls: list[dict[str, object]] = []
+    original_parse_args = failure_cli.parse_args
+    original_collect = failure_cli.collect_r3_failure_evidence
+
+    def cli_collect(**kwargs: object) -> tuple[dict[str, str], dict[str, object]]:
+        cli_calls.append(kwargs)
+        return {
+            "failure_id": "fixture-failure",
+            "failure_hash": "b" * 64,
+        }, {}
+
+    failure_cli.parse_args = lambda: Namespace(
+        check_only=True,
+        seal=False,
+        execution_dir=Path("/fixture/execution"),
+        held_scontrol_input=Path("/fixture/held"),
+        sacct_input=Path("/fixture/sacct"),
+        squeue_input=Path("/fixture/squeue"),
+        slurm_output_input=Path("/fixture/log"),
+        test_mode=False,
+    )
+    failure_cli.collect_r3_failure_evidence = cli_collect
+    try:
+        with redirect_stdout(StringIO()):
+            assert failure_cli.main() == 0
+    finally:
+        failure_cli.parse_args = original_parse_args
+        failure_cli.collect_r3_failure_evidence = original_collect
+    assert len(cli_calls) == 1
+    assert cli_calls[0]["repo_root"] == Path(failure_cli.__file__).resolve().parents[2]
+
+    # Formal admission must use the canonical live checkout.  The old bug used
+    # sources/control here: that lets the outer v2 relocation pass, then fails
+    # when the historical v1 loader compares its frozen absolute lock path.
+    # Keep this branch independent from the synthetic test-mode coverage below.
+    with tempfile.TemporaryDirectory(prefix="steel-r3-failure-formal-route-") as raw:
+        fixture = _make_fixture(Path(raw))
+        manifest_path = fixture.execution / "managed_execution.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["test_mode"] = False
+        manifest["accepted_statistical_evidence"] = True
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+        )
+        _write_static_manifest(fixture.execution)
+        live_root = fixture.root / "canonical-live-repo"
+        live_root.mkdir()
+        archive_root = fixture.execution / "sources/control"
+        calls: list[dict[str, object]] = []
+        original_loader = successor_lib.load_successor_execution
+
+        def formal_loader(
+            execution_dir: Path, **kwargs: object
+        ) -> SimpleNamespace:
+            calls.append({"execution_dir": execution_dir, **kwargs})
+            if kwargs.get("repo_root") != live_root:
+                raise ValueError("managed child formal lock path mismatch")
+            return SimpleNamespace(
+                directory=fixture.execution,
+                execution_id=FORMAL_EXECUTION_ID,
+                execution_hash=FORMAL_EXECUTION_HASH,
+            )
+
+        successor_lib.load_successor_execution = formal_loader
+        try:
+            execution, loaded_manifest = failure_lib._validate_execution(
+                fixture.execution, repo_root=live_root, test_mode=False
+            )
+            assert execution == fixture.execution
+            assert loaded_manifest == manifest
+            assert calls == [
+                {
+                    "execution_dir": fixture.execution,
+                    "repo_root": live_root,
+                    "require_readiness": False,
+                    "verify_runtime": True,
+                    "verify_phase2a_control_plane": True,
+                    "verify_live_predecessor": True,
+                    "allow_closed_v2": True,
+                }
+            ]
+            _expect_failure(
+                lambda: failure_lib._validate_execution(
+                    fixture.execution,
+                    repo_root=archive_root,
+                    test_mode=False,
+                ),
+                "formal lock path mismatch",
+            )
+            _expect_failure(
+                lambda: failure_lib._validate_execution(
+                    fixture.execution, repo_root=None, test_mode=False
+                ),
+                "canonical live repo root",
+            )
+        finally:
+            successor_lib.load_successor_execution = original_loader
+
+    # Successor admission has already loaded the predecessor in either live or
+    # frozen context.  Its failure-bundle bridge must reuse that exact object
+    # rather than recursively choosing another repo-root policy.
+    predecessor = SimpleNamespace(
+        directory=Path("/fixture/execution-v2"),
+        execution_id="fixture-execution-id",
+        execution_hash="a" * 64,
+    )
+    bridge_calls: list[dict[str, object]] = []
+    original_bundle_validator = failure_lib.validate_r3_failure_bundle
+
+    def bridge_validator(path: Path, **kwargs: object) -> dict[str, object]:
+        bridge_calls.append({"path": path, **kwargs})
+        return {"test_mode": True}
+
+    failure_lib.validate_r3_failure_bundle = bridge_validator
+    try:
+        assert successor_lib._validated_r3_failure(
+            Path("/fixture/failure"),
+            predecessor=predecessor,
+            test_mode=True,
+            require_current_execution=True,
+        ) == {"test_mode": True}
+    finally:
+        failure_lib.validate_r3_failure_bundle = original_bundle_validator
+    assert len(bridge_calls) == 1
+    assert bridge_calls[0]["preloaded_execution"] is predecessor
+    assert bridge_calls[0]["require_current_execution"] is True
+
     # Positive preview and seal.  Preview must leave the complete tree unchanged.
     with tempfile.TemporaryDirectory(prefix="steel-r3-failure-positive-") as raw:
         fixture = _make_fixture(Path(raw))

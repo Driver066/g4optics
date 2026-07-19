@@ -31,12 +31,14 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    repo_root = Path(__file__).resolve().parents[2]
     kwargs = {
         "execution_dir": args.execution_dir,
         "held_scontrol_input": args.held_scontrol_input,
         "sacct_input": args.sacct_input,
         "squeue_input": args.squeue_input,
         "slurm_output_input": args.slurm_output_input,
+        "repo_root": repo_root,
         "test_mode": args.test_mode,
     }
     try:
@@ -59,6 +61,7 @@ def main() -> int:
             execution_dir=args.execution_dir,
             require_current_execution=True,
             allow_test_mode=args.test_mode,
+            repo_root=repo_root,
         )
         print("steel-module failed R3 preflight sealing: PASS")
         print(f"failure_id: {payload['failure_id']}")

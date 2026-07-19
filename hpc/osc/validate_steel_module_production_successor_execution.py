@@ -32,9 +32,9 @@ def main() -> int:
         )
         execution = load_successor_execution(
             execution_dir,
-            repo_root=execution_dir / "sources/control",
+            repo_root=repo_root,
             require_readiness=False,
-            verify_phase2a_control_plane=False,
+            verify_phase2a_control_plane=True,
             verify_live_predecessor=True,
             allow_closed_v2=True,
         )
