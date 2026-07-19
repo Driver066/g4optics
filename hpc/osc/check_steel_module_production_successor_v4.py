@@ -43,6 +43,14 @@ def _make_rejection_fixture(
     root: Path, predecessor: Any
 ) -> tuple[Path, dict[str, Any]]:
     root.mkdir()
+    probe_token = "1" * 32
+    mountpoint = predecessor.directory / "attempts" / (
+        ".r3-probe-" + probe_token
+    )
+    mountpoint.mkdir(mode=0o755)
+    container_probe_root = (
+        "/work/g4optics-execution/attempts/.r3-probe-" + probe_token
+    )
     payload: dict[str, Any] = {
         "schema_version": (
             "steel-module-production-r3-container-probe-rejection-evidence-v1"
@@ -60,6 +68,17 @@ def _make_rejection_fixture(
             "job_name": "fixture-rejected-r3",
         },
         "probe": {
+            "probe_token": probe_token,
+            "container_probe_root": container_probe_root,
+            "historical_mountpoint": {
+                "relative_path": f"attempts/{mountpoint.name}",
+                "probe_token": probe_token,
+                "container_probe_root": container_probe_root,
+                "mode": 0o755,
+                "link_count": 2,
+                "empty": True,
+                "attempts_entry_count": 1,
+            },
             "false_report_keys": [
                 "static_writer_open_rejected",
                 "control_lock_writer_open_rejected",
@@ -67,7 +86,10 @@ def _make_rejection_fixture(
             "container_return_code": 0,
             "apptainer_invoked": True,
             "geant4_invoked": False,
-            "execution_snapshot_unchanged": True,
+            "raw_file_snapshot_scope": "recursive-regular-files-only",
+            "raw_file_snapshot_unchanged": True,
+            "historical_mountpoint_present": True,
+            "execution_tree_unchanged": False,
         },
         "consumption": {
             "events_consumed": 0,
@@ -219,6 +241,38 @@ def test_v4_materialization_and_lineage(repo_root: Path, scratch: Path) -> None:
             rejection_validator=inputs["rejection_validator"],
         )
         assert loaded.execution_hash == v4.execution_hash
+        successor_lib.validate_successor_r2_boundary(v4, repo_root=repo_root)
+        active_orphan = v4.directory / "attempts" / (
+            ".r3-probe-" + "3" * 32
+        )
+        active_orphan.mkdir()
+        try:
+            _assert_rejected(
+                lambda: successor_lib.validate_successor_r2_boundary(
+                    v4, repo_root=repo_root
+                ),
+                "normal successor-v4 boundary accepted a mountpoint exception",
+            )
+        finally:
+            active_orphan.rmdir()
+
+        predecessor_mountpoint = v3.directory / "attempts" / (
+            ".r3-probe-" + "1" * 32
+        )
+        predecessor_mountpoint.chmod(0o700)
+        try:
+            _assert_rejected(
+                lambda: load_successor_execution(
+                    v4.directory,
+                    allow_test_mode=True,
+                    require_readiness=False,
+                    verify_live_predecessor=True,
+                    rejection_validator=inputs["rejection_validator"],
+                ),
+                "successor-v4 authority accepted changed predecessor mountpoint",
+            )
+        finally:
+            predecessor_mountpoint.chmod(0o755)
         assert load_successor_execution(
             v3.directory,
             allow_test_mode=True,

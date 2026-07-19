@@ -132,6 +132,11 @@ FORMAL_ADMIN_REJECTED_R3_MANIFEST_SHA256 = (
     "4be9a54fbed81d59aac608a6a601602a79bcd10beb17a16f66555267fa563b77"
 )
 FORMAL_REJECTED_R3_JOB_ID = "50548308"
+R3_HISTORICAL_MOUNTPOINT_PREFIX = ".r3-probe-"
+R3_HISTORICAL_CONTAINER_ATTEMPTS_ROOT = PurePosixPath(
+    "/work/g4optics-execution/attempts"
+)
+R3_HISTORICAL_MOUNTPOINT_MODE = 0o755
 RECOVERY_READINESS_LOCK_RELATIVE_V2 = Path(
     "hpc/osc/configurations/steel-module-production-phase2b-recovery-v1.lock.json"
 )
@@ -1223,7 +1228,11 @@ def _rejection_binding(
         or probe.get("container_return_code") != 0
         or probe.get("apptainer_invoked") is not True
         or probe.get("geant4_invoked") is not False
-        or probe.get("execution_snapshot_unchanged") is not True
+        or probe.get("raw_file_snapshot_scope")
+        != "recursive-regular-files-only"
+        or probe.get("raw_file_snapshot_unchanged") is not True
+        or probe.get("historical_mountpoint_present") is not True
+        or probe.get("execution_tree_unchanged") is not False
         or consumption
         != {"events_consumed": 0, "production_seeds_consumed": 0}
     ):
@@ -1374,11 +1383,6 @@ def preview_successor_v4_execution(
         _validate_phase2a_binding(
             predecessor.managed_child, phase2a_path, phase2a
         )
-        validate_successor_r2_boundary(predecessor, repo_root=root)
-    for name in ("intents", "attempts", "finalized"):
-        mutable = predecessor.directory / name
-        if mutable.is_symlink() or not mutable.is_dir() or any(mutable.iterdir()):
-            raise ValueError(f"closed successor-v3 contains mutable {name} state")
     rejection_path = _resolve_r3_rejection_path(
         predecessor.managed_child, rejection_dir, test_mode=test_mode
     )
@@ -1393,6 +1397,18 @@ def preview_successor_v4_execution(
         test_mode=test_mode,
         repo_root=root,
         validator=rejection_validator,
+    )
+    rejection_probe = require_dict(rejection, "probe")
+    validate_rejected_successor_v3_boundary(
+        predecessor,
+        probe_token=require_string(rejection_probe, "probe_token"),
+        container_probe_root=require_string(
+            rejection_probe, "container_probe_root"
+        ),
+        repo_root=root,
+        recorded_mountpoint=require_dict(
+            rejection_probe, "historical_mountpoint"
+        ),
     )
     pilot = (
         pilot_dir
@@ -3184,10 +3200,6 @@ def _validate_v4_authority(
         execution.managed_child
     ):
         raise ValueError("formal successor-v4 predecessor path is not exact")
-    for name in ("intents", "attempts", "finalized"):
-        root = predecessor.directory / name
-        if root.is_symlink() or not root.is_dir() or any(root.iterdir()):
-            raise ValueError(f"closed successor-v3 contains mutable {name} state")
     for key in (
         "original_production_incident",
         "failed_r3_preflight",
@@ -3248,6 +3260,22 @@ def _validate_v4_authority(
         # repository identity for loading that immutable predecessor.
         repo_root=predecessor_repo_root,
         validator=rejection_validator,
+    )
+    rejection_probe = require_dict(rejection, "probe")
+    validate_rejected_successor_v3_boundary(
+        predecessor,
+        probe_token=require_string(rejection_probe, "probe_token"),
+        container_probe_root=require_string(
+            rejection_probe, "container_probe_root"
+        ),
+        repo_root=(
+            predecessor_repo_root
+            if predecessor_repo_root is not None
+            else predecessor.directory / "sources/control"
+        ),
+        recorded_mountpoint=require_dict(
+            rejection_probe, "historical_mountpoint"
+        ),
     )
     if rejected_record != _rejection_binding(
         rejection_path.resolve(),
@@ -3632,6 +3660,103 @@ def validate_successor_r2_boundary(
         task.logical_task_id for task in execution.tasks
     ):
         raise ValueError("successor predecessor-retry selection is not exact")
+
+
+def rejected_successor_v3_mountpoint_binding(
+    *, probe_token: str, container_probe_root: str
+) -> dict[str, Any]:
+    """Return the semantic record for one authenticated R3 bind target."""
+
+    if (
+        len(probe_token) != 32
+        or probe_token.lower() != probe_token
+        or any(character not in "0123456789abcdef" for character in probe_token)
+    ):
+        raise ValueError("historical R3 mountpoint probe token is invalid")
+    mountpoint_name = R3_HISTORICAL_MOUNTPOINT_PREFIX + probe_token
+    expected_container = (
+        R3_HISTORICAL_CONTAINER_ATTEMPTS_ROOT / mountpoint_name
+    ).as_posix()
+    if container_probe_root != expected_container:
+        raise ValueError("historical R3 container mountpoint identity mismatch")
+    return {
+        "relative_path": f"attempts/{mountpoint_name}",
+        "probe_token": probe_token,
+        "container_probe_root": container_probe_root,
+        "mode": R3_HISTORICAL_MOUNTPOINT_MODE,
+        "link_count": 2,
+        "empty": True,
+        "attempts_entry_count": 1,
+    }
+
+
+def validate_rejected_successor_v3_boundary(
+    execution: ManagedExecution,
+    *,
+    probe_token: str,
+    container_probe_root: str,
+    repo_root: Path,
+    recorded_mountpoint: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate the one empty bind target left by the rejected v3 R3 probe.
+
+    This is deliberately separate from :func:`validate_successor_r2_boundary`.
+    The normal pre-readiness boundary continues to require a completely empty
+    ``attempts/`` directory.  Only a rejection validator that has already
+    authenticated the raw R3 probe token may call this historical exception.
+    """
+
+    if execution.manifest.get("schema_version") != SUCCESSOR_EXECUTION_SCHEMA_VERSION_V3:
+        raise ValueError("historical R3 mountpoint requires successor-v3")
+    binding = rejected_successor_v3_mountpoint_binding(
+        probe_token=probe_token,
+        container_probe_root=container_probe_root,
+    )
+    mountpoint_name = Path(binding["relative_path"]).name
+
+    for name in ("intents", "finalized"):
+        path = execution.directory / name
+        if path.is_symlink() or not path.is_dir() or any(path.iterdir()):
+            raise ValueError(f"rejected successor-v3 requires empty {name}/")
+    attempts = execution.directory / "attempts"
+    if attempts.is_symlink() or not attempts.is_dir():
+        raise ValueError("rejected successor-v3 attempts/ is unsafe")
+    entries = tuple(attempts.iterdir())
+    if len(entries) != 1:
+        raise ValueError(
+            "rejected successor-v3 requires exactly one historical R3 mountpoint"
+        )
+    mountpoint = entries[0]
+    if mountpoint.name != mountpoint_name:
+        raise ValueError("historical R3 mountpoint name/token mismatch")
+    if mountpoint.is_symlink() or not mountpoint.is_dir():
+        raise ValueError("historical R3 mountpoint must be a regular directory")
+    stat_result = mountpoint.lstat()
+    mode = stat_result.st_mode & 0o777
+    if mode != R3_HISTORICAL_MOUNTPOINT_MODE:
+        raise ValueError("historical R3 mountpoint mode mismatch")
+    if any(mountpoint.iterdir()):
+        raise ValueError("historical R3 mountpoint is not empty")
+
+    if mode != binding["mode"]:
+        raise ValueError("historical R3 mountpoint semantic mode mismatch")
+    if stat_result.st_nlink != binding["link_count"]:
+        raise ValueError("historical R3 mountpoint link-count mismatch")
+    if recorded_mountpoint is not None and recorded_mountpoint != binding:
+        raise ValueError("recorded historical R3 mountpoint binding mismatch")
+
+    readiness = (
+        repo_root.expanduser().resolve() / RECOVERY_READINESS_LOCK_RELATIVE_V3
+    )
+    if readiness.exists() or readiness.is_symlink():
+        raise ValueError(
+            "rejected successor-v3 cannot coexist with recovery readiness"
+        )
+    if successor_predecessor_retry_task_ids(execution) != tuple(
+        task.logical_task_id for task in execution.tasks
+    ):
+        raise ValueError("successor predecessor-retry selection is not exact")
+    return binding
 
 
 def successor_predecessor_retry_task_ids(
@@ -4024,9 +4149,11 @@ __all__ = [
     "preview_successor_execution",
     "preview_successor_v3_execution",
     "preview_successor_v4_execution",
+    "rejected_successor_v3_mountpoint_binding",
     "successor_predecessor_retry_task_ids",
     "successor_r3_preflight_binding",
     "successor_recovery_readiness_path",
     "validate_successor_r2_boundary",
+    "validate_rejected_successor_v3_boundary",
     "verify_successor_recovery_readiness",
 ]

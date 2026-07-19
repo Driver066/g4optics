@@ -34,6 +34,7 @@ from steel_module_production_r3_probe_rejection_lib import (
 from steel_module_production_successor_lib import (
     FORMAL_SUCCESSOR_EXECUTION_NAME_V3,
     materialize_successor_v3_execution_companion,
+    validate_successor_r2_boundary,
 )
 
 
@@ -131,6 +132,10 @@ def _fixture(repo_root: Path, root: Path) -> tuple[object, Path, dict[str, Path]
         successor = materialize_successor_v3_execution_companion(
             **inputs, out_dir=target
         )
+    historical_mountpoint = successor.directory / "attempts" / (
+        ".r3-probe-" + "1" * 32
+    )
+    historical_mountpoint.mkdir(mode=0o755)
     r3_root = canonical_r3_evidence_root(successor.directory)
     raw_parent = r3_root / "raw"
     raw_parent.mkdir(parents=True)
@@ -223,7 +228,139 @@ def main() -> int:
             "events_consumed": 0,
             "production_seeds_consumed": 0,
         }
-        assert snapshot["snapshot_hash"] == payload["execution"]["snapshot_hash"]
+        assert snapshot["regular_file_snapshot_hash"] == payload["execution"][
+            "regular_file_snapshot_hash"
+        ]
+        assert snapshot["regular_file_snapshot_scope"] == (
+            "recursive-regular-files-only"
+        )
+        assert snapshot["historical_mountpoint"] == payload["probe"][
+            "historical_mountpoint"
+        ]
+        assert payload["probe"]["execution_tree_unchanged"] is False
+
+        mountpoint = successor.directory / "attempts" / (
+            ".r3-probe-" + "1" * 32
+        )
+        _expect_failure(
+            lambda: validate_successor_r2_boundary(
+                successor, repo_root=repo_root
+            ),
+            "empty attempts",
+        )
+
+        wrong_name = mountpoint.with_name(".r3-probe-" + "2" * 32)
+        mountpoint.rename(wrong_name)
+        try:
+            _expect_failure(
+                lambda: collect_r3_probe_rejection_evidence(**kwargs),
+                "name/token",
+            )
+        finally:
+            wrong_name.rename(mountpoint)
+
+        nested = mountpoint / "unexpected-empty-child"
+        nested.mkdir()
+        try:
+            _expect_failure(
+                lambda: collect_r3_probe_rejection_evidence(**kwargs),
+                "not empty",
+            )
+        finally:
+            nested.rmdir()
+
+        extra_attempt = successor.directory / "attempts/unexpected-attempt"
+        extra_attempt.mkdir()
+        try:
+            _expect_failure(
+                lambda: collect_r3_probe_rejection_evidence(**kwargs),
+                "exactly one",
+            )
+        finally:
+            extra_attempt.rmdir()
+
+        mountpoint.chmod(0o700)
+        try:
+            _expect_failure(
+                lambda: collect_r3_probe_rejection_evidence(**kwargs),
+                "mode mismatch",
+            )
+        finally:
+            mountpoint.chmod(0o755)
+
+        symlink_target = root / "mountpoint-symlink-target"
+        symlink_target.mkdir()
+        mountpoint.rmdir()
+        mountpoint.symlink_to(symlink_target, target_is_directory=True)
+        try:
+            _expect_failure(
+                lambda: collect_r3_probe_rejection_evidence(**kwargs),
+                "symlink",
+            )
+        finally:
+            mountpoint.unlink()
+            mountpoint.mkdir(mode=0o755)
+
+        raw_payload_path = raw / "probe_result.json"
+        original_raw_payload = raw_payload_path.read_text(encoding="utf-8")
+        resign = json.loads(original_raw_payload)
+        resign["probe_token"] = "2" * 32
+        resign["container_probe_root"] = (
+            "/work/g4optics-execution/attempts/.r3-probe-" + "2" * 32
+        )
+        resign["container_adjacent_root"] = (
+            "/work/g4optics-execution/attempts/.r3-probe-adjacent-" + "2" * 32
+        )
+        resign.pop("raw_result_hash")
+        resign["raw_result_hash"] = _canonical_hash(resign)
+        raw_payload_path.write_text(
+            json.dumps(resign, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        try:
+            _expect_failure(
+                lambda: collect_r3_probe_rejection_evidence(**kwargs),
+                "name/token",
+            )
+        finally:
+            raw_payload_path.write_text(original_raw_payload, encoding="utf-8")
+
+        original_validate_log = rejection_lib._validate_log
+        toctou_extra = successor.directory / "attempts/toctou-extra"
+
+        def add_attempt_after_log(*args: object, **call_kwargs: object) -> None:
+            original_validate_log(*args, **call_kwargs)
+            toctou_extra.mkdir()
+
+        rejection_lib._validate_log = add_attempt_after_log
+        try:
+            _expect_failure(
+                lambda: collect_r3_probe_rejection_evidence(**kwargs),
+                "exactly one",
+            )
+        finally:
+            rejection_lib._validate_log = original_validate_log
+            if toctou_extra.exists():
+                toctou_extra.rmdir()
+
+        toctou_renamed = mountpoint.with_name(".r3-probe-" + "3" * 32)
+
+        def rename_mountpoint_after_log(
+            *args: object, **call_kwargs: object
+        ) -> None:
+            original_validate_log(*args, **call_kwargs)
+            mountpoint.rename(toctou_renamed)
+
+        rejection_lib._validate_log = rename_mountpoint_after_log
+        try:
+            _expect_failure(
+                lambda: collect_r3_probe_rejection_evidence(**kwargs),
+                "name/token",
+            )
+        finally:
+            rejection_lib._validate_log = original_validate_log
+            if toctou_renamed.exists():
+                toctou_renamed.rename(mountpoint)
 
         target = seal_r3_probe_rejection_evidence(**kwargs)
         recorded = validate_r3_probe_rejection_bundle(
@@ -293,6 +430,42 @@ def main() -> int:
                 allow_test_mode=True,
                 require_canonical_location=False,
             )
+        )
+
+        resigned_bundle = root / "resigned-mountpoint-bundle"
+        shutil.copytree(target, resigned_bundle)
+        for path in resigned_bundle.rglob("*"):
+            if path.is_dir():
+                path.chmod(0o755)
+            elif path.is_file():
+                path.chmod(0o644)
+        rejection_path = resigned_bundle / "rejection.json"
+        resigned_rejection = json.loads(
+            rejection_path.read_text(encoding="utf-8")
+        )
+        resigned_rejection["probe"]["historical_mountpoint"]["mode"] = 0o700
+        resigned_rejection.pop("rejection_hash")
+        resigned_rejection.pop("rejection_id")
+        resigned_rejection["rejection_hash"] = rejection_lib._rejection_hash(
+            resigned_rejection
+        )
+        resigned_rejection["rejection_id"] = (
+            "sm-v1-r3-container-probe-rejection-"
+            f"{resigned_rejection['scheduler']['job_id']}-"
+            f"{resigned_rejection['rejection_hash'][:12]}"
+        )
+        rejection_path.write_text(
+            json.dumps(resigned_rejection, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        _rewrite_bundle_checksums(resigned_bundle)
+        _expect_failure(
+            lambda: validate_r3_probe_rejection_bundle(
+                resigned_bundle,
+                allow_test_mode=True,
+                require_canonical_location=False,
+            ),
+            "semantic validation",
         )
 
         original = values["squeue"].read_text(encoding="utf-8")

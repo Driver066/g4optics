@@ -37,14 +37,15 @@ from steel_module_production_r3_probe_lib import (
 from steel_module_production_successor_lib import (
     SUCCESSOR_EXECUTION_SCHEMA_VERSION_V3,
     load_successor_execution,
-    validate_successor_r2_boundary,
+    rejected_successor_v3_mountpoint_binding,
+    validate_rejected_successor_v3_boundary,
 )
 
 
 REJECTION_SCHEMA_VERSION = (
     "steel-module-production-r3-container-probe-rejection-evidence-v1"
 )
-SNAPSHOT_SCHEMA_VERSION = "steel-module-production-r3-execution-snapshot-v1"
+SNAPSHOT_SCHEMA_VERSION = "steel-module-production-r3-execution-snapshot-v2"
 FORMAL_EXECUTION_NAME = "steel-module-production-bc-s1-execution-v3"
 FORMAL_EXECUTION_ID = "sm-v1-production-bc-s1-execution-v3-e3bd626fe694"
 FORMAL_EXECUTION_HASH = (
@@ -52,6 +53,10 @@ FORMAL_EXECUTION_HASH = (
 )
 FORMAL_JOB_ID = "50548308"
 FORMAL_JOB_NAME = "g4sm-r3-30d01a2a03d9"
+FORMAL_PROBE_TOKEN = "48d49c5eac79a554858f9a640c1d8a28"
+FORMAL_CONTAINER_PROBE_ROOT = (
+    "/work/g4optics-execution/attempts/.r3-probe-" + FORMAL_PROBE_TOKEN
+)
 FORMAL_ACCOUNT = "PAS2524"
 FORMAL_CLASSIFICATION = "container-isolation-writer-open-rejection-failure"
 FORMAL_FAILURE_STAGE = "post-apptainer-container-contract-evaluation"
@@ -104,13 +109,18 @@ def _require_regular_input(path: Path, label: str) -> Path:
     return resolved
 
 
-def _snapshot_payload(execution: Path) -> dict[str, Any]:
+def _snapshot_payload(
+    execution: Path, *, historical_mountpoint: dict[str, Any]
+) -> dict[str, Any]:
     records, snapshot_hash = _execution_snapshot(execution)
     return {
         "schema_version": SNAPSHOT_SCHEMA_VERSION,
         "execution_directory": str(execution),
-        "records": records,
-        "snapshot_hash": snapshot_hash,
+        "regular_file_snapshot_scope": "recursive-regular-files-only",
+        "regular_file_records": records,
+        "regular_file_snapshot_hash": snapshot_hash,
+        "regular_file_snapshot_record_count": len(records),
+        "historical_mountpoint": json.loads(json.dumps(historical_mountpoint)),
     }
 
 
@@ -118,14 +128,26 @@ def _validate_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     if set(snapshot) != {
         "schema_version",
         "execution_directory",
-        "records",
-        "snapshot_hash",
+        "regular_file_snapshot_scope",
+        "regular_file_records",
+        "regular_file_snapshot_hash",
+        "regular_file_snapshot_record_count",
+        "historical_mountpoint",
     }:
         raise ValueError("R3 rejection execution snapshot field set mismatch")
-    records = snapshot.get("records")
+    records = snapshot.get("regular_file_records")
+    mountpoint = snapshot.get("historical_mountpoint")
+    if not isinstance(mountpoint, dict):
+        raise ValueError("R3 rejection execution mountpoint snapshot is invalid")
+    expected_mountpoint = rejected_successor_v3_mountpoint_binding(
+        probe_token=str(mountpoint.get("probe_token", "")),
+        container_probe_root=str(mountpoint.get("container_probe_root", "")),
+    )
     if (
         snapshot.get("schema_version") != SNAPSHOT_SCHEMA_VERSION
         or not isinstance(snapshot.get("execution_directory"), str)
+        or snapshot.get("regular_file_snapshot_scope")
+        != "recursive-regular-files-only"
         or not isinstance(records, dict)
         or not records
         or list(records) != sorted(records)
@@ -138,7 +160,9 @@ def _validate_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             or not re.fullmatch(r"[0-9a-f]{64}", digest)
             for name, digest in records.items()
         )
-        or snapshot.get("snapshot_hash") != _canonical_hash(records)
+        or snapshot.get("regular_file_snapshot_hash") != _canonical_hash(records)
+        or snapshot.get("regular_file_snapshot_record_count") != len(records)
+        or mountpoint != expected_mountpoint
     ):
         raise ValueError("R3 rejection execution snapshot is invalid")
     return snapshot
@@ -240,11 +264,7 @@ def collect_r3_probe_rejection_evidence(
     execution = _load_execution(
         execution_dir, repo_root=repo_root, test_mode=test_mode
     )
-    validate_successor_r2_boundary(
-        execution,
-        repo_root=repo_root if repo_root is not None else execution.directory / "sources/control",
-    )
-    before = _snapshot_payload(execution.directory)
+    initial_records, initial_hash = _execution_snapshot(execution.directory)
     raw_requested = raw_workspace.expanduser()
     if raw_requested.is_symlink() or not raw_requested.is_dir():
         raise ValueError("R3 rejection raw workspace must be a regular directory")
@@ -263,12 +283,35 @@ def collect_r3_probe_rejection_evidence(
         or raw.get("execution_id") != execution.execution_id
         or raw.get("execution_hash") != execution.execution_hash
         or raw.get("execution_directory") != str(execution.directory)
-        or raw.get("execution_snapshot_before_sha256") != before["snapshot_hash"]
-        or raw.get("execution_snapshot_record_count") != len(before["records"])
+        or raw.get("execution_snapshot_before_sha256") != initial_hash
+        or raw.get("execution_snapshot_record_count") != len(initial_records)
     ):
         raise ValueError("R3 rejection raw/execution identity mismatch")
-    if not test_mode and (job_id != FORMAL_JOB_ID or job_name != FORMAL_JOB_NAME):
-        raise ValueError("formal R3 rejection job identity mismatch")
+    if not test_mode and (
+        job_id != FORMAL_JOB_ID
+        or job_name != FORMAL_JOB_NAME
+        or raw.get("probe_token") != FORMAL_PROBE_TOKEN
+        or raw.get("container_probe_root") != FORMAL_CONTAINER_PROBE_ROOT
+    ):
+        raise ValueError("formal R3 rejection job/probe identity mismatch")
+    historical_mountpoint = validate_rejected_successor_v3_boundary(
+        execution,
+        probe_token=str(raw["probe_token"]),
+        container_probe_root=str(raw["container_probe_root"]),
+        repo_root=(
+            repo_root
+            if repo_root is not None
+            else execution.directory / "sources/control"
+        ),
+    )
+    before = _snapshot_payload(
+        execution.directory, historical_mountpoint=historical_mountpoint
+    )
+    if (
+        before["regular_file_records"] != initial_records
+        or before["regular_file_snapshot_hash"] != initial_hash
+    ):
+        raise ValueError("execution-v3 changed while binding the R3 rejection")
 
     inputs = {
         "held_scontrol": _require_regular_input(
@@ -311,7 +354,22 @@ def collect_r3_probe_rejection_evidence(
     if squeue_text.strip():
         raise ValueError("R3 rejection job remains active in supplied squeue")
     _validate_log(log_text, raw_workspace=raw_path)
-    after = _snapshot_payload(execution.directory)
+    final_mountpoint = validate_rejected_successor_v3_boundary(
+        execution,
+        probe_token=str(raw["probe_token"]),
+        container_probe_root=str(raw["container_probe_root"]),
+        repo_root=(
+            repo_root
+            if repo_root is not None
+            else execution.directory / "sources/control"
+        ),
+        recorded_mountpoint=historical_mountpoint,
+    )
+    if final_mountpoint != historical_mountpoint:
+        raise ValueError("historical R3 mountpoint changed during collection")
+    after = _snapshot_payload(
+        execution.directory, historical_mountpoint=historical_mountpoint
+    )
     if before != after:
         raise ValueError("execution-v3 changed while collecting R3 rejection")
 
@@ -331,8 +389,16 @@ def collect_r3_probe_rejection_evidence(
             "static_manifest_sha256": sha256_file(
                 execution.directory / ROOT_STATIC_MANIFEST
             ),
-            "snapshot_hash": before["snapshot_hash"],
-            "snapshot_record_count": len(before["records"]),
+            "regular_file_snapshot_scope": before[
+                "regular_file_snapshot_scope"
+            ],
+            "regular_file_snapshot_hash": before[
+                "regular_file_snapshot_hash"
+            ],
+            "regular_file_snapshot_record_count": before[
+                "regular_file_snapshot_record_count"
+            ],
+            "historical_mountpoint": historical_mountpoint,
         },
         "scheduler": {
             "job_id": job_id,
@@ -345,13 +411,19 @@ def collect_r3_probe_rejection_evidence(
         "probe": {
             "raw_schema_version": RAW_PROBE_SCHEMA_VERSION,
             "raw_result_hash": raw["raw_result_hash"],
+            "probe_token": raw["probe_token"],
+            "container_probe_root": raw["container_probe_root"],
+            "historical_mountpoint": historical_mountpoint,
             "false_report_keys": [
                 name for name in REPORT_KEYS if name in FORMAL_FALSE_REPORT_KEYS
             ],
             "container_return_code": 0,
             "apptainer_invoked": True,
             "geant4_invoked": False,
-            "execution_snapshot_unchanged": True,
+            "raw_file_snapshot_scope": "recursive-regular-files-only",
+            "raw_file_snapshot_unchanged": True,
+            "historical_mountpoint_present": True,
+            "execution_tree_unchanged": False,
         },
         "consumption": {
             "events_consumed": 0,
@@ -411,8 +483,10 @@ def _validate_rejection_payload(
         "execution_hash",
         "managed_execution_sha256",
         "static_manifest_sha256",
-        "snapshot_hash",
-        "snapshot_record_count",
+        "regular_file_snapshot_scope",
+        "regular_file_snapshot_hash",
+        "regular_file_snapshot_record_count",
+        "historical_mountpoint",
     } or set(scheduler) != {
         "job_id",
         "job_name",
@@ -423,11 +497,17 @@ def _validate_rejection_payload(
     } or set(probe) != {
         "raw_schema_version",
         "raw_result_hash",
+        "probe_token",
+        "container_probe_root",
+        "historical_mountpoint",
         "false_report_keys",
         "container_return_code",
         "apptainer_invoked",
         "geant4_invoked",
-        "execution_snapshot_unchanged",
+        "raw_file_snapshot_scope",
+        "raw_file_snapshot_unchanged",
+        "historical_mountpoint_present",
+        "execution_tree_unchanged",
     } or set(consumption) != {"events_consumed", "production_seeds_consumed"} or set(
         inputs
     ) != {
@@ -441,6 +521,10 @@ def _validate_rejection_payload(
     rejection_hash = _rejection_hash(payload)
     job_id = str(scheduler.get("job_id", ""))
     expected_false = [name for name in REPORT_KEYS if name in FORMAL_FALSE_REPORT_KEYS]
+    expected_mountpoint = rejected_successor_v3_mountpoint_binding(
+        probe_token=str(raw.get("probe_token", "")),
+        container_probe_root=str(raw.get("container_probe_root", "")),
+    )
     test_mode = payload.get("test_mode")
     if (
         payload.get("schema_version") != REJECTION_SCHEMA_VERSION
@@ -453,18 +537,30 @@ def _validate_rejection_payload(
         or payload.get("rejection_id")
         != f"sm-v1-r3-container-probe-rejection-{job_id}-{rejection_hash[:12]}"
         or execution.get("directory") != snapshot.get("execution_directory")
-        or execution.get("snapshot_hash") != snapshot.get("snapshot_hash")
-        or execution.get("snapshot_record_count") != len(snapshot.get("records", {}))
+        or execution.get("regular_file_snapshot_scope")
+        != snapshot.get("regular_file_snapshot_scope")
+        or execution.get("regular_file_snapshot_hash")
+        != snapshot.get("regular_file_snapshot_hash")
+        or execution.get("regular_file_snapshot_record_count")
+        != snapshot.get("regular_file_snapshot_record_count")
+        or execution.get("historical_mountpoint")
+        != snapshot.get("historical_mountpoint")
         or scheduler.get("squeue_terminal_empty") is not True
         or probe
         != {
             "raw_schema_version": RAW_PROBE_SCHEMA_VERSION,
             "raw_result_hash": raw.get("raw_result_hash"),
+            "probe_token": raw.get("probe_token"),
+            "container_probe_root": raw.get("container_probe_root"),
+            "historical_mountpoint": expected_mountpoint,
             "false_report_keys": expected_false,
             "container_return_code": 0,
             "apptainer_invoked": True,
             "geant4_invoked": False,
-            "execution_snapshot_unchanged": True,
+            "raw_file_snapshot_scope": "recursive-regular-files-only",
+            "raw_file_snapshot_unchanged": True,
+            "historical_mountpoint_present": True,
+            "execution_tree_unchanged": False,
         }
         or consumption != {"events_consumed": 0, "production_seeds_consumed": 0}
     ):
@@ -474,6 +570,8 @@ def _validate_rejection_payload(
         or execution.get("execution_hash") != FORMAL_EXECUTION_HASH
         or job_id != FORMAL_JOB_ID
         or scheduler.get("job_name") != FORMAL_JOB_NAME
+        or probe.get("probe_token") != FORMAL_PROBE_TOKEN
+        or probe.get("container_probe_root") != FORMAL_CONTAINER_PROBE_ROOT
     ):
         raise ValueError("formal R3 rejection payload identity mismatch")
 
@@ -654,7 +752,8 @@ def validate_r3_probe_rejection_bundle(
         or payload["scheduler"]["terminal_rows"] != rows
         or payload["scheduler"]["account"] != held["account"]
         or payload["inputs"] != actual_inputs
-        or payload["execution"]["snapshot_hash"] != raw["execution_snapshot_before_sha256"]
+        or payload["execution"]["regular_file_snapshot_hash"]
+        != raw["execution_snapshot_before_sha256"]
     ):
         raise ValueError("sealed R3 rejection source identity mismatch")
     if not test_mode:
@@ -669,7 +768,21 @@ def validate_r3_probe_rejection_bundle(
             raise ValueError("sealed formal R3 rejection input SHA-256 mismatch")
     if require_current_execution:
         current = _load_execution(execution, repo_root=repo_root, test_mode=test_mode)
-        current_snapshot = _snapshot_payload(current.directory)
+        validate_rejected_successor_v3_boundary(
+            current,
+            probe_token=str(raw["probe_token"]),
+            container_probe_root=str(raw["container_probe_root"]),
+            repo_root=(
+                repo_root
+                if repo_root is not None
+                else current.directory / "sources/control"
+            ),
+            recorded_mountpoint=payload["probe"]["historical_mountpoint"],
+        )
+        current_snapshot = _snapshot_payload(
+            current.directory,
+            historical_mountpoint=payload["probe"]["historical_mountpoint"],
+        )
         if current_snapshot != snapshot:
             raise ValueError("execution-v3 changed since R3 rejection capture")
         if (
@@ -691,6 +804,7 @@ __all__ = [
     "FORMAL_INPUT_SHA256",
     "FORMAL_JOB_ID",
     "FORMAL_JOB_NAME",
+    "FORMAL_PROBE_TOKEN",
     "REJECTION_SCHEMA_VERSION",
     "collect_r3_probe_rejection_evidence",
     "seal_r3_probe_rejection_evidence",

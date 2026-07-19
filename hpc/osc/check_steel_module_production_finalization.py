@@ -280,7 +280,10 @@ def fixture_successor_v4(root: Path) -> SimpleNamespace:
             "probe": {
                 "apptainer_invoked": True,
                 "geant4_invoked": False,
-                "execution_snapshot_unchanged": True,
+                "raw_file_snapshot_scope": "recursive-regular-files-only",
+                "raw_file_snapshot_unchanged": True,
+                "historical_mountpoint_present": True,
+                "execution_tree_unchanged": False,
             },
             "consumption": {
                 "events_consumed": 0,

@@ -467,7 +467,11 @@ def validate_recovery_lineage(
             or not str(rejected_scheduler.get("job_id", "")).isdigit()
             or rejected_probe.get("apptainer_invoked") is not True
             or rejected_probe.get("geant4_invoked") is not False
-            or rejected_probe.get("execution_snapshot_unchanged") is not True
+            or rejected_probe.get("raw_file_snapshot_scope")
+            != "recursive-regular-files-only"
+            or rejected_probe.get("raw_file_snapshot_unchanged") is not True
+            or rejected_probe.get("historical_mountpoint_present") is not True
+            or rejected_probe.get("execution_tree_unchanged") is not False
             or rejected_consumption
             != {"events_consumed": 0, "production_seeds_consumed": 0}
         ):
