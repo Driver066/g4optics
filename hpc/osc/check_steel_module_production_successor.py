@@ -15,19 +15,27 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
+from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
 
 import seal_steel_module_production_phase2b_incident as incident_lib
 import steel_module_production_phase2b_lib as phase2b_lib
+import steel_module_production_r3_failure_lib as failure_lib
+import steel_module_production_successor_lib as successor_lib
 from check_steel_module_production_phase2b_control import (
     FakeSlurm,
     _fixture_sources,
     _prepare,
     make_execution,
+)
+from generate_steel_module_production_successor_readiness import (
+    FORMAL_PROPOSAL_NAME,
+    validate_proposal_target,
 )
 from manage_steel_module_production_attempt import submit_intent
 from seal_steel_module_production_phase2b_incident import (
@@ -43,16 +51,31 @@ from steel_module_production_program_lib import (
     seed_set_hash,
     task_set_hash,
 )
+from steel_module_production_r3_failure_lib import (
+    EXPECTED_LOG_LINES as R3_FAILURE_LOG_LINES,
+    FORMAL_JOB_ID as R3_FAILURE_JOB_ID,
+    FORMAL_JOB_NAME as R3_FAILURE_JOB_NAME,
+    seal_r3_failure_evidence,
+)
 from steel_module_production_successor_lib import (
     FORMAL_SUCCESSOR_EXECUTION_NAME,
+    FORMAL_SUCCESSOR_EXECUTION_NAME_V2,
     RECOVERY_READINESS_LOCK_RELATIVE,
+    RECOVERY_READINESS_LOCK_RELATIVE_V2,
+    SUCCESSOR_EXECUTION_GENERATION,
+    SUCCESSOR_EXECUTION_GENERATION_V2,
     SUCCESSOR_EXECUTION_SCHEMA_VERSION,
+    SUCCESSOR_EXECUTION_SCHEMA_VERSION_V2,
     SUCCESSOR_OBJECT_KIND,
+    build_successor_recovery_readiness_candidate,
     load_execution_for_frozen_worker,
     load_successor_execution,
     materialize_successor_execution_companion,
+    materialize_successor_v3_execution_companion,
     preview_successor_execution,
+    preview_successor_v3_execution,
     successor_predecessor_retry_task_ids,
+    verify_successor_recovery_readiness,
 )
 
 
@@ -159,6 +182,112 @@ def _successor_inputs(
     }
 
 
+@contextmanager
+def _fixture_r3_failure_identity(execution: object):
+    original_id = failure_lib.FORMAL_EXECUTION_ID
+    original_hash = failure_lib.FORMAL_EXECUTION_HASH
+    failure_lib.FORMAL_EXECUTION_ID = execution.execution_id
+    failure_lib.FORMAL_EXECUTION_HASH = execution.execution_hash
+    try:
+        yield
+    finally:
+        failure_lib.FORMAL_EXECUTION_ID = original_id
+        failure_lib.FORMAL_EXECUTION_HASH = original_hash
+
+
+def _seal_failed_r3_fixture(execution: object, scratch: Path) -> Path:
+    r3 = execution.directory.parent.parent / "evidence/steel-module-production-r3"
+    raw = r3 / "raw"
+    raw.mkdir(parents=True)
+    inputs = scratch / "r3-failure-inputs"
+    inputs.mkdir()
+    held = inputs / "held.txt"
+    sacct = inputs / "sacct.psv"
+    squeue = inputs / "squeue.psv"
+    log = r3 / f"slurm-{R3_FAILURE_JOB_ID}.out"
+    command = (
+        execution.directory
+        / "sources/control/hpc/osc/"
+        "run_steel_module_production_r3_container_probe.py"
+    )
+    held.write_text(
+        " ".join(
+            (
+                f"JobId={R3_FAILURE_JOB_ID}",
+                f"JobName={R3_FAILURE_JOB_NAME}",
+                "Account=pas2524",
+                "JobState=PENDING",
+                "Reason=JobHeldUser",
+                "Requeue=0",
+                f"Command={command}",
+                f"WorkDir={execution.directory}",
+                f"StdOut={log}",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    sacct.write_text(
+        "\n".join(
+            (
+                f"{R3_FAILURE_JOB_ID}|{R3_FAILURE_JOB_NAME}|pas2524|FAILED|1:0|1",
+                f"{R3_FAILURE_JOB_ID}.batch|batch|pas2524|FAILED|1:0|1",
+                f"{R3_FAILURE_JOB_ID}.extern|extern|pas2524|COMPLETED|0:0|1",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    squeue.write_text("", encoding="utf-8")
+    log.write_text("\n".join(R3_FAILURE_LOG_LINES) + "\n", encoding="utf-8")
+    with _fixture_r3_failure_identity(execution):
+        return seal_r3_failure_evidence(
+            execution_dir=execution.directory,
+            held_scontrol_input=held,
+            sacct_input=sacct,
+            squeue_input=squeue,
+            slurm_output_input=log,
+            test_mode=True,
+        )
+
+
+def _make_v3_fixture(
+    repo_root: Path, scratch: Path
+) -> tuple[object, object, Path, dict[str, object]]:
+    predecessor_v1, incident, _ = _make_sealed_incident_fixture(repo_root, scratch)
+    v2_inputs = _successor_inputs(
+        repo_root, scratch, predecessor_v1, incident
+    )
+    work_campaigns = scratch / "work/campaigns"
+    work_campaigns.mkdir(parents=True)
+    v2_target = work_campaigns / FORMAL_SUCCESSOR_EXECUTION_NAME_V2
+    v2 = materialize_successor_execution_companion(
+        **v2_inputs, out_dir=v2_target
+    )
+    with _fixture_r3_failure_identity(v2):
+        failure = _seal_failed_r3_fixture(v2, scratch)
+    source_root = scratch / "successor-v3-source-inputs"
+    simulation = v2_inputs["fixture_sources"][0]
+    control = source_root / "control-source"
+    shutil.copytree(v2_inputs["fixture_sources"][1], control)
+    launcher = control / "hpc/osc/run_steel_module_production_r3_probe.sbatch"
+    launcher.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+    launcher.chmod(0o755)
+    (control / "successor-v3-marker.txt").write_text(
+        "updated control plane\n", encoding="utf-8"
+    )
+    inputs: dict[str, object] = {
+        "repo_root": repo_root,
+        "managed_child_dir": v2.managed_child.directory,
+        "predecessor_dir": v2.directory,
+        "failure_dir": failure,
+        "pilot_dir": Path(v2.manifest["sealed_pilot"]["directory"]),
+        "test_mode": True,
+        "fixture_sources": (simulation, control),
+    }
+    return predecessor_v1, v2, failure, inputs
+
+
 def _scheduler_sentinels(
     scratch: Path,
 ) -> tuple[Path, dict[str, Path], str]:
@@ -192,7 +321,8 @@ def _assert_successor_identity(
     incident_value: dict[str, Any],
 ) -> None:
     manifest = successor.manifest
-    assert manifest["schema_version"] == SUCCESSOR_EXECUTION_SCHEMA_VERSION
+    assert manifest["schema_version"] == SUCCESSOR_EXECUTION_SCHEMA_VERSION_V2
+    assert manifest["execution_generation"] == SUCCESSOR_EXECUTION_GENERATION_V2
     assert manifest["object_kind"] == SUCCESSOR_OBJECT_KIND
     assert manifest["test_mode"] is True
     assert manifest["accepted_statistical_evidence"] is False
@@ -202,7 +332,7 @@ def _assert_successor_identity(
         "predecessor-retry"
     )
     assert manifest["readiness_gate"]["tracked_path"] == (
-        RECOVERY_READINESS_LOCK_RELATIVE.as_posix()
+        RECOVERY_READINESS_LOCK_RELATIVE_V2.as_posix()
     )
     control_lock = manifest["artifacts"]["control_lock"]
     assert control_lock["protocol"] == phase2b_lib.CONTROL_LOCK_PROTOCOL_V2
@@ -645,6 +775,310 @@ def test_exact_task_seed_reuse_and_binding(repo_root: Path, scratch: Path) -> No
         raise AssertionError("successor accepted deleted attempt authority")
 
 
+def test_v3_failure_bound_successor(repo_root: Path, scratch: Path) -> None:
+    scratch.mkdir()
+    _, v2, failure, inputs = _make_v3_fixture(repo_root, scratch)
+    target = scratch / "successor-v3-execution"
+    v2_before = _tree_snapshot(v2.directory)
+    failure_before = _tree_snapshot(failure)
+    with _fixture_r3_failure_identity(v2):
+        preview = preview_successor_v3_execution(**inputs)
+        assert preview.predecessor.execution_id == v2.execution_id
+        assert preview.failure["execution"]["execution_id"] == v2.execution_id
+        v3 = materialize_successor_v3_execution_companion(
+            **inputs, out_dir=target
+        )
+        assert v3.manifest["schema_version"] == SUCCESSOR_EXECUTION_SCHEMA_VERSION
+        assert v3.manifest["execution_generation"] == SUCCESSOR_EXECUTION_GENERATION
+        assert v3.tasks == v2.tasks
+        assert v3.scan_args == v2.scan_args
+        assert v3.manifest["runtime"] == v2.manifest["runtime"]
+        assert v3.manifest["sources"]["simulation"] == v2.manifest["sources"]["simulation"]
+        assert v3.manifest["sources"]["control_plane"] != v2.manifest["sources"]["control_plane"]
+        authority = v3.manifest["recovery_authority"]
+        assert authority["predecessor_execution"]["execution_id"] == v2.execution_id
+        assert authority["predecessor_execution"]["execution_hash"] == v2.execution_hash
+        assert authority["predecessor_execution"]["static_checksums_sha256"] == sha256_file(
+            v2.directory / "STATIC_SHA256SUMS"
+        )
+        assert authority["failed_r3_preflight"]["failure_hash"] == preview.failure["failure_hash"]
+        assert authority["original_production_incident"] == v2.manifest["recovery_authority"]["incident"]
+        _assert_exact_task_seed_reuse(v3, v2)
+
+        # A successful v3 R3 workspace shares the evidence/raw parent with the
+        # failed v2 probe.  It must not invalidate the old failure bundle;
+        # only the old v2 job name acquiring a workspace is contradictory.
+        raw_root = failure.parent.parent / "raw"
+        v3_raw = raw_root / ("g4sm-r3-" + v3.execution_hash[:12])
+        v3_raw.mkdir()
+        assert load_successor_execution(
+            v3.directory,
+            allow_test_mode=True,
+            require_readiness=False,
+            verify_live_predecessor=True,
+        ).execution_hash == v3.execution_hash
+        failed_v2_raw = raw_root / R3_FAILURE_JOB_NAME
+        failed_v2_raw.mkdir()
+        try:
+            load_successor_execution(
+                v3.directory,
+                allow_test_mode=True,
+                require_readiness=False,
+                verify_live_predecessor=True,
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("successor-v3 accepted a raw workspace for failed v2 R3")
+        failed_v2_raw.rmdir()
+
+        # The closed v2 is admissible only as explicit lineage evidence. It can
+        # never become the active loader, readiness, worker, or submission target.
+        try:
+            load_successor_execution(
+                v2.directory,
+                allow_test_mode=True,
+                require_readiness=True,
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("closed successor-v2 accepted readiness")
+        try:
+            load_execution_for_frozen_worker(v2.directory, control_root=repo_root)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("closed successor-v2 accepted worker dispatch")
+
+        # Rehashing the local v3 manifest cannot replace the external failed-R3
+        # evidence binding.
+        tampered = scratch / "successor-v3-tampered-failure"
+        shutil.copytree(v3.directory, tampered)
+        tampered.chmod(0o755)
+        manifest_path = tampered / "managed_execution.json"
+        manifest_path.chmod(0o644)
+        (tampered / "STATIC_SHA256SUMS").chmod(0o644)
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["recovery_authority"]["failed_r3_preflight"]["failure_hash"] = "7" * 64
+        manifest["recovery_authority"]["authority_hash"] = phase2b_lib._semantic_hash(
+            manifest["recovery_authority"], "authority_hash"
+        )
+        manifest["execution_hash"] = phase2b_lib._semantic_hash(
+            manifest, "execution_hash"
+        )
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        phase2b_lib._write_static_checksums(tampered)
+        for name in (
+            "README.md", "STATIC_SHA256SUMS", "managed_execution.json",
+            "scan_args.txt", "source_archives.json", "tasks.tsv",
+        ):
+            (tampered / name).chmod(0o444)
+        tampered.chmod(0o555)
+        try:
+            load_successor_execution(
+                tampered,
+                allow_test_mode=True,
+                verify_live_predecessor=True,
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("successor-v3 accepted rehashed failed-R3 lineage")
+    assert _tree_snapshot(v2.directory) == v2_before
+    assert _tree_snapshot(failure) == failure_before
+
+
+def _git_checked(root: Path, *arguments: str) -> str:
+    result = subprocess.run(
+        ["git", *arguments],
+        cwd=root,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode:
+        raise AssertionError(
+            "readiness fixture git command failed: "
+            f"git {' '.join(arguments)}: {result.stderr.strip()}"
+        )
+    return result.stdout.strip()
+
+
+def test_v3_recovery_readiness_job_lineage(
+    repo_root: Path, scratch: Path
+) -> None:
+    """Exercise R4 list semantics behind the real one-commit Git gate.
+
+    The upstream successor/R3 checkers already prove that test evidence cannot
+    become formal evidence.  This fixture therefore uses a formal-shaped view
+    of the otherwise fully validated synthetic v3 execution and stubs only the
+    completed-R3 evidence binding.  Candidate construction, readiness hashing,
+    the lock-only Git gate, and readiness verification are the production
+    implementations.
+    """
+
+    scratch.mkdir()
+    lineage = scratch / "lineage"
+    lineage.mkdir()
+    _, v2, _, inputs = _make_v3_fixture(repo_root, lineage)
+    with _fixture_r3_failure_identity(v2):
+        v3 = materialize_successor_v3_execution_companion(
+            **inputs, out_dir=scratch / "successor-v3-execution"
+        )
+
+    git_root = scratch / "formal-shaped-control"
+    git_root.mkdir()
+    _git_checked(git_root, "init", "-q")
+    _git_checked(git_root, "config", "user.name", "Successor Fixture")
+    _git_checked(git_root, "config", "user.email", "fixture@example.invalid")
+    _git_checked(git_root, "config", "commit.gpgsign", "false")
+    (git_root / "frozen-control.txt").write_text(
+        "formal-shaped v3 control baseline\n", encoding="utf-8"
+    )
+    _git_checked(git_root, "add", "frozen-control.txt")
+    _git_checked(git_root, "commit", "-q", "-m", "freeze v3 control fixture")
+    control_commit = _git_checked(git_root, "rev-parse", "HEAD")
+    control_tree = _git_checked(git_root, "rev-parse", "HEAD^{tree}")
+
+    manifest = json.loads(json.dumps(v3.manifest))
+    manifest["test_mode"] = False
+    manifest["accepted_statistical_evidence"] = True
+    control_source = manifest["sources"]["control_plane"]
+    control_source["git_commit"] = control_commit
+    control_source["git_tree"] = control_tree
+    formal_view = phase2b_lib.ManagedExecution(
+        v3.directory,
+        v3.managed_child,
+        manifest,
+        v3.tasks,
+        v3.scan_args,
+    )
+
+    accepted_job_id = "70000991"
+    preflight_evidence = scratch / "accepted-r3-evidence"
+    preflight_evidence.mkdir()
+    preflight_binding = {
+        "directory": str(preflight_evidence.resolve()),
+        "job_id": accepted_job_id,
+    }
+    original_binding = successor_lib.successor_r3_preflight_binding
+
+    def fixture_binding(
+        execution: object,
+        evidence_dir: Path,
+        *,
+        allow_test_mode: bool = False,
+        require_current_snapshot: bool = False,
+    ) -> dict[str, str]:
+        assert execution is formal_view
+        assert evidence_dir.resolve() == preflight_evidence.resolve()
+        assert allow_test_mode is False
+        assert require_current_snapshot is True
+        return dict(preflight_binding)
+
+    successor_lib.successor_r3_preflight_binding = fixture_binding
+    try:
+        candidate = build_successor_recovery_readiness_candidate(
+            formal_view, preflight_evidence_dir=preflight_evidence
+        )
+        assert candidate["failed_compute_preflight_slurm_job_ids"] == [
+            "50544247"
+        ]
+        assert candidate["compute_preflight_slurm_job_ids"] == [
+            accepted_job_id
+        ]
+        assert candidate["all_compute_preflight_slurm_job_ids"] == [
+            "50544247",
+            accepted_job_id,
+        ]
+
+        lock = git_root / RECOVERY_READINESS_LOCK_RELATIVE
+        lock.parent.mkdir(parents=True)
+        lock.write_text(
+            json.dumps(candidate, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        lock.chmod(0o644)
+        _git_checked(
+            git_root, "add", "--", RECOVERY_READINESS_LOCK_RELATIVE.as_posix()
+        )
+        _git_checked(git_root, "commit", "-q", "-m", "add R4 readiness lock")
+        verified_path, verified = verify_successor_recovery_readiness(
+            formal_view, repo_root=git_root
+        )
+        assert verified_path == lock.resolve()
+        assert verified == candidate
+
+        # Preserve a valid semantic signature and a valid one-commit Git shape
+        # while reversing the union.  Verification must still reject the
+        # policy-level lineage order instead of trusting the re-signed payload.
+        tampered = json.loads(json.dumps(candidate))
+        tampered["all_compute_preflight_slurm_job_ids"] = [
+            accepted_job_id,
+            "50544247",
+        ]
+        tampered["readiness_hash"] = phase2b_lib._semantic_hash(
+            tampered, "readiness_hash"
+        )
+        lock.write_text(
+            json.dumps(tampered, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        lock.chmod(0o644)
+        _git_checked(
+            git_root, "add", "--", RECOVERY_READINESS_LOCK_RELATIVE.as_posix()
+        )
+        _git_checked(git_root, "commit", "-q", "--amend", "--no-edit")
+        try:
+            verify_successor_recovery_readiness(formal_view, repo_root=git_root)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(
+                "successor readiness accepted a re-signed compute-job union tamper"
+            )
+    finally:
+        successor_lib.successor_r3_preflight_binding = original_binding
+
+
+def test_recovery_readiness_proposal_target_policy(scratch: Path) -> None:
+    """Keep the inert proposal out of every immutable evidence authority."""
+
+    work_root = scratch / "g4optics-rn"
+    execution = (
+        work_root / "campaigns" / FORMAL_SUCCESSOR_EXECUTION_NAME
+    )
+    execution.mkdir(parents=True)
+    evidence = work_root / "evidence"
+    evidence.mkdir()
+    canonical = evidence / FORMAL_PROPOSAL_NAME
+    assert validate_proposal_target(
+        canonical, execution_root=execution
+    ) == canonical.resolve()
+
+    forbidden_parents = (
+        evidence / "steel-module-production-r3/evidence/accepted-r3",
+        evidence / "steel-module-production-r3/failures/failed-r3",
+        work_root / "campaigns" / FORMAL_SUCCESSOR_EXECUTION_NAME_V2,
+        scratch / "control-repository",
+        execution,
+    )
+    for parent in forbidden_parents:
+        parent.mkdir(parents=True, exist_ok=True)
+        requested = parent / FORMAL_PROPOSAL_NAME
+        try:
+            validate_proposal_target(requested, execution_root=execution)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(
+                "successor readiness proposal accepted non-canonical target: "
+                f"{requested}"
+            )
+
+
 def test_atomicity_and_concurrency(repo_root: Path, scratch: Path) -> None:
     scratch.mkdir()
     predecessor, incident, _ = _make_sealed_incident_fixture(repo_root, scratch)
@@ -713,7 +1147,10 @@ def test_atomicity_and_concurrency(repo_root: Path, scratch: Path) -> None:
 
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[2]
-    assert FORMAL_SUCCESSOR_EXECUTION_NAME != phase2b_lib.FORMAL_EXECUTION_NAME
+    assert FORMAL_SUCCESSOR_EXECUTION_NAME_V2 != phase2b_lib.FORMAL_EXECUTION_NAME
+    assert FORMAL_SUCCESSOR_EXECUTION_NAME != FORMAL_SUCCESSOR_EXECUTION_NAME_V2
+    assert SUCCESSOR_EXECUTION_SCHEMA_VERSION != SUCCESSOR_EXECUTION_SCHEMA_VERSION_V2
+    assert SUCCESSOR_EXECUTION_GENERATION != SUCCESSOR_EXECUTION_GENERATION_V2
     assert RECOVERY_READINESS_LOCK_RELATIVE != phase2b_lib.READINESS_LOCK_RELATIVE
     worker_source = (
         repo_root / "hpc/osc/run_steel_module_production_phase2b_task.py"
@@ -746,11 +1183,18 @@ def main() -> int:
             test_happy_path_and_r2_gate(repo_root, scratch / "happy")
             test_incident_authority_policy(repo_root, scratch / "authority")
             test_exact_task_seed_reuse_and_binding(repo_root, scratch / "plan")
+            test_v3_failure_bound_successor(repo_root, scratch / "v3")
+            test_v3_recovery_readiness_job_lineage(
+                repo_root, scratch / "readiness"
+            )
+            test_recovery_readiness_proposal_target_policy(
+                scratch / "proposal-target"
+            )
             test_atomicity_and_concurrency(repo_root, scratch / "atomic")
             _assert_no_scheduler_contact(markers)
         finally:
             os.environ["PATH"] = original_path
-    print("steel-module production successor R2: PASS")
+    print("steel-module production successor R2/v3: PASS")
     print("scheduler: forbidden command sentinels; real Slurm calls: 0")
     return 0
 

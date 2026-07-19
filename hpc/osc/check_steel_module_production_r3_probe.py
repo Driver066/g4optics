@@ -5,15 +5,19 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 import steel_module_production_successor_lib as successor_lib
 from check_steel_module_production_phase2b_control import FakeSlurm
 from check_steel_module_production_successor import (
+    _fixture_r3_failure_identity,
     _make_sealed_incident_fixture,
+    _make_v3_fixture,
     _successor_inputs,
 )
 from steel_module_campaign_lib import canonical_json, sha256_bytes, sha256_file
@@ -53,6 +57,7 @@ from steel_module_production_successor_lib import (
     _validate_successor_mutable_state_after_intent,
     _verify_r4_git_gate,
     materialize_successor_execution_companion,
+    materialize_successor_v3_execution_companion,
     successor_r3_preflight_binding,
 )
 from manage_steel_module_production_attempt import submit_intent
@@ -302,13 +307,13 @@ def _write_raw_workspace(workspace: Path, successor: object) -> Path:
 def _test_accounting_and_evidence(repo_root: Path, scratch: Path) -> None:
     scratch.mkdir(parents=True)
     (scratch / "lineage").mkdir()
-    predecessor, incident, _ = _make_sealed_incident_fixture(
+    _, predecessor_v2, _, inputs = _make_v3_fixture(
         repo_root, scratch / "lineage"
     )
-    inputs = _successor_inputs(repo_root, scratch / "lineage", predecessor, incident)
-    successor = materialize_successor_execution_companion(
-        **inputs, out_dir=scratch / "successor"
-    )
+    with _fixture_r3_failure_identity(predecessor_v2):
+        successor = materialize_successor_v3_execution_companion(
+            **inputs, out_dir=scratch / "successor-v3"
+        )
     raw = _write_raw_workspace(scratch / "raw", successor)
     job_id = "70000123"
     job_name = expected_r3_job_name(successor.execution_hash)
@@ -329,7 +334,7 @@ def _test_accounting_and_evidence(repo_root: Path, scratch: Path) -> None:
     formal_command = (
         formal_execution
         / "sources/control/hpc/osc/"
-        "run_steel_module_production_r3_container_probe.py"
+        "run_steel_module_production_r3_probe.sbatch"
     )
     formal_held = (
         f"JobId={job_id} JobName={job_name} Account=PAS2524 "
@@ -620,6 +625,215 @@ def _test_source_boundaries(repo_root: Path) -> None:
         text = (repo_root / "hpc/osc" / name).read_text(encoding="utf-8")
         assert "sbatch" not in text
         assert '["scontrol"' not in text and "['scontrol'" not in text
+    launcher_path = repo_root / "hpc/osc/run_steel_module_production_r3_probe.sbatch"
+    assert launcher_path.stat().st_mode & 0o111
+    launcher = launcher_path.read_text(encoding="utf-8")
+    assert "BASH_SOURCE" not in launcher
+    assert "PYTHONPATH" not in launcher
+    assert "/usr/bin/env -i" in launcher
+    assert '[[ "$#" -eq 0 ]]' in launcher
+    assert "steel-module-production-bc-s1-execution-v3" in launcher
+    assert "run_steel_module_production_r3_container_probe.py" in launcher
+
+
+def _test_spool_copy_safe_launcher(repo_root: Path, scratch: Path) -> None:
+    """Prove the Slurm-copied shell trampoline does not follow its own path."""
+
+    scratch.mkdir(parents=True)
+    scratch = scratch.resolve()
+    canonical_name = "steel-module-production-bc-s1-execution-v3"
+    work_root = scratch / "users/PAS2524/fixture/g4optics-rn"
+    execution = work_root / "campaigns" / canonical_name
+    control = execution / "sources/control/hpc/osc"
+    raw_parent = work_root / "evidence/steel-module-production-r3/raw"
+    control.mkdir(parents=True)
+    raw_parent.mkdir(parents=True)
+    execution_hash = "a1b2c3d4e5f6" + "7" * 52
+    job_name = "g4sm-r3-" + execution_hash[:12]
+    (execution / "managed_execution.json").write_text(
+        json.dumps(
+            {
+                "execution_hash": execution_hash,
+                "recovery_authority": {
+                    "predecessor_execution": {"execution_hash": "f" * 64},
+                    "failed_r3_preflight": {
+                        "execution": {"execution_hash": "e" * 64}
+                    },
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    frozen_runner = control / "run_steel_module_production_r3_container_probe.py"
+    frozen_runner.write_text(
+        "raise SystemExit('fake python must intercept')\n", encoding="utf-8"
+    )
+
+    spool = scratch / "var/spool/slurmd/job70000123"
+    spool.mkdir(parents=True)
+    launcher_source = repo_root / "hpc/osc/run_steel_module_production_r3_probe.sbatch"
+    launcher = spool / "slurm_script"
+    shutil.copyfile(launcher_source, launcher)
+    launcher.chmod(0o755)
+
+    fake_bin = scratch / "fake-bin"
+    fake_bin.mkdir()
+    capture = scratch / "python-invocation.txt"
+    fake_python = fake_bin / "python3"
+    fake_python.write_text(
+        "#!/bin/sh\n"
+        "if [ \"${1:-}\" = -I ]; then exec /usr/bin/python3 \"$@\"; fi\n"
+        "{\n"
+        "  printf 'argc=%s\\n' \"$#\"\n"
+        "  index=0\n"
+        "  for value in \"$@\"; do printf 'arg%s=%s\\n' \"$index\" \"$value\"; index=$((index + 1)); done\n"
+        "  /usr/bin/env | /usr/bin/sort\n"
+        f"}} > {shlex.quote(str(capture))}\n",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+    fake_apptainer = fake_bin / "apptainer"
+    fake_apptainer.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
+    fake_apptainer.chmod(0o755)
+
+    scheduler_environment = {
+        "PATH": f"{fake_bin}:/usr/bin:/bin",
+        "PYTHONPATH": "/forbidden/import/override",
+        "APPTAINER_BIND": "/forbidden/bind",
+        "UNRELATED_INHERITED_SECRET": "must-not-cross-exec",
+        "SLURM_JOB_ID": "70000123",
+        "SLURM_JOB_NAME": job_name,
+        "SLURMD_NODENAME": "fixture-compute-01",
+        "SLURM_SUBMIT_DIR": str(scratch / "submit-origin"),
+    }
+    result = subprocess.run(
+        [str(launcher)],
+        cwd=execution,
+        env=scheduler_environment,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    invocation = capture.read_text(encoding="utf-8")
+    expected_workspace = raw_parent / job_name
+    expected_arguments = (
+        str(frozen_runner),
+        "--execution-dir",
+        str(execution),
+        "--workspace",
+        str(expected_workspace),
+    )
+    assert "argc=5\n" in invocation
+    for index, value in enumerate(expected_arguments):
+        assert f"arg{index}={value}\n" in invocation
+    assert f"HOME={work_root.parent}\n" in invocation
+    assert f"SLURM_JOB_ID=70000123\n" in invocation
+    assert f"SLURM_JOB_NAME={job_name}\n" in invocation
+    assert "SLURM_SUBMIT_DIR=" not in invocation
+    assert "PYTHONPATH=" not in invocation
+    assert "APPTAINER_BIND=" not in invocation
+    assert "UNRELATED_INHERITED_SECRET=" not in invocation
+    assert str(spool) not in invocation
+
+    valid_manifest = (execution / "managed_execution.json").read_text(
+        encoding="utf-8"
+    )
+    capture.unlink()
+    (execution / "managed_execution.json").write_text(
+        json.dumps(
+            {"recovery_authority": {"execution_hash": execution_hash}},
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    missing_top_level = subprocess.run(
+        [str(launcher)],
+        cwd=execution,
+        env=scheduler_environment,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert missing_top_level.returncode == 2
+    assert not capture.exists()
+    (execution / "managed_execution.json").write_text(
+        valid_manifest, encoding="utf-8"
+    )
+
+    # This reproduces the original failure mode: Slurm copies a directly
+    # submitted Python script to its spool, so sibling imports and __file__-
+    # relative control-root discovery both lose the frozen source directory.
+    copied_python = spool / "direct-python-slurm-script"
+    shutil.copyfile(
+        repo_root / "hpc/osc/run_steel_module_production_r3_container_probe.py",
+        copied_python,
+    )
+    direct = subprocess.run(
+        [sys.executable, str(copied_python), "--help"],
+        cwd=execution,
+        env={"PATH": "/usr/bin:/bin"},
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert direct.returncode != 0
+    assert "ModuleNotFoundError" in direct.stderr
+    assert "steel_module_production_r3_probe_lib" in direct.stderr
+
+    wrong_workdir = execution.with_name("wrong")
+    wrong_workdir.mkdir()
+    rejected_cases = (
+        (
+            {
+                **scheduler_environment,
+                "SLURM_JOB_NAME": "g4sm-r3-000000000000",
+            },
+            execution,
+            "job-name drift",
+        ),
+        (
+            {**scheduler_environment, "SLURM_ARRAY_JOB_ID": "70000123"},
+            execution,
+            "array job",
+        ),
+        (
+            scheduler_environment,
+            wrong_workdir,
+            "workdir drift",
+        ),
+    )
+    for environment, workdir, label in rejected_cases:
+        rejected = subprocess.run(
+            [str(launcher)],
+            cwd=workdir,
+            env=environment,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        assert rejected.returncode == 2, (label, rejected.stderr)
+        assert not capture.exists(), label
+    with_argument = subprocess.run(
+        [str(launcher), str(execution)],
+        cwd=execution,
+        env=scheduler_environment,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert with_argument.returncode == 2
+    assert not capture.exists()
 
 
 def _test_r4_git_gate(scratch: Path) -> None:
@@ -692,6 +906,7 @@ def main() -> int:
         _test_accounting_and_evidence(repo_root, scratch / "evidence-case")
         _test_r4_git_gate(scratch / "r4-git")
         _test_source_boundaries(repo_root)
+        _test_spool_copy_safe_launcher(repo_root, scratch / "spool-copy")
     print(
         "steel-module production R3 container probe: PASS "
         "(exact mount contract, environment rejection, terminal accounting, "

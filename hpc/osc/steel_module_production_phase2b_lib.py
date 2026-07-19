@@ -52,6 +52,9 @@ EXECUTION_SCHEMA_VERSION_V2 = "steel-module-production-managed-execution-v2"
 EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1 = (
     "steel-module-production-managed-successor-execution-v1"
 )
+EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2 = (
+    "steel-module-production-managed-successor-execution-v2"
+)
 SUCCESSOR_OBJECT_KIND = "managed-production-recovery-successor"
 # Keep the public legacy name stable.  The canonical Phase-2B materializer
 # remains v1 unless a successor explicitly selects the portable lock protocol.
@@ -661,6 +664,7 @@ def _control_lock_record_from_manifest(
     if schema in {
         EXECUTION_SCHEMA_VERSION_V2,
         EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
     }:
         return CONTROL_LOCK_PROTOCOL_V2, record
     raise ValueError("unsupported managed-execution schema")
@@ -2132,7 +2136,10 @@ def require_production_execution_open(execution: ManagedExecution) -> None:
     manifest = getattr(execution, "manifest", {})
     if (
         manifest.get("schema_version")
-        == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1
+        in {
+            EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
+            EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
+        }
         or manifest.get("object_kind") == SUCCESSOR_OBJECT_KIND
     ):
         try:
@@ -2407,6 +2414,7 @@ __all__ = [
     "CONTROL_LOCK_PROTOCOL_V1", "CONTROL_LOCK_PROTOCOL_V2",
     "EXECUTION_SCHEMA_VERSION", "EXECUTION_SCHEMA_VERSION_V1",
     "EXECUTION_SCHEMA_VERSION_V2", "EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1",
+    "EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2",
     "SUCCESSOR_OBJECT_KIND", "FORMAL_ACCOUNT", "FORMAL_EXECUTION_NAME",
     "HISTORICAL_CLOSED_ATTEMPT_ID", "HISTORICAL_CLOSED_EXECUTION_HASH",
     "HISTORICAL_CLOSED_EXECUTION_ID", "HISTORICAL_CLOSED_INTENT_SHA256",

@@ -2,7 +2,7 @@
 """Generate the inert R4 lock candidate from a sealed formal R3 bundle.
 
 The output is not authority by itself.  It becomes usable only after human
-review and a clean Git commit whose sole delta from the frozen R2 control
+review and a clean Git commit whose sole delta from the frozen v3 control
 commit is the tracked recovery-readiness lock.
 """
 
@@ -24,6 +24,11 @@ from steel_module_production_successor_lib import (
     build_successor_recovery_readiness_candidate,
     load_successor_execution,
     validate_successor_r2_boundary,
+)
+
+
+FORMAL_PROPOSAL_NAME = (
+    "steel-module-phase2b-recovery-readiness-candidate.json"
 )
 
 
@@ -56,7 +61,7 @@ def collect(
     if readiness.exists() or readiness.is_symlink():
         raise ValueError("R4 recovery-readiness lock already exists")
     if _git(root, "status", "--porcelain", "--untracked-files=all"):
-        raise ValueError("R4 proposal requires a clean R2 checkout")
+        raise ValueError("R4 proposal requires a clean v3 implementation checkout")
     _, phase2a = load_phase2a_lock(root)
     execution_dir = (
         Path(phase2a["canonical_directory"]).parent
@@ -74,10 +79,37 @@ def collect(
         _git(root, "rev-parse", "HEAD") != control["git_commit"]
         or _git(root, "rev-parse", "HEAD^{tree}") != control["git_tree"]
     ):
-        raise ValueError("live checkout is not the successor's frozen R2 source")
+        raise ValueError("live checkout is not the successor's frozen v3 source")
     return build_successor_recovery_readiness_candidate(
         execution, preflight_evidence_dir=preflight_evidence_dir
     )
+
+
+def validate_proposal_target(requested: Path, *, execution_root: Path) -> Path:
+    """Allow the inert proposal only at the canonical WORK/evidence leaf.
+
+    The proposal is deliberately outside both Git and the execution companion,
+    but those exclusions alone are insufficient: writing it inside a sealed
+    incident, failed-preflight, or accepted-preflight tree would mutate
+    immutable authority before the R4 review.  The single canonical leaf keeps
+    proposal generation non-authoritative and non-polluting.
+    """
+
+    execution = execution_root.expanduser().resolve()
+    work_root = execution.parent.parent
+    evidence_root = work_root / "evidence"
+    if evidence_root.is_symlink() or not evidence_root.is_dir():
+        raise ValueError("canonical WORK/evidence directory is missing or unsafe")
+    target = requested.expanduser()
+    if target.is_symlink() or target.parent.is_symlink():
+        raise ValueError("R4 proposal path must not be a symlink")
+    target = target.parent.resolve() / target.name
+    expected = evidence_root.resolve() / FORMAL_PROPOSAL_NAME
+    if target != expected:
+        raise ValueError(
+            "R4 proposal must use the canonical WORK/evidence top-level path"
+        )
+    return target
 
 
 def main() -> int:
@@ -88,21 +120,12 @@ def main() -> int:
             repo_root=root,
             preflight_evidence_dir=args.preflight_evidence_dir,
         )
-        target = args.write_proposal.expanduser()
-        if target.is_symlink() or target.parent.is_symlink():
-            raise ValueError("R4 proposal path must not be a symlink")
-        target = target.parent.resolve() / target.name
-        if target == root / RECOVERY_READINESS_LOCK_RELATIVE or root in target.parents:
-            raise ValueError("R4 proposal must remain outside the repository")
         execution_root = Path(
             proposal["successor_execution"]["directory"]  # type: ignore[index]
         ).resolve()
-        if target == execution_root or execution_root in target.parents:
-            raise ValueError(
-                "R4 proposal must remain outside the managed execution companion"
-            )
-        if not target.parent.is_dir():
-            raise ValueError("R4 proposal parent directory is missing")
+        target = validate_proposal_target(
+            args.write_proposal, execution_root=execution_root
+        )
         write_exclusive_json(target, proposal)
         print(f"Phase-2B recovery readiness candidate: {target}")
         print(f"readiness_hash: {proposal['readiness_hash']}")

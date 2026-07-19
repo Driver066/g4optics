@@ -946,6 +946,10 @@ def main() -> int:
         cwd=repo_root,
     )
     run(
+        [sys.executable, "hpc/osc/check_steel_module_production_r3_failure.py"],
+        cwd=repo_root,
+    )
+    run(
         [sys.executable, "hpc/osc/check_steel_module_production_r3_probe.py"],
         cwd=repo_root,
     )
@@ -962,9 +966,9 @@ def main() -> int:
         "steel-module campaign infrastructure: PASS "
         "(18-task smoke, 120-task frozen pilot, 914-task production program, "
         "managed BC-S1 Phase-2A/2B, OSC-shaped incident fixture, "
-        "incident-bound R2 successor, portable-lock local gate, "
-        "R3 no-Geant4 container-isolation evidence, "
-        "whole-child finalizer, checkpoint, "
+        "closed R2 plus failed-R3 evidence, incident-bound v3 successor, "
+        "portable-lock local gate, copy-safe R3 no-Geant4 evidence, "
+        "dual-lineage whole-child finalizer and checkpoint, "
         "v1/v2/production analyzers, offline review and progression recorder)"
     )
     return 0

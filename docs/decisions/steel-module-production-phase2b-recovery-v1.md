@@ -283,10 +283,14 @@ lock.  A syntactically valid evidence hash alone cannot authorize submission.
 
 ## Current stopping point
 
-The predecessor incident is now sealed as accepted evidence with 32 terminal
+The predecessor incident is sealed as accepted evidence with 32 terminal
 `FAILED / 1:0` tasks, zero committed events, and zero consumed production
-seeds.  The current local implementation contains the R2 successor, the R3
-no-Geant4 container probe and evidence sealer, strict R4 candidate/verifier,
-and the R4-gated `predecessor-retry` manager path.  No formal successor, R3
-job, R4 lock, production intent, or retry exists on OSC yet; none is authorized
-merely by this implementation checkpoint.
+seeds. Execution-v2 was then materialized, but formal R3 job `50544247` failed
+in Slurm's copied Python wrapper before Apptainer or Geant4. Its read-only
+evidence is fixed by the additive
+`steel-module-production-r3-bootstrap-recovery-v1.md` amendment.
+
+Execution-v2 is therefore permanently closed. The current recovery target is
+execution-v3, which must bind both failed histories and use the copy-safe shell
+R3 launcher. No replacement R3 job, v3 R4 lock, production intent, or physics
+retry is authorized merely by the implementation or evidence-sealing steps.

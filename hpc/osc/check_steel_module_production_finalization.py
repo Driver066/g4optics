@@ -27,6 +27,7 @@ from steel_module_campaign_lib import (
 )
 from steel_module_production_checkpoint_lib import (
     MANAGED_FINALIZATION_SCHEMA_VERSION,
+    RECOVERY_LINEAGE_SCHEMA_VERSION_V2,
     SUCCESSOR_FINALIZATION_BUNDLE_NAME,
     load_managed_finalization,
     load_execution_for_downstream,
@@ -40,6 +41,7 @@ from steel_module_production_checkpoint_lib import (
 )
 from steel_module_production_phase2b_lib import (
     EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
+    EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
     EXECUTION_SCHEMA_VERSION_V2,
     SUCCESSOR_OBJECT_KIND,
 )
@@ -158,6 +160,66 @@ def fixture_successor(root: Path) -> SimpleNamespace:
         directory=execution_dir,
         execution_id="fixture-successor",
         execution_hash="6" * 64,
+        manifest=manifest,
+    )
+
+
+def fixture_successor_v3(root: Path) -> SimpleNamespace:
+    """A compact but semantically complete downstream v3 authority."""
+
+    execution_dir = (root / "successor-v3-execution").resolve()
+    predecessor_authority = fixture_recovery_authority(root)
+    identity = fixture_task_identity(root)
+    authority: dict[str, Any] = {
+        "schema_version": "steel-module-production-successor-authority-v2",
+        "predecessor_execution": {
+            "directory": str(root / "successor-v2-execution"),
+            "schema_version": EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
+            "execution_generation": "predecessor-retry-successor-v2",
+            "execution_id": "fixture-successor-v2",
+            "execution_hash": "7" * 64,
+            "managed_execution_sha256": "8" * 64,
+            "static_checksums_sha256": "9" * 64,
+            "recovery_authority_hash": predecessor_authority["authority_hash"],
+        },
+        "predecessor_recovery_authority": predecessor_authority,
+        "original_production_incident": predecessor_authority["incident"],
+        "failed_r3_preflight": {
+            "directory": str(root / "failed-r3"),
+            "schema_version": "steel-module-production-r3-preflight-failure-evidence-v1",
+            "failure_id": "fixture-r3-failure",
+            "failure_hash": "b" * 64,
+            "failure_json_sha256": "c" * 64,
+            "checksum_manifest_sha256": "d" * 64,
+            "recursive_record_count": 6,
+            "execution": {
+                "execution_id": "fixture-successor-v2",
+                "execution_hash": "7" * 64,
+            },
+            "scheduler": {"job_id": "50544247"},
+            "runtime_boundary": {
+                "apptainer_invoked": False,
+                "geant4_invoked": False,
+            },
+            "consumption": {
+                "events_consumed": 0,
+                "production_seeds_consumed": 0,
+            },
+        },
+        "zero_consumption": predecessor_authority["zero_consumption"],
+        "retry_equivalence": {**identity, "all_equal": True},
+    }
+    authority["authority_hash"] = sha256_bytes(canonical_json(authority))
+    manifest = {
+        "schema_version": EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
+        "object_kind": SUCCESSOR_OBJECT_KIND,
+        "execution_generation": "predecessor-retry-successor-v3",
+        "recovery_authority": authority,
+    }
+    return SimpleNamespace(
+        directory=execution_dir,
+        execution_id="fixture-successor-v3",
+        execution_hash="e" * 64,
         manifest=manifest,
     )
 
@@ -376,22 +438,12 @@ def write_finalization(root: Path) -> Path:
 
 def check_execution_dispatch(root: Path) -> None:
     old_dir = root / "dispatch-old"
-    successor_dir = root / "dispatch-successor"
     old_dir.mkdir()
-    successor_dir.mkdir()
     json_write(
         old_dir / "managed_execution.json",
         {"schema_version": EXECUTION_SCHEMA_VERSION_V2},
     )
-    json_write(
-        successor_dir / "managed_execution.json",
-        {
-            "schema_version": EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
-            "object_kind": SUCCESSOR_OBJECT_KIND,
-        },
-    )
     old_sentinel = object()
-    successor_sentinel = object()
     with patch.object(
         checkpoint_lib, "load_execution_companion", return_value=old_sentinel
     ) as old_loader:
@@ -405,25 +457,44 @@ def check_execution_dispatch(root: Path) -> None:
             is old_sentinel
         )
         assert old_loader.call_args.kwargs["require_readiness"] is True
-    with patch(
-        "steel_module_production_successor_lib.load_successor_execution",
-        return_value=successor_sentinel,
-    ) as successor_loader:
-        assert (
-            load_execution_for_downstream(
-                successor_dir,
-                repo_root=root,
-                require_readiness=True,
-                verify_live_predecessor=True,
-            )
-            is successor_sentinel
+    for label, schema in (
+        ("v2-history", EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1),
+        ("v3-active", EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2),
+    ):
+        successor_dir = root / f"dispatch-successor-{label}"
+        successor_dir.mkdir()
+        json_write(
+            successor_dir / "managed_execution.json",
+            {
+                "schema_version": schema,
+                "object_kind": SUCCESSOR_OBJECT_KIND,
+            },
         )
-        kwargs = successor_loader.call_args.kwargs
-        assert kwargs["require_readiness"] is True
-        assert kwargs["verify_live_predecessor"] is True
+        successor_sentinel = object()
+        with patch(
+            "steel_module_production_successor_lib.load_successor_execution",
+            return_value=successor_sentinel,
+        ) as successor_loader:
+            assert (
+                load_execution_for_downstream(
+                    successor_dir,
+                    repo_root=root,
+                    require_readiness=True,
+                    verify_live_predecessor=True,
+                )
+                is successor_sentinel
+            )
+            kwargs = successor_loader.call_args.kwargs
+            assert kwargs["require_readiness"] is True
+            assert kwargs["verify_live_predecessor"] is True
 
 
-def write_successor_finalization(source: Path, root: Path) -> tuple[Path, dict[str, Any]]:
+def write_successor_finalization(
+    source: Path,
+    root: Path,
+    *,
+    successor: SimpleNamespace | None = None,
+) -> tuple[Path, dict[str, Any]]:
     target = (
         root
         / "successor-finalization"
@@ -432,7 +503,7 @@ def write_successor_finalization(source: Path, root: Path) -> tuple[Path, dict[s
     )
     target.parent.mkdir(parents=True)
     shutil.copytree(source, target)
-    successor = fixture_successor(root)
+    successor = successor or fixture_successor(root)
     lineage = recovery_lineage_from_execution(successor)
     assert lineage is not None
     identity = fixture_task_identity(root)
@@ -921,6 +992,96 @@ def check_successor_provenance(finalization: Path, root: Path) -> None:
     )
 
 
+def check_successor_v3_provenance(finalization: Path, root: Path) -> None:
+    """Exercise the dual-failure v3 lineage through checkpoint publication."""
+
+    successor = fixture_successor_v3(root)
+    successor_finalization, lineage = write_successor_finalization(
+        finalization,
+        root,
+        successor=successor,
+    )
+    assert lineage["schema_version"] == RECOVERY_LINEAGE_SCHEMA_VERSION_V2
+    assert lineage["predecessor_incident"]["incident_id"] == (
+        "fixture-zero-consumption-incident"
+    )
+    assert lineage["failed_r3_preflight"]["scheduler"]["job_id"] == "50544247"
+    validation, rows = load_managed_finalization(
+        successor_finalization,
+        allow_test_mode=True,
+        verify_root_files=False,
+    )
+    assert validation["recovery_lineage"] == lineage and len(rows) == 32
+    checkpoint = build_checkpoint(
+        successor_finalization,
+        root / "successor-v3-checkpoints",
+        allow_test_mode=True,
+        verify_root_files=False,
+    )
+    loaded = load_production_checkpoint(
+        checkpoint,
+        allow_test_mode=True,
+        verify_root_files=False,
+    )
+    assert loaded.manifest["recovery_lineage"] == lineage
+
+    # Re-signing every containing JSON cannot detach the failed-R3 record from
+    # the v3 recovery authority.
+    tampered = root / "successor-v3-failed-r3-tamper"
+    shutil.copytree(successor_finalization, tampered)
+    for name in (
+        "validation_report.json",
+        "event_audit.json",
+        "seed_audit.json",
+        "selection_record.json",
+    ):
+        path = tampered / name
+        value = json.loads(path.read_text(encoding="utf-8"))
+        changed = value["recovery_lineage"]
+        changed["failed_r3_preflight"]["scheduler"]["job_id"] = "59999999"
+        unhashed = dict(changed)
+        unhashed.pop("lineage_hash")
+        changed["lineage_hash"] = sha256_bytes(canonical_json(unhashed))
+        json_write(path, value)
+    rewrite_recursive_checksums(tampered)
+    expect_failure(
+        load_managed_finalization,
+        tampered,
+        allow_test_mode=True,
+        verify_root_files=False,
+        contains="failed-R3 binding changed",
+    )
+
+    valid = SimpleNamespace(
+        attempt={"attempt_id": "20260720T120000Z-predecessor-retry"},
+        job_id="60000000",
+        marker_path=successor.directory / "attempts/new/task_result.json",
+        paths={"root": successor.directory / "attempts/new/output.root"},
+    )
+    with patch.object(
+        finalizer,
+        "load_frozen_accounting",
+        return_value={"job_id": "60000000"},
+    ):
+        assert finalizer.validate_selected_result_lineage(
+            successor, [valid], ["20260720T120000Z-predecessor-retry"]
+        ) == lineage
+    for forbidden_job in ("50532143", "50544247"):
+        forbidden = SimpleNamespace(
+            attempt={"attempt_id": "20260720T120000Z-predecessor-retry"},
+            job_id=forbidden_job,
+            marker_path=successor.directory / "attempts/new/task_result.json",
+            paths={"root": successor.directory / "attempts/new/output.root"},
+        )
+        expect_failure(
+            finalizer.validate_selected_result_lineage,
+            successor,
+            [forbidden],
+            [],
+            contains="selected predecessor scheduler job",
+        )
+
+
 def check_candidate_selection(root: Path) -> None:
     tasks = tuple(
         CampaignTask(
@@ -1236,6 +1397,9 @@ def main() -> int:
         check_candidate_selection(scratch)
         check_execution_dispatch(scratch)
         check_successor_provenance(finalization, scratch)
+        check_successor_v3_provenance(
+            finalization, scratch / "successor-v3-provenance"
+        )
 
         validation, rows = load_managed_finalization(
             finalization, allow_test_mode=True, verify_root_files=False

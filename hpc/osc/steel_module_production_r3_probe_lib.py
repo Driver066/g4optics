@@ -800,7 +800,7 @@ def _held_scheduler_identity(
             "Command": str(
                 execution
                 / "sources/control/hpc/osc/"
-                "run_steel_module_production_r3_container_probe.py"
+                "run_steel_module_production_r3_probe.sbatch"
             ),
             "WorkDir": str(execution),
             "StdOut": str(

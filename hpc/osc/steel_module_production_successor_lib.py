@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Incident-bound Phase-2B recovery successor primitives.
+"""Incident-bound Phase-2B recovery-successor primitives.
 
-R2 is deliberately a materialization-only stage.  This module can freeze and
-validate the exact BC-S1 successor, but it cannot create an intent, contact a
-scheduler, or treat the historical Phase-2B readiness lock as successor
-authority.
+The closed v2 generation remains immutable history. The active v3 generation
+binds that history and its failed R3 preflight, but materialization itself
+cannot create an intent, contact a scheduler, or treat either historical
+readiness lock as current authority.
 """
 
 from __future__ import annotations
 
 import json
+import fcntl
 import subprocess
 import tempfile
 from dataclasses import asdict, dataclass
@@ -46,6 +47,7 @@ from steel_module_production_checkpoint_lib import (
 from steel_module_production_phase2b_lib import (
     CONTROL_LOCK_PROTOCOL_V2,
     EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
+    EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
     FORMAL_EXECUTION_NAME,
     FORMAL_PILOT_NAME,
     HISTORICAL_CLOSED_ATTEMPT_ID,
@@ -61,6 +63,7 @@ from steel_module_production_phase2b_lib import (
     SUCCESSOR_OBJECT_KIND,
     ManagedExecution,
     _read_scan_args,
+    _opened_portable_control_lock,
     _remove_tree,
     _sealed_pilot_identity,
     _semantic_hash,
@@ -85,17 +88,38 @@ from steel_module_production_program_lib import (
 )
 
 
-SUCCESSOR_EXECUTION_SCHEMA_VERSION = EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1
-SUCCESSOR_EXECUTION_GENERATION = "predecessor-retry-successor-v2"
+SUCCESSOR_EXECUTION_SCHEMA_VERSION_V2 = EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1
+SUCCESSOR_EXECUTION_GENERATION_V2 = "predecessor-retry-successor-v2"
+SUCCESSOR_EXECUTION_SCHEMA_VERSION = EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2
+SUCCESSOR_EXECUTION_GENERATION = "predecessor-retry-successor-v3"
 SUCCESSOR_AUTHORITY_SCHEMA_VERSION = (
     "steel-module-production-successor-authority-v1"
 )
-SUCCESSOR_RECOVERY_READINESS_SCHEMA_VERSION = (
+SUCCESSOR_RECOVERY_READINESS_SCHEMA_VERSION_V2 = (
     "steel-module-production-phase2b-recovery-readiness-lock-v1"
 )
-FORMAL_SUCCESSOR_EXECUTION_NAME = "steel-module-production-bc-s1-execution-v2"
-RECOVERY_READINESS_LOCK_RELATIVE = Path(
+SUCCESSOR_RECOVERY_READINESS_SCHEMA_VERSION = (
+    "steel-module-production-phase2b-recovery-readiness-lock-v2"
+)
+SUCCESSOR_V3_AUTHORITY_SCHEMA_VERSION = (
+    "steel-module-production-successor-authority-v2"
+)
+FORMAL_SUCCESSOR_EXECUTION_NAME_V2 = (
+    "steel-module-production-bc-s1-execution-v2"
+)
+FORMAL_SUCCESSOR_EXECUTION_NAME = "steel-module-production-bc-s1-execution-v3"
+FORMAL_SUCCESSOR_V2_EXECUTION_ID = (
+    "sm-v1-production-bc-s1-execution-v2-50aefd35ac58"
+)
+FORMAL_SUCCESSOR_V2_EXECUTION_HASH = (
+    "8352b7949657fb3161ec2e31ddf384997634ae6092f1f3e884ef95f7f22427de"
+)
+FORMAL_FAILED_R3_JOB_ID = "50544247"
+RECOVERY_READINESS_LOCK_RELATIVE_V2 = Path(
     "hpc/osc/configurations/steel-module-production-phase2b-recovery-v1.lock.json"
+)
+RECOVERY_READINESS_LOCK_RELATIVE = Path(
+    "hpc/osc/configurations/steel-module-production-phase2b-recovery-v2.lock.json"
 )
 FORMAL_INCIDENT_ID = "sm-v1-bc-s1-pre-simulation-incident-0d8898f4e1ce"
 FORMAL_INCIDENT_HASH = (
@@ -124,6 +148,9 @@ SUCCESSOR_STATIC_FILES = {
     "source_archives.json",
     "tasks.tsv",
 }
+R3_COPY_SAFE_LAUNCHER_RELATIVE = Path(
+    "sources/control/hpc/osc/run_steel_module_production_r3_probe.sbatch"
+)
 
 
 def _require_exact_keys(
@@ -135,6 +162,20 @@ def _require_exact_keys(
             f"unexpected={sorted(set(value) - expected)}, "
             f"missing={sorted(expected - set(value))}"
         )
+
+
+def _r3_launcher_identity(directory: Path) -> dict[str, Any]:
+    path = directory / R3_COPY_SAFE_LAUNCHER_RELATIVE
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("successor-v3 copy-safe R3 launcher is missing or unsafe")
+    mode = path.stat().st_mode & 0o777
+    if mode != 0o555:
+        raise ValueError("successor-v3 copy-safe R3 launcher mode is not frozen")
+    return {
+        "path": R3_COPY_SAFE_LAUNCHER_RELATIVE.as_posix(),
+        "sha256": sha256_file(path),
+        "mode": mode,
+    }
 
 
 @dataclass(frozen=True)
@@ -151,8 +192,26 @@ class SuccessorPreview:
     test_mode: bool
 
 
+@dataclass(frozen=True)
+class SuccessorV3Preview:
+    repo_root: Path
+    managed_child: Any
+    phase2a_path: Path
+    phase2a_lock: dict[str, Any]
+    predecessor: ManagedExecution
+    failure_path: Path
+    failure: dict[str, Any]
+    recovery_authority: dict[str, Any]
+    pilot_dir: Path
+    test_mode: bool
+
+
 def canonical_successor_directory(managed_child: Any) -> Path:
     return managed_child.directory.parent / FORMAL_SUCCESSOR_EXECUTION_NAME
+
+
+def canonical_v2_successor_directory(managed_child: Any) -> Path:
+    return managed_child.directory.parent / FORMAL_SUCCESSOR_EXECUTION_NAME_V2
 
 
 def canonical_incident_directory(managed_child: Any) -> Path:
@@ -515,7 +574,7 @@ def preview_successor_execution(
     )
 
 
-def _successor_execution_id(
+def _v2_successor_execution_id(
     binding_hash: str,
     control_commit: str,
     incident_hash: str,
@@ -557,14 +616,14 @@ def _transform_successor_manifest(
         raise ValueError("successor task/scan bytes differ from predecessor")
     payload.update(
         {
-            "schema_version": SUCCESSOR_EXECUTION_SCHEMA_VERSION,
+            "schema_version": SUCCESSOR_EXECUTION_SCHEMA_VERSION_V2,
             "object_kind": SUCCESSOR_OBJECT_KIND,
-            "execution_generation": SUCCESSOR_EXECUTION_GENERATION,
+            "execution_generation": SUCCESSOR_EXECUTION_GENERATION_V2,
             "phase": "Phase-2B-R2",
             "recovery_authority": preview.recovery_authority,
             "readiness_gate": {
-                "tracked_path": RECOVERY_READINESS_LOCK_RELATIVE.as_posix(),
-                "schema_version": SUCCESSOR_RECOVERY_READINESS_SCHEMA_VERSION,
+                "tracked_path": RECOVERY_READINESS_LOCK_RELATIVE_V2.as_posix(),
+                "schema_version": SUCCESSOR_RECOVERY_READINESS_SCHEMA_VERSION_V2,
                 "required_for_scheduler_contact": True,
                 "compute_node_container_preflight_required": True,
                 "automatic_submission": False,
@@ -585,7 +644,7 @@ def _transform_successor_manifest(
         }
     )
     control_commit = require_string(require_dict(sources, "control_plane"), "git_commit")
-    payload["execution_id"] = _successor_execution_id(
+    payload["execution_id"] = _v2_successor_execution_id(
         require_string(require_dict(payload, "managed_child"), "binding_hash"),
         control_commit,
         require_sha256(preview.incident, "incident_hash"),
@@ -633,6 +692,346 @@ def _validate_successor_tree_modes(directory: Path) -> None:
         raise ValueError("successor portable control lock is not host-read-only")
 
 
+def canonical_r3_failure_parent(managed_child: Any) -> Path:
+    return (
+        managed_child.directory.parent.parent
+        / "evidence/steel-module-production-r3/failures"
+    )
+
+
+def _resolve_r3_failure_path(
+    managed_child: Any, requested: Path | None, *, test_mode: bool
+) -> Path:
+    if requested is not None:
+        if requested.is_symlink() or requested.parent.is_symlink():
+            raise ValueError("R3 failure bundle must not be a symlink")
+        resolved = requested.expanduser().resolve()
+        if not test_mode and resolved.parent != canonical_r3_failure_parent(managed_child):
+            raise ValueError("formal R3 failure bundle parent is fixed")
+        return resolved
+    if test_mode:
+        raise ValueError("test successor-v3 requires an explicit R3 failure bundle")
+    parent = canonical_r3_failure_parent(managed_child)
+    if parent.is_symlink() or not parent.is_dir():
+        raise ValueError("formal R3 failure bundle parent is missing or unsafe")
+    candidates = tuple(
+        path
+        for path in sorted(parent.glob(f"r3-preflight-{FORMAL_FAILED_R3_JOB_ID}-*"))
+        if path.exists() or path.is_symlink()
+    )
+    if len(candidates) != 1:
+        raise ValueError(
+            "formal failed-R3 bundle set is not unique and exact: "
+            f"{[path.name for path in candidates]}"
+        )
+    if candidates[0].is_symlink() or not candidates[0].is_dir():
+        raise ValueError("formal failed-R3 bundle is unsafe")
+    return candidates[0].resolve()
+
+
+def _validated_r3_failure(
+    path: Path,
+    *,
+    predecessor: ManagedExecution,
+    test_mode: bool,
+    require_current_execution: bool,
+) -> dict[str, Any]:
+    import steel_module_production_r3_failure_lib as failure_lib
+
+    def validate() -> dict[str, Any]:
+        return failure_lib.validate_r3_failure_bundle(
+            path,
+            execution_dir=predecessor.directory,
+            require_current_execution=require_current_execution,
+            allow_test_mode=test_mode,
+        )
+
+    if not test_mode:
+        return validate()
+    # Synthetic predecessors intentionally have content-addressed fixture
+    # identities.  Scope the formal constants to that exact fixture while the
+    # bundle is validated; production evidence never enters this branch.
+    original_id = failure_lib.FORMAL_EXECUTION_ID
+    original_hash = failure_lib.FORMAL_EXECUTION_HASH
+    failure_lib.FORMAL_EXECUTION_ID = predecessor.execution_id
+    failure_lib.FORMAL_EXECUTION_HASH = predecessor.execution_hash
+    try:
+        return validate()
+    finally:
+        failure_lib.FORMAL_EXECUTION_ID = original_id
+        failure_lib.FORMAL_EXECUTION_HASH = original_hash
+
+
+def _failure_binding(path: Path, failure: dict[str, Any]) -> dict[str, Any]:
+    records = verify_recursive_checksums(path)
+    execution = require_dict(failure, "execution")
+    scheduler = require_dict(failure, "scheduler")
+    boundary = require_dict(failure, "runtime_boundary")
+    consumption = require_dict(failure, "consumption")
+    return {
+        "directory": str(path),
+        "schema_version": require_string(failure, "schema_version"),
+        "failure_id": require_string(failure, "failure_id"),
+        "failure_hash": require_sha256(failure, "failure_hash"),
+        "failure_json_sha256": sha256_file(path / "failure.json"),
+        "checksum_manifest_sha256": sha256_file(path / "SHA256SUMS"),
+        "recursive_record_count": len(records),
+        "execution": execution,
+        "scheduler": scheduler,
+        "runtime_boundary": boundary,
+        "consumption": consumption,
+    }
+
+
+def _build_v3_recovery_authority(
+    *, predecessor: ManagedExecution, failure_path: Path, failure: dict[str, Any]
+) -> dict[str, Any]:
+    predecessor_authority = require_dict(
+        predecessor.manifest, "recovery_authority"
+    )
+    original_incident = require_dict(predecessor_authority, "incident")
+    retry = _task_identity(predecessor.tasks)
+    value: dict[str, Any] = {
+        "schema_version": SUCCESSOR_V3_AUTHORITY_SCHEMA_VERSION,
+        "predecessor_execution": {
+            "directory": str(predecessor.directory),
+            "schema_version": predecessor.manifest.get("schema_version"),
+            "execution_generation": predecessor.manifest.get(
+                "execution_generation"
+            ),
+            "execution_id": predecessor.execution_id,
+            "execution_hash": predecessor.execution_hash,
+            "managed_execution_sha256": sha256_file(
+                predecessor.directory / "managed_execution.json"
+            ),
+            "static_checksums_sha256": sha256_file(
+                predecessor.directory / ROOT_STATIC_MANIFEST
+            ),
+            "recovery_authority_hash": predecessor_authority.get(
+                "authority_hash"
+            ),
+        },
+        # Preserve the complete already-validated v2 recovery authority so
+        # downstream whole-child evidence can exclude the original failed
+        # production attempt without consulting mutable external state.
+        "predecessor_recovery_authority": json.loads(
+            json.dumps(predecessor_authority)
+        ),
+        "original_production_incident": original_incident,
+        "failed_r3_preflight": _failure_binding(failure_path, failure),
+        "zero_consumption": require_dict(
+            predecessor_authority, "zero_consumption"
+        ),
+        "retry_equivalence": {
+            **retry,
+            "tasks_tsv_sha256": sha256_file(predecessor.directory / "tasks.tsv"),
+            "scan_args_sha256": sha256_file(
+                predecessor.directory / "scan_args.txt"
+            ),
+            "phase2a_tasks_sha256": sha256_file(
+                predecessor.managed_child.directory / "tasks.tsv"
+            ),
+            "phase2a_scan_args_sha256": sha256_file(
+                predecessor.managed_child.directory / "scan_args.txt"
+            ),
+            "simulation_source": require_dict(
+                predecessor.manifest, "sources"
+            )["simulation"],
+            "runtime": predecessor.manifest["runtime"],
+            "all_equal": True,
+        },
+        "authority_hash": None,
+    }
+    value["authority_hash"] = _semantic_hash(value, "authority_hash")
+    return value
+
+
+def preview_successor_v3_execution(
+    *,
+    repo_root: Path,
+    managed_child_dir: Path | None = None,
+    predecessor_dir: Path | None = None,
+    failure_dir: Path | None = None,
+    pilot_dir: Path | None = None,
+    test_mode: bool = False,
+    fixture_sources: tuple[Path, Path] | None = None,
+) -> SuccessorV3Preview:
+    del fixture_sources
+    root = repo_root.expanduser().resolve()
+    phase2a_path, phase2a = load_phase2a_lock(root)
+    formal_child = Path(require_string(phase2a, "canonical_directory"))
+    requested_child = managed_child_dir or formal_child
+    if requested_child.is_symlink() or requested_child.parent.is_symlink():
+        raise ValueError("managed child must not be a symlink")
+    child_path = requested_child.expanduser().resolve()
+    if not test_mode and child_path != formal_child:
+        raise ValueError("formal successor-v3 managed-child path is fixed")
+    expected_predecessor = child_path.parent / FORMAL_SUCCESSOR_EXECUTION_NAME_V2
+    requested_predecessor = predecessor_dir or expected_predecessor
+    if requested_predecessor.is_symlink() or requested_predecessor.parent.is_symlink():
+        raise ValueError("successor-v2 predecessor must not be a symlink")
+    predecessor_path = requested_predecessor.expanduser().resolve()
+    if not test_mode and predecessor_path != expected_predecessor:
+        raise ValueError("formal successor-v2 predecessor path is fixed")
+    predecessor = _load_v2_successor_execution(
+        predecessor_path,
+        repo_root=root if not test_mode else None,
+        allow_test_mode=test_mode,
+        require_readiness=False,
+        verify_runtime=not test_mode,
+        verify_live_predecessor=not test_mode,
+    )
+    if predecessor.managed_child.directory != child_path:
+        raise ValueError("successor-v2 is not bound to the requested child")
+    if not test_mode:
+        if (
+            predecessor.execution_id != FORMAL_SUCCESSOR_V2_EXECUTION_ID
+            or predecessor.execution_hash != FORMAL_SUCCESSOR_V2_EXECUTION_HASH
+        ):
+            raise ValueError("formal successor-v2 immutable identity mismatch")
+        _validate_phase2a_binding(
+            predecessor.managed_child, phase2a_path, phase2a
+        )
+    for name in ("intents", "attempts", "finalized"):
+        path = predecessor.directory / name
+        if path.is_symlink() or not path.is_dir() or any(path.iterdir()):
+            raise ValueError(f"closed successor-v2 contains mutable {name} state")
+    failure_path = _resolve_r3_failure_path(
+        predecessor.managed_child, failure_dir, test_mode=test_mode
+    )
+    failure = _validated_r3_failure(
+        failure_path,
+        predecessor=predecessor,
+        test_mode=test_mode,
+        require_current_execution=True,
+    )
+    pilot = (
+        pilot_dir
+        or Path(
+            require_string(
+                require_dict(predecessor.manifest, "sealed_pilot"), "directory"
+            )
+        )
+    ).expanduser().resolve()
+    if not test_mode and pilot != child_path.parent / FORMAL_PILOT_NAME:
+        raise ValueError("formal successor-v3 sealed-pilot path is fixed")
+    authority = _build_v3_recovery_authority(
+        predecessor=predecessor,
+        failure_path=failure_path,
+        failure=failure,
+    )
+    return SuccessorV3Preview(
+        root,
+        predecessor.managed_child,
+        phase2a_path,
+        phase2a,
+        predecessor,
+        failure_path,
+        failure,
+        authority,
+        pilot,
+        test_mode,
+    )
+
+
+def _v3_successor_execution_id(
+    binding_hash: str,
+    control_commit: str,
+    original_incident_hash: str,
+    predecessor_execution_hash: str,
+    failure_hash: str,
+) -> str:
+    suffix = sha256_bytes(
+        canonical_json(
+            {
+                "binding_hash": binding_hash,
+                "control_commit": control_commit,
+                "original_incident_hash": original_incident_hash,
+                "predecessor_execution_hash": predecessor_execution_hash,
+                "failed_r3_hash": failure_hash,
+            }
+        )
+    )[:12]
+    return f"sm-v1-production-bc-s1-execution-v3-{suffix}"
+
+
+def _transform_v3_manifest(
+    directory: Path, preview: SuccessorV3Preview
+) -> None:
+    lock_path = directory / ".control.lock"
+    lock_path.chmod(0o400)
+    manifest_path = directory / "managed_execution.json"
+    payload = load_json(manifest_path)
+    require_dict(require_dict(payload, "artifacts"), "control_lock")["mode"] = 0o400
+    sources = require_dict(payload, "sources")
+    predecessor_sources = require_dict(preview.predecessor.manifest, "sources")
+    if (
+        require_dict(sources, "simulation")
+        != require_dict(predecessor_sources, "simulation")
+        or payload.get("runtime") != preview.predecessor.manifest.get("runtime")
+    ):
+        raise ValueError("successor-v3 changed frozen simulation/runtime identity")
+    retry = require_dict(preview.recovery_authority, "retry_equivalence")
+    if (
+        retry.get("tasks_tsv_sha256") != sha256_file(directory / "tasks.tsv")
+        or retry.get("scan_args_sha256")
+        != sha256_file(directory / "scan_args.txt")
+    ):
+        raise ValueError("successor-v3 task/scan bytes differ from successor-v2")
+    payload.update(
+        {
+            "schema_version": SUCCESSOR_EXECUTION_SCHEMA_VERSION,
+            "object_kind": SUCCESSOR_OBJECT_KIND,
+            "execution_generation": SUCCESSOR_EXECUTION_GENERATION,
+            "phase": "Phase-2B-R2-v3",
+            "recovery_authority": preview.recovery_authority,
+            "readiness_gate": {
+                "tracked_path": RECOVERY_READINESS_LOCK_RELATIVE.as_posix(),
+                "schema_version": SUCCESSOR_RECOVERY_READINESS_SCHEMA_VERSION,
+                "required_for_scheduler_contact": True,
+                "compute_node_container_preflight_required": True,
+                "automatic_submission": False,
+                "r2_submission_ready": False,
+            },
+            "submission_policy": {
+                "account": "PAS2524",
+                "two_step_required": True,
+                "initially_held": True,
+                "no_requeue": True,
+                "export_mode": "NONE",
+                "formal_child": INITIAL_CHILD_ID,
+                "formal_initial_mode": "predecessor-retry",
+                "predecessor_retry_task_count": 32,
+                "predecessor_retry_event_count": 8000,
+                "r2_submittable": False,
+            },
+        }
+    )
+    control_commit = require_string(require_dict(sources, "control_plane"), "git_commit")
+    incident = require_dict(
+        preview.recovery_authority, "original_production_incident"
+    )
+    failed = require_dict(preview.recovery_authority, "failed_r3_preflight")
+    payload["execution_id"] = _v3_successor_execution_id(
+        require_string(require_dict(payload, "managed_child"), "binding_hash"),
+        control_commit,
+        require_sha256(incident, "incident_hash"),
+        preview.predecessor.execution_hash,
+        require_sha256(failed, "failure_hash"),
+    )
+    payload["execution_hash"] = None
+    payload["execution_hash"] = _semantic_hash(payload, "execution_hash")
+    manifest_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    (directory / "README.md").write_text(
+        f"# {payload['execution_id']}\n\n"
+        "Incident-bound BC-S1 recovery successor generation v3. It preserves "
+        "the closed v2/R3 failure lineage and remains non-submittable until a "
+        "new compute-node preflight and additive recovery readiness are frozen.\n",
+        encoding="utf-8",
+    )
+    _write_static_checksums(directory)
+
+
 def successor_recovery_readiness_path(
     execution: ManagedExecution, *, repo_root: Path | None
 ) -> Path:
@@ -665,7 +1064,7 @@ def _validate_formal_r3_held_job_paths(
         "command": str(
             execution
             / "sources/control/hpc/osc/"
-            "run_steel_module_production_r3_container_probe.py"
+            "run_steel_module_production_r3_probe.sbatch"
         ),
         "work_dir": str(execution),
         "stdout": str(
@@ -880,7 +1279,8 @@ def build_successor_recovery_readiness_candidate(
         require_current_snapshot=True,
     )
     authority = require_dict(execution.manifest, "recovery_authority")
-    incident = require_dict(authority, "incident")
+    incident = require_dict(authority, "original_production_incident")
+    failed_r3 = require_dict(authority, "failed_r3_preflight")
     value: dict[str, Any] = {
         "schema_version": SUCCESSOR_RECOVERY_READINESS_SCHEMA_VERSION,
         "status": "accepted-formal-phase2b-recovery-ready",
@@ -892,7 +1292,12 @@ def build_successor_recovery_readiness_candidate(
         "successor_intent_count": 0,
         "successor_slurm_job_ids": [],
         "predecessor_slurm_job_ids": [HISTORICAL_CLOSED_JOB_ID],
+        "failed_compute_preflight_slurm_job_ids": [FORMAL_FAILED_R3_JOB_ID],
         "compute_preflight_slurm_job_ids": [preflight["job_id"]],
+        "all_compute_preflight_slurm_job_ids": [
+            FORMAL_FAILED_R3_JOB_ID,
+            preflight["job_id"],
+        ],
         "accepted_statistical_evidence": True,
         "successor_execution": {
             "directory": str(execution.directory),
@@ -915,8 +1320,14 @@ def build_successor_recovery_readiness_candidate(
             "incident_checksum_manifest_sha256": incident.get(
                 "checksum_manifest_sha256"
             ),
+            "failed_r3_id": failed_r3.get("failure_id"),
+            "failed_r3_hash": failed_r3.get("failure_hash"),
+            "failed_r3_checksum_manifest_sha256": failed_r3.get(
+                "checksum_manifest_sha256"
+            ),
         },
         "compute_preflight": preflight,
+        "r3_copy_safe_launcher": _r3_launcher_identity(execution.directory),
         "control_plane_source": require_dict(
             require_dict(execution.manifest, "sources"), "control_plane"
         ),
@@ -928,7 +1339,7 @@ def build_successor_recovery_readiness_candidate(
 def _verify_r4_git_gate(
     *, path: Path, live_root: Path, control_commit: str, source: dict[str, Any]
 ) -> None:
-    """Require one clean, non-merge, lock-only commit after frozen R2."""
+    """Require one clean, non-merge, lock-only commit after frozen v3."""
 
     relative = RECOVERY_READINESS_LOCK_RELATIVE.as_posix()
 
@@ -1026,11 +1437,14 @@ def verify_successor_recovery_readiness(
             "successor_intent_count",
             "successor_slurm_job_ids",
             "predecessor_slurm_job_ids",
+            "failed_compute_preflight_slurm_job_ids",
             "compute_preflight_slurm_job_ids",
+            "all_compute_preflight_slurm_job_ids",
             "accepted_statistical_evidence",
             "successor_execution",
             "recovery_authority",
             "compute_preflight",
+            "r3_copy_safe_launcher",
             "control_plane_source",
         },
         "successor recovery readiness",
@@ -1049,6 +1463,8 @@ def verify_successor_recovery_readiness(
         or value.get("successor_slurm_job_ids") != []
         or value.get("predecessor_slurm_job_ids")
         != [HISTORICAL_CLOSED_JOB_ID]
+        or value.get("failed_compute_preflight_slurm_job_ids")
+        != [FORMAL_FAILED_R3_JOB_ID]
         or value.get("accepted_statistical_evidence") is not True
     ):
         raise ValueError("successor recovery readiness policy is not accepted")
@@ -1070,7 +1486,8 @@ def verify_successor_recovery_readiness(
     if bound_execution != expected_execution:
         raise ValueError("successor recovery readiness execution binding mismatch")
     authority = require_dict(execution.manifest, "recovery_authority")
-    incident = require_dict(authority, "incident")
+    incident = require_dict(authority, "original_production_incident")
+    failed_r3 = require_dict(authority, "failed_r3_preflight")
     expected_authority = {
         "authority_hash": authority.get("authority_hash"),
         "incident_id": incident.get("incident_id"),
@@ -1078,11 +1495,20 @@ def verify_successor_recovery_readiness(
         "incident_checksum_manifest_sha256": incident.get(
             "checksum_manifest_sha256"
         ),
+        "failed_r3_id": failed_r3.get("failure_id"),
+        "failed_r3_hash": failed_r3.get("failure_hash"),
+        "failed_r3_checksum_manifest_sha256": failed_r3.get(
+            "checksum_manifest_sha256"
+        ),
     }
     if require_dict(value, "recovery_authority") != expected_authority:
         raise ValueError("successor recovery readiness incident binding mismatch")
     if require_dict(value, "control_plane_source") != source:
         raise ValueError("successor recovery readiness frozen-source mismatch")
+    if require_dict(value, "r3_copy_safe_launcher") != _r3_launcher_identity(
+        execution.directory
+    ):
+        raise ValueError("successor recovery readiness R3 launcher mismatch")
     recorded_preflight = require_dict(value, "compute_preflight")
     evidence_path = Path(require_string(recorded_preflight, "directory"))
     intent_root = execution.directory / "intents"
@@ -1101,6 +1527,8 @@ def verify_successor_recovery_readiness(
         recorded_preflight != current_preflight
         or value.get("compute_preflight_slurm_job_ids")
         != [current_preflight["job_id"]]
+        or value.get("all_compute_preflight_slurm_job_ids")
+        != [FORMAL_FAILED_R3_JOB_ID, current_preflight["job_id"]]
     ):
         raise ValueError("successor R3 compute-preflight binding mismatch")
     return path.resolve(), value
@@ -1376,7 +1804,7 @@ def _validate_authority_against_live_incident(
             raise ValueError("live predecessor retry identity changed")
 
 
-def load_successor_execution(
+def _load_v2_successor_execution(
     execution_dir: Path,
     *,
     repo_root: Path | None = None,
@@ -1428,9 +1856,9 @@ def load_successor_execution(
         "successor execution manifest",
     )
     if (
-        manifest.get("schema_version") != SUCCESSOR_EXECUTION_SCHEMA_VERSION
+        manifest.get("schema_version") != SUCCESSOR_EXECUTION_SCHEMA_VERSION_V2
         or manifest.get("object_kind") != SUCCESSOR_OBJECT_KIND
-        or manifest.get("execution_generation") != SUCCESSOR_EXECUTION_GENERATION
+        or manifest.get("execution_generation") != SUCCESSOR_EXECUTION_GENERATION_V2
         or manifest.get("phase") != "Phase-2B-R2"
         or manifest.get("execution_hash")
         != _semantic_hash(manifest, "execution_hash")
@@ -1617,7 +2045,7 @@ def load_successor_execution(
             )
         ):
             raise ValueError("successor Phase-2A lock identity mismatch")
-        expected = canonical_successor_directory(managed)
+        expected = canonical_v2_successor_directory(managed)
         staging_prefix = f".{expected.name}.tmp-"
         if directory != expected and not (
             allow_staging
@@ -1634,7 +2062,7 @@ def load_successor_execution(
         verify_live_predecessor=verify_live_predecessor,
     )
     authority = require_dict(manifest, "recovery_authority")
-    expected_execution_id = _successor_execution_id(
+    expected_execution_id = _v2_successor_execution_id(
         require_string(child_record, "binding_hash"),
         require_string(require_dict(sources, "control_plane"), "git_commit"),
         require_sha256(require_dict(authority, "incident"), "incident_hash"),
@@ -1659,8 +2087,8 @@ def load_successor_execution(
         "r2_submittable": False,
     }
     expected_gate = {
-        "tracked_path": RECOVERY_READINESS_LOCK_RELATIVE.as_posix(),
-        "schema_version": SUCCESSOR_RECOVERY_READINESS_SCHEMA_VERSION,
+        "tracked_path": RECOVERY_READINESS_LOCK_RELATIVE_V2.as_posix(),
+        "schema_version": SUCCESSOR_RECOVERY_READINESS_SCHEMA_VERSION_V2,
         "required_for_scheduler_contact": True,
         "compute_node_container_preflight_required": True,
         "automatic_submission": False,
@@ -1673,16 +2101,524 @@ def load_successor_execution(
     return execution
 
 
+def _validate_v3_authority(
+    execution: ManagedExecution,
+    *,
+    repo_root: Path | None,
+    verify_phase2a_control_plane: bool,
+    verify_live_predecessor: bool,
+) -> None:
+    authority = require_dict(execution.manifest, "recovery_authority")
+    _require_exact_keys(
+        authority,
+        {
+            "schema_version",
+            "predecessor_execution",
+            "predecessor_recovery_authority",
+            "original_production_incident",
+            "failed_r3_preflight",
+            "zero_consumption",
+            "retry_equivalence",
+            "authority_hash",
+        },
+        "successor-v3 recovery authority",
+    )
+    if (
+        authority.get("schema_version") != SUCCESSOR_V3_AUTHORITY_SCHEMA_VERSION
+        or authority.get("authority_hash")
+        != _semantic_hash(authority, "authority_hash")
+    ):
+        raise ValueError("successor-v3 recovery authority identity mismatch")
+    predecessor_record = require_dict(authority, "predecessor_execution")
+    _require_exact_keys(
+        predecessor_record,
+        {
+            "directory",
+            "schema_version",
+            "execution_generation",
+            "execution_id",
+            "execution_hash",
+            "managed_execution_sha256",
+            "static_checksums_sha256",
+            "recovery_authority_hash",
+        },
+        "successor-v3 predecessor execution",
+    )
+    formal = execution.manifest.get("test_mode") is False
+    predecessor_path = Path(require_string(predecessor_record, "directory"))
+    if predecessor_path.is_symlink() or not predecessor_path.is_dir():
+        raise ValueError("successor-v3 predecessor is missing or unsafe")
+    predecessor_repo_root = repo_root
+    if formal and not verify_phase2a_control_plane:
+        predecessor_repo_root = predecessor_path / "sources/control"
+    predecessor = _load_v2_successor_execution(
+        predecessor_path,
+        repo_root=predecessor_repo_root if formal else None,
+        allow_test_mode=not formal,
+        require_readiness=False,
+        verify_runtime=formal,
+        verify_phase2a_control_plane=verify_phase2a_control_plane,
+        verify_live_predecessor=verify_live_predecessor,
+    )
+    predecessor_authority = require_dict(
+        predecessor.manifest, "recovery_authority"
+    )
+    if require_dict(authority, "predecessor_recovery_authority") != (
+        predecessor_authority
+    ):
+        raise ValueError("successor-v3 predecessor recovery authority changed")
+    expected_predecessor = {
+        "directory": str(predecessor.directory),
+        "schema_version": predecessor.manifest.get("schema_version"),
+        "execution_generation": predecessor.manifest.get("execution_generation"),
+        "execution_id": predecessor.execution_id,
+        "execution_hash": predecessor.execution_hash,
+        "managed_execution_sha256": sha256_file(
+            predecessor.directory / "managed_execution.json"
+        ),
+        "static_checksums_sha256": sha256_file(
+            predecessor.directory / ROOT_STATIC_MANIFEST
+        ),
+        "recovery_authority_hash": predecessor_authority.get("authority_hash"),
+    }
+    if predecessor_record != expected_predecessor:
+        raise ValueError("successor-v3 predecessor binding mismatch")
+    if formal and (
+        predecessor.directory
+        != execution.managed_child.directory.parent
+        / FORMAL_SUCCESSOR_EXECUTION_NAME_V2
+        or predecessor.execution_id != FORMAL_SUCCESSOR_V2_EXECUTION_ID
+        or predecessor.execution_hash != FORMAL_SUCCESSOR_V2_EXECUTION_HASH
+    ):
+        raise ValueError("formal successor-v3 predecessor identity is not exact")
+    for name in ("intents", "attempts", "finalized"):
+        root = predecessor.directory / name
+        if root.is_symlink() or not root.is_dir() or any(root.iterdir()):
+            raise ValueError(f"closed successor-v2 contains mutable {name} state")
+    original = require_dict(authority, "original_production_incident")
+    if original != require_dict(predecessor_authority, "incident"):
+        raise ValueError("successor-v3 original production incident changed")
+    zero = require_dict(authority, "zero_consumption")
+    if zero != require_dict(predecessor_authority, "zero_consumption"):
+        raise ValueError("successor-v3 original zero-consumption authority changed")
+    failure_record = require_dict(authority, "failed_r3_preflight")
+    _require_exact_keys(
+        failure_record,
+        {
+            "directory",
+            "schema_version",
+            "failure_id",
+            "failure_hash",
+            "failure_json_sha256",
+            "checksum_manifest_sha256",
+            "recursive_record_count",
+            "execution",
+            "scheduler",
+            "runtime_boundary",
+            "consumption",
+        },
+        "successor-v3 failed-R3 binding",
+    )
+    failure_path = Path(require_string(failure_record, "directory"))
+    if failure_path.is_symlink() or not failure_path.is_dir():
+        raise ValueError("successor-v3 failed-R3 bundle is missing or unsafe")
+    failure = _validated_r3_failure(
+        failure_path.resolve(),
+        predecessor=predecessor,
+        test_mode=not formal,
+        require_current_execution=True,
+    )
+    if failure_record != _failure_binding(failure_path.resolve(), failure):
+        raise ValueError("successor-v3 failed-R3 bundle binding mismatch")
+    failed_execution = require_dict(failure, "execution")
+    if (
+        failed_execution.get("directory") != str(predecessor.directory)
+        or failed_execution.get("execution_id") != predecessor.execution_id
+        or failed_execution.get("execution_hash") != predecessor.execution_hash
+        or failed_execution.get("managed_execution_sha256")
+        != expected_predecessor["managed_execution_sha256"]
+        or failed_execution.get("static_manifest_sha256")
+        != expected_predecessor["static_checksums_sha256"]
+    ):
+        raise ValueError("successor-v3 failed-R3 execution identity mismatch")
+    if (
+        require_dict(failure, "consumption").get("events_consumed") != 0
+        or require_dict(failure, "consumption").get("production_seeds_consumed")
+        != 0
+        or require_dict(failure, "runtime_boundary").get("apptainer_invoked")
+        is not False
+        or require_dict(failure, "runtime_boundary").get("geant4_invoked")
+        is not False
+    ):
+        raise ValueError("successor-v3 failed-R3 evidence is not zero-consumption")
+    retry = require_dict(authority, "retry_equivalence")
+    expected_retry = {
+        **_task_identity(execution.tasks),
+        "tasks_tsv_sha256": sha256_file(execution.directory / "tasks.tsv"),
+        "scan_args_sha256": sha256_file(execution.directory / "scan_args.txt"),
+        "phase2a_tasks_sha256": sha256_file(
+            execution.managed_child.directory / "tasks.tsv"
+        ),
+        "phase2a_scan_args_sha256": sha256_file(
+            execution.managed_child.directory / "scan_args.txt"
+        ),
+        "simulation_source": require_dict(execution.manifest, "sources")[
+            "simulation"
+        ],
+        "runtime": execution.manifest["runtime"],
+        "all_equal": True,
+    }
+    if retry != expected_retry:
+        raise ValueError("successor-v3 retry-equivalence evidence mismatch")
+    if (
+        execution.tasks != predecessor.tasks
+        or execution.scan_args != predecessor.scan_args
+        or require_dict(execution.manifest, "sources")["simulation"]
+        != require_dict(predecessor.manifest, "sources")["simulation"]
+        or execution.manifest.get("runtime") != predecessor.manifest.get("runtime")
+    ):
+        raise ValueError("successor-v3 changed frozen physics/runtime inputs")
+
+
+def _load_v3_successor_execution(
+    execution_dir: Path,
+    *,
+    repo_root: Path | None = None,
+    allow_test_mode: bool = False,
+    require_readiness: bool = False,
+    verify_runtime: bool = True,
+    verify_phase2a_control_plane: bool = True,
+    allow_staging: bool = False,
+    verify_live_predecessor: bool = False,
+) -> ManagedExecution:
+    requested = execution_dir.expanduser()
+    if requested.is_symlink() or requested.parent.is_symlink():
+        raise ValueError("successor-v3 execution must not be a symlink")
+    directory = requested.resolve()
+    verify_execution_static_checksums(directory)
+    _validate_successor_tree_modes(directory)
+    actual_root = {path.name for path in directory.iterdir()}
+    if actual_root != SUCCESSOR_ROOT_ENTRIES or any(
+        path.is_symlink() for path in directory.iterdir()
+    ):
+        raise ValueError("successor-v3 execution root entry set is unsafe")
+    manifest = load_json(directory / "managed_execution.json")
+    _require_exact_keys(
+        manifest,
+        {
+            "schema_version",
+            "object_kind",
+            "execution_generation",
+            "created_at_utc",
+            "test_mode",
+            "accepted_statistical_evidence",
+            "execution_id",
+            "execution_hash",
+            "phase",
+            "managed_child",
+            "program",
+            "phase2a_lock",
+            "readiness_gate",
+            "shape",
+            "runtime",
+            "sources",
+            "sealed_pilot",
+            "artifacts",
+            "submission_policy",
+            "recovery_authority",
+        },
+        "successor-v3 execution manifest",
+    )
+    if (
+        manifest.get("schema_version") != SUCCESSOR_EXECUTION_SCHEMA_VERSION
+        or manifest.get("object_kind") != SUCCESSOR_OBJECT_KIND
+        or manifest.get("execution_generation") != SUCCESSOR_EXECUTION_GENERATION
+        or manifest.get("phase") != "Phase-2B-R2-v3"
+        or manifest.get("execution_hash")
+        != _semantic_hash(manifest, "execution_hash")
+    ):
+        raise ValueError("unsupported or invalid successor-v3 manifest")
+    require_string(manifest, "created_at_utc")
+    test_mode = manifest.get("test_mode")
+    accepted = manifest.get("accepted_statistical_evidence")
+    if (
+        not isinstance(test_mode, bool)
+        or not isinstance(accepted, bool)
+        or accepted == test_mode
+        or (test_mode and not allow_test_mode)
+    ):
+        raise ValueError("successor-v3 test/evidence flags are invalid")
+    if not test_mode and repo_root is None:
+        raise ValueError("formal successor-v3 validation requires repo_root")
+    root = repo_root.expanduser().resolve() if repo_root is not None else None
+    sources = require_dict(manifest, "sources")
+    _require_exact_keys(
+        sources,
+        {"schema_version", "simulation", "control_plane"},
+        "successor-v3 source archives",
+    )
+    if sources.get("schema_version") != "steel-module-production-dual-source-v1":
+        raise ValueError("successor-v3 source-archive schema mismatch")
+    frozen_control_mode = not test_mode and not verify_phase2a_control_plane
+    if frozen_control_mode:
+        control = require_dict(sources, "control_plane")
+        expected_control = (directory / require_string(control, "path")).resolve()
+        if root != expected_control:
+            raise ValueError("frozen successor-v3 loader must use control archive")
+        _verify_source_record(directory, control)
+    child_record = require_dict(manifest, "managed_child")
+    child_dir = Path(require_string(child_record, "directory"))
+    managed = load_managed_production_child(
+        child_dir,
+        repo_root=root if not test_mode else None,
+        verify_runtime_artifacts=verify_runtime and not test_mode,
+        verify_control_plane=not test_mode and verify_phase2a_control_plane,
+        allow_test_mode=test_mode,
+        _allow_formal_lock_relocation=frozen_control_mode,
+    )
+    expected_child_keys = {
+        "directory", "campaign_id", "plan_hash", "binding_hash", "child_id",
+        "child_plan_hash", "task_set_hash", "parent_task_plan_hash",
+        "task_seed_mapping_hash", "seed_set_hash", "tasks_sha256",
+        "scan_args_sha256",
+    }
+    _require_exact_keys(child_record, expected_child_keys, "successor-v3 child")
+    if (
+        child_dir != managed.directory
+        or child_record.get("child_id") != INITIAL_CHILD_ID
+        or managed.plan.campaign_id != child_record.get("campaign_id")
+        or managed.plan.plan_hash != child_record.get("plan_hash")
+        or managed.binding.get("binding_hash") != child_record.get("binding_hash")
+    ):
+        raise ValueError("successor-v3 managed-child identity mismatch")
+    binding_child = require_dict(managed.binding, "child")
+    for key in (
+        "child_plan_hash", "task_set_hash", "parent_task_plan_hash",
+        "task_seed_mapping_hash", "seed_set_hash",
+    ):
+        if child_record.get(key) != binding_child.get(key):
+            raise ValueError(f"successor-v3 managed-child {key} mismatch")
+    expected_program = {
+        key: managed.binding["program"][key]
+        for key in (
+            "program_id", "program_hash", "parent_plan_hash",
+            "authorization_graph_hash",
+        )
+    }
+    if require_dict(manifest, "program") != expected_program:
+        raise ValueError("successor-v3 production-program identity mismatch")
+    environment = managed.plan.environment
+    expected_runtime = {
+        "environment_identity": environment["identity_hash"],
+        "image_sha256": environment["image"]["sha256"],
+        "g4_data_manifest_sha256": environment["g4_data_manifest"]["sha256"],
+        "executable_sha256": environment["build_artifact"]["sha256"],
+    }
+    if require_dict(manifest, "runtime") != expected_runtime:
+        raise ValueError("successor-v3 runtime identity differs from Phase-2A")
+    tasks = parse_campaign_tasks(directory / "tasks.tsv")
+    scan_args = _read_scan_args(directory / "scan_args.txt")
+    if tasks != managed.plan.tasks or scan_args != managed.plan.scan_args:
+        raise ValueError("successor-v3 task/scan plan differs from Phase-2A")
+    if (
+        child_record.get("tasks_sha256")
+        != sha256_file(managed.directory / "tasks.tsv")
+        or child_record.get("scan_args_sha256")
+        != sha256_file(managed.directory / "scan_args.txt")
+    ):
+        raise ValueError("successor-v3 child task/scan bytes changed")
+    artifacts = require_dict(manifest, "artifacts")
+    _require_exact_keys(
+        artifacts,
+        {"tasks", "scan_args", "source_archives", "control_lock"},
+        "successor-v3 artifacts",
+    )
+    for key, filename in (
+        ("tasks", "tasks.tsv"),
+        ("scan_args", "scan_args.txt"),
+        ("source_archives", "source_archives.json"),
+    ):
+        record = require_dict(artifacts, key)
+        if (
+            record.get("path") != filename
+            or record.get("sha256") != sha256_file(directory / filename)
+        ):
+            raise ValueError(f"successor-v3 artifact mismatch: {filename}")
+    shape = require_dict(manifest, "shape")
+    expected_shape = {
+        "task_count": 32,
+        "event_count": 8000,
+        "events_per_task": 250,
+        "seed_count": 64,
+        "tile_thickness_mm": [4, 24],
+        "sipm_layout": "back-center",
+        "absorber_transverse_mm": 500,
+        "seed_block_range_inclusive": [0, 15],
+    }
+    seeds = _seed_values(tasks)
+    if shape != expected_shape or len(seeds) != 64 or len(set(seeds)) != 64:
+        raise ValueError("successor-v3 shape is not exact BC-S1")
+    if load_json(directory / "source_archives.json") != sources:
+        raise ValueError("successor-v3 source manifest mismatch")
+    _verify_source_record(directory, require_dict(sources, "simulation"))
+    _verify_source_record(directory, require_dict(sources, "control_plane"))
+    _r3_launcher_identity(directory)
+    lock_record = require_dict(artifacts, "control_lock")
+    with _opened_portable_control_lock(
+        directory / ".control.lock", lock_record, operation=fcntl.LOCK_SH
+    ):
+        pass
+    recorded_pilot = require_dict(manifest, "sealed_pilot")
+    current_pilot = _sealed_pilot_identity(
+        Path(require_string(recorded_pilot, "directory")), allow_fixture=test_mode
+    )
+    for key, value in current_pilot.items():
+        if recorded_pilot.get(key) != value:
+            raise ValueError(f"successor-v3 sealed-pilot {key} mismatch")
+    execution = ManagedExecution(directory, managed, manifest, tasks, scan_args)
+    recorded_phase2a = require_dict(manifest, "phase2a_lock")
+    _require_exact_keys(
+        recorded_phase2a,
+        {"path", "sha256", "schema_version"},
+        "successor-v3 Phase-2A lock",
+    )
+    if recorded_phase2a.get("schema_version") != PHASE2A_LOCK_SCHEMA_VERSION:
+        raise ValueError("successor-v3 Phase-2A lock schema mismatch")
+    if not test_mode:
+        assert root is not None
+        phase2a_path, phase2a = load_phase2a_lock(root)
+        _validate_phase2a_binding(managed, phase2a_path, phase2a)
+        if (
+            recorded_phase2a.get("sha256") != sha256_file(phase2a_path)
+            or (
+                not frozen_control_mode
+                and recorded_phase2a.get("path") != str(phase2a_path)
+            )
+        ):
+            raise ValueError("successor-v3 Phase-2A identity mismatch")
+        expected = canonical_successor_directory(managed)
+        staging_prefix = f".{expected.name}.tmp-"
+        if directory != expected and not (
+            allow_staging
+            and directory.parent == expected.parent
+            and directory.name.startswith(staging_prefix)
+        ):
+            raise ValueError(f"formal successor-v3 path must be canonical: {expected}")
+    _validate_v3_authority(
+        execution,
+        repo_root=root,
+        verify_phase2a_control_plane=verify_phase2a_control_plane,
+        verify_live_predecessor=verify_live_predecessor,
+    )
+    authority = require_dict(manifest, "recovery_authority")
+    expected_execution_id = _v3_successor_execution_id(
+        require_string(child_record, "binding_hash"),
+        require_string(require_dict(sources, "control_plane"), "git_commit"),
+        require_sha256(
+            require_dict(authority, "original_production_incident"),
+            "incident_hash",
+        ),
+        require_sha256(
+            require_dict(authority, "predecessor_execution"), "execution_hash"
+        ),
+        require_sha256(
+            require_dict(authority, "failed_r3_preflight"), "failure_hash"
+        ),
+    )
+    if manifest.get("execution_id") != expected_execution_id:
+        raise ValueError("successor-v3 execution ID does not match lineage")
+    expected_policy = {
+        "account": "PAS2524", "two_step_required": True,
+        "initially_held": True, "no_requeue": True, "export_mode": "NONE",
+        "formal_child": INITIAL_CHILD_ID,
+        "formal_initial_mode": "predecessor-retry",
+        "predecessor_retry_task_count": 32,
+        "predecessor_retry_event_count": 8000,
+        "r2_submittable": False,
+    }
+    expected_gate = {
+        "tracked_path": RECOVERY_READINESS_LOCK_RELATIVE.as_posix(),
+        "schema_version": SUCCESSOR_RECOVERY_READINESS_SCHEMA_VERSION,
+        "required_for_scheduler_contact": True,
+        "compute_node_container_preflight_required": True,
+        "automatic_submission": False,
+        "r2_submission_ready": False,
+    }
+    if (
+        require_dict(manifest, "submission_policy") != expected_policy
+        or require_dict(manifest, "readiness_gate") != expected_gate
+    ):
+        raise ValueError("successor-v3 readiness/submission boundary mismatch")
+    if require_readiness:
+        verify_successor_recovery_readiness(execution, repo_root=root)
+    return execution
+
+
+def load_successor_execution(
+    execution_dir: Path,
+    *,
+    repo_root: Path | None = None,
+    allow_test_mode: bool = False,
+    require_readiness: bool = False,
+    verify_runtime: bool = True,
+    verify_phase2a_control_plane: bool = True,
+    allow_staging: bool = False,
+    verify_live_predecessor: bool = False,
+    allow_closed_v2: bool = False,
+) -> ManagedExecution:
+    directory = execution_dir.expanduser().resolve()
+    manifest = load_json(directory / "managed_execution.json")
+    schema = manifest.get("schema_version")
+    if schema == SUCCESSOR_EXECUTION_SCHEMA_VERSION_V2:
+        value = _load_v2_successor_execution(
+            directory,
+            repo_root=repo_root,
+            allow_test_mode=allow_test_mode,
+            require_readiness=False,
+            verify_runtime=verify_runtime,
+            verify_phase2a_control_plane=verify_phase2a_control_plane,
+            allow_staging=allow_staging,
+            verify_live_predecessor=verify_live_predecessor,
+        )
+        if value.manifest.get("test_mode") is False and not allow_closed_v2:
+            raise ValueError(
+                "successor-v2 is permanently closed after failed R3 preflight"
+            )
+        if require_readiness:
+            raise ValueError("successor-v2 can never satisfy recovery readiness")
+        return value
+    if schema == SUCCESSOR_EXECUTION_SCHEMA_VERSION:
+        return _load_v3_successor_execution(
+            directory,
+            repo_root=repo_root,
+            allow_test_mode=allow_test_mode,
+            require_readiness=require_readiness,
+            verify_runtime=verify_runtime,
+            verify_phase2a_control_plane=verify_phase2a_control_plane,
+            allow_staging=allow_staging,
+            verify_live_predecessor=verify_live_predecessor,
+        )
+    raise ValueError("unsupported recovery-successor execution schema")
+
+
 def validate_successor_r2_boundary(
     execution: ManagedExecution, *, repo_root: Path
 ) -> None:
     for name in ("intents", "attempts", "finalized"):
         path = execution.directory / name
         if path.is_symlink() or not path.is_dir() or any(path.iterdir()):
-            raise ValueError(f"R2 successor requires empty {name}/")
-    readiness = repo_root.expanduser().resolve() / RECOVERY_READINESS_LOCK_RELATIVE
+            raise ValueError(f"pre-readiness successor requires empty {name}/")
+    readiness_relative = (
+        RECOVERY_READINESS_LOCK_RELATIVE_V2
+        if execution.manifest.get("schema_version")
+        == SUCCESSOR_EXECUTION_SCHEMA_VERSION_V2
+        else RECOVERY_READINESS_LOCK_RELATIVE
+    )
+    readiness = repo_root.expanduser().resolve() / readiness_relative
     if readiness.exists() or readiness.is_symlink():
-        raise ValueError("R2 successor cannot coexist with recovery readiness")
+        raise ValueError(
+            "pre-readiness successor cannot coexist with recovery readiness"
+        )
     if successor_predecessor_retry_task_ids(execution) != tuple(
         task.logical_task_id for task in execution.tasks
     ):
@@ -1709,6 +2645,10 @@ def materialize_successor_execution_companion(
     fixture_sources: tuple[Path, Path] | None = None,
     fault_after: str | None = None,
 ) -> ManagedExecution:
+    if not test_mode:
+        raise ValueError(
+            "formal successor-v2 materialization is retired and permanently closed"
+        )
     preview = preview_successor_execution(
         repo_root=repo_root,
         managed_child_dir=managed_child_dir,
@@ -1717,7 +2657,7 @@ def materialize_successor_execution_companion(
         pilot_dir=pilot_dir,
         test_mode=test_mode,
     )
-    expected = canonical_successor_directory(preview.managed_child)
+    expected = canonical_v2_successor_directory(preview.managed_child)
     requested_target = out_dir or expected
     if requested_target.is_symlink() or requested_target.parent.is_symlink():
         raise ValueError("successor output must not be a symlink")
@@ -1731,7 +2671,7 @@ def materialize_successor_execution_companion(
     for protected in (preview.predecessor.directory, preview.incident_path):
         if target == protected or protected in target.parents or target in protected.parents:
             raise ValueError("successor output overlaps predecessor evidence")
-    readiness = preview.repo_root / RECOVERY_READINESS_LOCK_RELATIVE
+    readiness = preview.repo_root / RECOVERY_READINESS_LOCK_RELATIVE_V2
     if readiness.exists() or readiness.is_symlink():
         raise ValueError("R2 materialization requires recovery readiness to be absent")
     temporary = Path(
@@ -1757,7 +2697,7 @@ def materialize_successor_execution_companion(
             raise RuntimeError("injected successor failure before recovery authority")
         _transform_successor_manifest(temporary, preview)
         _harden_successor_tree(temporary)
-        loaded = load_successor_execution(
+        loaded = _load_v2_successor_execution(
             temporary,
             repo_root=preview.repo_root if not test_mode else None,
             allow_test_mode=test_mode,
@@ -1772,7 +2712,99 @@ def materialize_successor_execution_companion(
         fsync_tree(temporary)
         publish_directory_no_replace(temporary, target)
         temporary = None
-        result = load_successor_execution(
+        result = _load_v2_successor_execution(
+            target,
+            repo_root=preview.repo_root if not test_mode else None,
+            allow_test_mode=test_mode,
+            require_readiness=False,
+            verify_runtime=not test_mode,
+            verify_live_predecessor=not test_mode,
+        )
+        validate_successor_r2_boundary(result, repo_root=preview.repo_root)
+        return result
+    finally:
+        if temporary is not None and temporary.exists():
+            _remove_tree(temporary)
+
+
+def materialize_successor_v3_execution_companion(
+    *,
+    repo_root: Path,
+    managed_child_dir: Path | None = None,
+    predecessor_dir: Path | None = None,
+    failure_dir: Path | None = None,
+    out_dir: Path | None = None,
+    pilot_dir: Path | None = None,
+    test_mode: bool = False,
+    fixture_sources: tuple[Path, Path] | None = None,
+    fault_after: str | None = None,
+) -> ManagedExecution:
+    preview = preview_successor_v3_execution(
+        repo_root=repo_root,
+        managed_child_dir=managed_child_dir,
+        predecessor_dir=predecessor_dir,
+        failure_dir=failure_dir,
+        pilot_dir=pilot_dir,
+        test_mode=test_mode,
+    )
+    expected = canonical_successor_directory(preview.managed_child)
+    requested_target = out_dir or expected
+    if requested_target.is_symlink() or requested_target.parent.is_symlink():
+        raise ValueError("successor-v3 output must not be a symlink")
+    target = requested_target.expanduser().resolve()
+    if not test_mode and target != expected:
+        raise ValueError(f"formal successor-v3 path is fixed: {expected}")
+    if target.exists() or target.is_symlink():
+        raise ValueError(f"refusing to overwrite successor-v3 execution: {target}")
+    if not target.parent.is_dir() or target.parent.is_symlink():
+        raise ValueError("successor-v3 output parent is unsafe")
+    for protected in (preview.predecessor.directory, preview.failure_path):
+        if target == protected or protected in target.parents or target in protected.parents:
+            raise ValueError("successor-v3 output overlaps immutable predecessor evidence")
+    readiness = preview.repo_root / RECOVERY_READINESS_LOCK_RELATIVE
+    if readiness.exists() or readiness.is_symlink():
+        raise ValueError("successor-v3 materialization requires readiness to be absent")
+    temporary = Path(
+        tempfile.mkdtemp(prefix=f".{target.name}.tmp-", dir=target.parent)
+    )
+    temporary.rmdir()
+    try:
+        _write_execution_tree(
+            temporary,
+            managed=preview.managed_child,
+            repo_root=preview.repo_root,
+            phase2a_path=preview.phase2a_path,
+            phase2a_lock=preview.phase2a_lock,
+            pilot_dir=preview.pilot_dir,
+            test_mode=test_mode,
+            fixture_sources=fixture_sources,
+            fault_after=(
+                fault_after
+                if fault_after in {"tasks", "sources", "checksums"}
+                else None
+            ),
+            control_lock_protocol=CONTROL_LOCK_PROTOCOL_V2,
+        )
+        if fault_after in {"predecessor", "failure", "recovery-authority"}:
+            raise RuntimeError("injected successor-v3 lineage failure")
+        _transform_v3_manifest(temporary, preview)
+        _harden_successor_tree(temporary)
+        loaded = _load_v3_successor_execution(
+            temporary,
+            repo_root=preview.repo_root if not test_mode else None,
+            allow_test_mode=test_mode,
+            require_readiness=False,
+            verify_runtime=not test_mode,
+            allow_staging=True,
+            verify_live_predecessor=not test_mode,
+        )
+        validate_successor_r2_boundary(loaded, repo_root=preview.repo_root)
+        if fault_after == "pre-publish":
+            raise RuntimeError("injected successor-v3 failure before publication")
+        fsync_tree(temporary)
+        publish_directory_no_replace(temporary, target)
+        temporary = None
+        result = _load_v3_successor_execution(
             target,
             repo_root=preview.repo_root if not test_mode else None,
             allow_test_mode=test_mode,
@@ -1801,6 +2833,10 @@ def load_execution_for_frozen_worker(
     """
 
     manifest = load_json(execution_dir.expanduser().resolve() / "managed_execution.json")
+    if manifest.get("schema_version") == SUCCESSOR_EXECUTION_SCHEMA_VERSION_V2:
+        raise ValueError(
+            "successor-v2 is permanently closed and cannot be a worker target"
+        )
     if manifest.get("schema_version") == SUCCESSOR_EXECUTION_SCHEMA_VERSION:
         execution = load_successor_execution(
             execution_dir,
@@ -1828,20 +2864,30 @@ __all__ = [
     "FORMAL_INCIDENT_ID",
     "FORMAL_INCIDENT_NAME",
     "FORMAL_SUCCESSOR_EXECUTION_NAME",
+    "FORMAL_SUCCESSOR_EXECUTION_NAME_V2",
+    "FORMAL_SUCCESSOR_V2_EXECUTION_HASH",
+    "FORMAL_SUCCESSOR_V2_EXECUTION_ID",
     "RECOVERY_READINESS_LOCK_RELATIVE",
+    "RECOVERY_READINESS_LOCK_RELATIVE_V2",
     "SUCCESSOR_AUTHORITY_SCHEMA_VERSION",
     "SUCCESSOR_EXECUTION_GENERATION",
+    "SUCCESSOR_EXECUTION_GENERATION_V2",
     "SUCCESSOR_EXECUTION_SCHEMA_VERSION",
+    "SUCCESSOR_EXECUTION_SCHEMA_VERSION_V2",
     "SUCCESSOR_OBJECT_KIND",
     "SUCCESSOR_RECOVERY_READINESS_SCHEMA_VERSION",
     "SuccessorPreview",
+    "SuccessorV3Preview",
     "build_successor_recovery_readiness_candidate",
     "canonical_incident_directory",
     "canonical_successor_directory",
+    "canonical_v2_successor_directory",
     "load_execution_for_frozen_worker",
     "load_successor_execution",
     "materialize_successor_execution_companion",
+    "materialize_successor_v3_execution_companion",
     "preview_successor_execution",
+    "preview_successor_v3_execution",
     "successor_predecessor_retry_task_ids",
     "successor_r3_preflight_binding",
     "successor_recovery_readiness_path",

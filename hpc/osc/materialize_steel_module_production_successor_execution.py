@@ -1,17 +1,10 @@
 #!/usr/bin/env python3
-"""Preview or materialize the incident-bound BC-S1 successor at R2."""
+"""Retired formal entrypoint for the permanently closed successor-v2."""
 
 from __future__ import annotations
 
 import argparse
-import json
 import sys
-from pathlib import Path
-
-from steel_module_production_successor_lib import (
-    materialize_successor_execution_companion,
-    preview_successor_execution,
-)
 
 
 def parse_args() -> argparse.Namespace:
@@ -23,36 +16,14 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
-    args = parse_args()
-    repo_root = Path(__file__).resolve().parents[2]
-    try:
-        if args.check_only:
-            preview = preview_successor_execution(repo_root=repo_root)
-            authority = preview.recovery_authority
-            print("steel-module Phase-2B R2 successor preview: PASS")
-            print(f"incident_id: {preview.incident['incident_id']}")
-            print(f"incident_hash: {preview.incident['incident_hash']}")
-            print(f"predecessor_execution_id: {preview.predecessor.execution_id}")
-            print(f"authority_hash: {authority['authority_hash']}")
-            print("tasks: 32")
-            print("events: 8000")
-            print("production_seeds_reused: 64")
-            print("No file was written and no scheduler command was invoked.")
-            return 0
-        execution = materialize_successor_execution_companion(repo_root=repo_root)
-    except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
-        print(f"Cannot materialize Phase-2B R2 successor: {exc}", file=sys.stderr)
-        return 1
-    print("managed steel-module Phase-2B R2 successor materialization: PASS")
-    print(f"execution_id: {execution.execution_id}")
-    print(f"execution_hash: {execution.execution_hash}")
-    print(f"tasks: {len(execution.tasks)}")
-    print(f"events: {sum(task.events for task in execution.tasks)}")
-    print(f"output: {execution.directory}")
-    print("submission_ready: false (R2 materialization only)")
-    print("intents: 0")
-    print("No scheduler command was invoked.")
-    return 0
+    parse_args()
+    print(
+        "Cannot materialize Phase-2B successor-v2: this generation is "
+        "permanently closed after failed R3 job 50544247; seal that failure "
+        "and use materialize_steel_module_production_successor_v3_execution.py",
+        file=sys.stderr,
+    )
+    return 1
 
 
 if __name__ == "__main__":

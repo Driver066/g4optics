@@ -35,6 +35,7 @@ from steel_module_production_program_lib import (
 )
 from steel_module_production_phase2b_lib import (
     EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
+    EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
     EXECUTION_SCHEMA_VERSION_V1,
     EXECUTION_SCHEMA_VERSION_V2,
     FORMAL_EXECUTION_NAME,
@@ -48,8 +49,12 @@ from steel_module_production_phase2b_lib import (
 CHECKPOINT_SCHEMA_VERSION = "steel-module-production-checkpoint-v1"
 MANAGED_FINALIZATION_SCHEMA_VERSION = "steel-module-managed-finalization-v1"
 RECOVERY_LINEAGE_SCHEMA_VERSION = "steel-module-managed-recovery-lineage-v1"
+RECOVERY_LINEAGE_SCHEMA_VERSION_V2 = "steel-module-managed-recovery-lineage-v2"
 SUCCESSOR_AUTHORITY_SCHEMA_VERSION = (
     "steel-module-production-successor-authority-v1"
+)
+SUCCESSOR_AUTHORITY_SCHEMA_VERSION_V2 = (
+    "steel-module-production-successor-authority-v2"
 )
 FORMAL_CHECKPOINT_STATE = "BC-ONLY-S1"
 FORMAL_EVIDENCE_MODE = "back-center-only"
@@ -87,7 +92,10 @@ def is_successor_execution_manifest(manifest: dict[str, Any]) -> bool:
 
     schema = manifest.get("schema_version")
     object_kind = manifest.get("object_kind")
-    if schema == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1:
+    if schema in {
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
+    }:
         if object_kind != SUCCESSOR_OBJECT_KIND:
             raise ValueError("successor execution schema/object-kind mismatch")
         return True
@@ -169,11 +177,35 @@ def recovery_lineage_from_execution(execution: Any) -> dict[str, Any] | None:
     manifest = execution.manifest
     if not is_successor_execution_manifest(manifest):
         return None
+    schema = manifest.get("schema_version")
     authority = require_dict(manifest, "recovery_authority")
-    incident = require_dict(authority, "incident")
     predecessor = require_dict(authority, "predecessor_execution")
+    if schema == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1:
+        lineage_schema = RECOVERY_LINEAGE_SCHEMA_VERSION
+        incident = require_dict(authority, "incident")
+        failed_r3: dict[str, Any] | None = None
+        result_scope = {
+            "source_execution_directory": str(execution.directory),
+            "selected_results": "successor-successes-only",
+            "predecessor_failed_outputs_included": False,
+            "predecessor_accounting_included": False,
+        }
+    elif schema == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2:
+        lineage_schema = RECOVERY_LINEAGE_SCHEMA_VERSION_V2
+        incident = require_dict(authority, "original_production_incident")
+        failed_r3 = require_dict(authority, "failed_r3_preflight")
+        result_scope = {
+            "source_execution_directory": str(execution.directory),
+            "selected_results": "successor-successes-only",
+            "predecessor_failed_outputs_included": False,
+            "predecessor_accounting_included": False,
+            "failed_r3_preflight_outputs_included": False,
+            "failed_r3_accounting_included": False,
+        }
+    else:  # guarded by is_successor_execution_manifest
+        raise ValueError("unsupported recovery-successor schema")
     payload: dict[str, Any] = {
-        "schema_version": RECOVERY_LINEAGE_SCHEMA_VERSION,
+        "schema_version": lineage_schema,
         "successor_execution": {
             "directory": str(execution.directory),
             "schema_version": manifest.get("schema_version"),
@@ -199,13 +231,10 @@ def recovery_lineage_from_execution(execution: Any) -> dict[str, Any] | None:
             "execution_id": predecessor.get("execution_id"),
             "execution_hash": predecessor.get("execution_hash"),
         },
-        "result_scope": {
-            "source_execution_directory": str(execution.directory),
-            "selected_results": "successor-successes-only",
-            "predecessor_failed_outputs_included": False,
-            "predecessor_accounting_included": False,
-        },
+        "result_scope": result_scope,
     }
+    if failed_r3 is not None:
+        payload["failed_r3_preflight"] = json.loads(json.dumps(failed_r3))
     payload["lineage_hash"] = sha256_bytes(canonical_json(payload))
     return payload
 
@@ -216,13 +245,21 @@ def validate_recovery_lineage(
     """Validate optional lineage, requiring it for every successor output."""
 
     schema = execution_record.get("schema_version")
-    if schema != EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1:
+    if schema not in {
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
+    }:
         if lineage is not None:
             raise ValueError("historical execution must not carry recovery lineage")
         return None
     if not isinstance(lineage, dict):
         raise ValueError("successor evidence lacks recovery lineage")
-    if lineage.get("schema_version") != RECOVERY_LINEAGE_SCHEMA_VERSION:
+    expected_lineage_schema = (
+        RECOVERY_LINEAGE_SCHEMA_VERSION
+        if schema == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1
+        else RECOVERY_LINEAGE_SCHEMA_VERSION_V2
+    )
+    if lineage.get("schema_version") != expected_lineage_schema:
         raise ValueError("unsupported recovery-lineage schema")
     expected_hash = require_sha256(lineage, "lineage_hash")
     unhashed = dict(lineage)
@@ -244,8 +281,13 @@ def validate_recovery_lineage(
     authority_hash = require_sha256(authority, "authority_hash")
     unhashed_authority = dict(authority)
     unhashed_authority.pop("authority_hash")
+    expected_authority_schema = (
+        SUCCESSOR_AUTHORITY_SCHEMA_VERSION
+        if schema == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1
+        else SUCCESSOR_AUTHORITY_SCHEMA_VERSION_V2
+    )
     if (
-        authority.get("schema_version") != SUCCESSOR_AUTHORITY_SCHEMA_VERSION
+        authority.get("schema_version") != expected_authority_schema
         or sha256_bytes(canonical_json(unhashed_authority)) != authority_hash
         or authority_hash != execution_record.get("recovery_authority_hash")
     ):
@@ -268,7 +310,31 @@ def validate_recovery_lineage(
     }
     if zero != expected_zero:
         raise ValueError("recovery-lineage does not prove exact zero consumption")
-    incident = require_dict(authority, "incident")
+    if schema == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1:
+        incident = require_dict(authority, "incident")
+    else:
+        predecessor_authority = require_dict(
+            authority, "predecessor_recovery_authority"
+        )
+        predecessor_authority_hash = require_sha256(
+            predecessor_authority, "authority_hash"
+        )
+        unhashed_predecessor_authority = dict(predecessor_authority)
+        unhashed_predecessor_authority.pop("authority_hash")
+        if (
+            predecessor_authority.get("schema_version")
+            != SUCCESSOR_AUTHORITY_SCHEMA_VERSION
+            or sha256_bytes(canonical_json(unhashed_predecessor_authority))
+            != predecessor_authority_hash
+            or predecessor_authority_hash
+            != require_dict(authority, "predecessor_execution").get(
+                "recovery_authority_hash"
+            )
+        ):
+            raise ValueError("recovery-lineage predecessor authority mismatch")
+        incident = require_dict(authority, "original_production_incident")
+        if incident != require_dict(predecessor_authority, "incident"):
+            raise ValueError("recovery-lineage original incident changed")
     recorded_incident = require_dict(lineage, "predecessor_incident")
     for key in (
         "directory",
@@ -284,15 +350,75 @@ def validate_recovery_lineage(
     for key in ("directory", "execution_id", "execution_hash"):
         if recorded_predecessor.get(key) != predecessor.get(key):
             raise ValueError(f"recovery-lineage predecessor {key} mismatch")
-    scope = require_dict(lineage, "result_scope")
-    if scope != {
+    expected_scope = {
         "source_execution_directory": execution_record.get("directory"),
         "selected_results": "successor-successes-only",
         "predecessor_failed_outputs_included": False,
         "predecessor_accounting_included": False,
-    }:
+    }
+    if schema == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2:
+        failure = require_dict(authority, "failed_r3_preflight")
+        if lineage.get("failed_r3_preflight") != failure:
+            raise ValueError("recovery-lineage failed-R3 binding changed")
+        failure_runtime = require_dict(failure, "runtime_boundary")
+        failure_consumption = require_dict(failure, "consumption")
+        failure_scheduler = require_dict(failure, "scheduler")
+        if (
+            failure_runtime.get("apptainer_invoked") is not False
+            or failure_runtime.get("geant4_invoked") is not False
+            or failure_consumption
+            != {"events_consumed": 0, "production_seeds_consumed": 0}
+            or not str(failure_scheduler.get("job_id", "")).isdigit()
+        ):
+            raise ValueError("recovery-lineage failed-R3 boundary is invalid")
+        original_attempt = require_dict(
+            require_dict(authority, "predecessor_recovery_authority"),
+            "predecessor_attempt",
+        )
+        if (
+            not isinstance(original_attempt.get("attempt_id"), str)
+            or not original_attempt["attempt_id"]
+            or not str(original_attempt.get("job_id", "")).isdigit()
+        ):
+            raise ValueError("recovery-lineage original attempt is invalid")
+        expected_scope.update(
+            {
+                "failed_r3_preflight_outputs_included": False,
+                "failed_r3_accounting_included": False,
+            }
+        )
+    scope = require_dict(lineage, "result_scope")
+    if scope != expected_scope:
         raise ValueError("recovery-lineage result scope is unsafe")
     return lineage
+
+
+def recovery_lineage_exclusions(
+    lineage: dict[str, Any],
+) -> tuple[set[str], set[str]]:
+    """Return immutable failed attempt/job identities excluded downstream."""
+
+    authority = require_dict(lineage, "recovery_authority")
+    if lineage.get("schema_version") == RECOVERY_LINEAGE_SCHEMA_VERSION:
+        attempt = require_dict(authority, "predecessor_attempt")
+        attempts = {require_string(attempt, "attempt_id")}
+        jobs = {str(attempt.get("job_id", ""))}
+    elif lineage.get("schema_version") == RECOVERY_LINEAGE_SCHEMA_VERSION_V2:
+        predecessor_authority = require_dict(
+            authority, "predecessor_recovery_authority"
+        )
+        attempt = require_dict(predecessor_authority, "predecessor_attempt")
+        failed_r3 = require_dict(authority, "failed_r3_preflight")
+        attempts = {require_string(attempt, "attempt_id")}
+        jobs = {
+            str(attempt.get("job_id", "")),
+            str(require_dict(failed_r3, "scheduler").get("job_id", "")),
+        }
+    else:
+        raise ValueError("unsupported recovery-lineage exclusion schema")
+    if any(not value or not value.isdigit() for value in jobs):
+        raise ValueError("recovery-lineage excluded scheduler job is invalid")
+    return attempts, jobs
 
 
 def _tasks_from_finalized_rows(
@@ -354,7 +480,10 @@ def validate_successor_seed_lineage(
 ) -> None:
     """Recompute every successor task/seed identity from the selected rows."""
 
-    if execution_record.get("schema_version") != EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1:
+    if execution_record.get("schema_version") not in {
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
+    }:
         return
     if lineage is None:
         raise ValueError("successor seed audit lacks recovery lineage")
@@ -418,14 +547,14 @@ def validate_successor_selection_and_accounting(
 ) -> None:
     """Bind selected rows and every copied accounting snapshot to the successor."""
 
-    if execution_record.get("schema_version") != EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1:
+    if execution_record.get("schema_version") not in {
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
+    }:
         return
     if lineage is None:
         raise ValueError("successor selection lacks recovery lineage")
-    authority = require_dict(lineage, "recovery_authority")
-    predecessor_attempt = require_dict(authority, "predecessor_attempt")
-    forbidden_attempt = predecessor_attempt.get("attempt_id")
-    forbidden_job = str(predecessor_attempt.get("job_id"))
+    forbidden_attempts, forbidden_jobs = recovery_lineage_exclusions(lineage)
     expected_selected = {
         row["logical_task_id"]: row["attempt_id"] for row in rows
     }
@@ -445,13 +574,13 @@ def validate_successor_selection_and_accounting(
     ):
         raise ValueError("successor selection record is inconsistent")
     selected_attempts = set(expected_selected.values())
-    if forbidden_attempt in selected_attempts:
+    if selected_attempts & forbidden_attempts:
         raise ValueError("successor selection contains predecessor attempt")
     selected_jobs_by_attempt: dict[str, set[str]] = {}
     for row in rows:
         attempt_id = row["attempt_id"]
         job_id = row["slurm_job_id"]
-        if job_id == forbidden_job:
+        if job_id in forbidden_jobs:
             raise ValueError("successor selection contains predecessor scheduler job")
         selected_jobs_by_attempt.setdefault(attempt_id, set()).add(job_id)
     accounting_attempts = validation.get("accounting_attempts")
@@ -460,7 +589,7 @@ def validate_successor_selection_and_accounting(
         or any(not isinstance(value, str) or not value for value in accounting_attempts)
         or len(set(accounting_attempts)) != len(accounting_attempts)
         or not selected_attempts.issubset(set(accounting_attempts))
-        or forbidden_attempt in accounting_attempts
+        or bool(set(accounting_attempts) & forbidden_attempts)
     ):
         raise ValueError("successor accounting-attempt registry is inconsistent")
     accounting_root = directory / "accounting"
@@ -478,7 +607,7 @@ def validate_successor_selection_and_accounting(
         job_id = str(frozen.get("job_id", ""))
         if frozen.get("attempt_id") != attempt_id or not job_id.isdigit():
             raise ValueError("successor copied accounting identity is invalid")
-        if job_id == forbidden_job:
+        if job_id in forbidden_jobs:
             raise ValueError("successor copied predecessor scheduler accounting")
         expected_jobs = selected_jobs_by_attempt.get(attempt_id)
         if expected_jobs is not None and expected_jobs != {job_id}:
@@ -501,8 +630,14 @@ def readiness_identity_for_execution(
             execution, repo_root=repo_root
         )
         authority = require_dict(execution.manifest, "recovery_authority")
-        incident = require_dict(authority, "incident")
-        return {
+        schema = execution.manifest.get("schema_version")
+        incident = require_dict(
+            authority,
+            "incident"
+            if schema == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1
+            else "original_production_incident",
+        )
+        identity = {
             "required": True,
             "authority": "recovery-successor",
             "path": str(path),
@@ -513,6 +648,18 @@ def readiness_identity_for_execution(
             "predecessor_incident_id": incident.get("incident_id"),
             "predecessor_incident_hash": incident.get("incident_hash"),
         }
+        if schema == EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2:
+            failed_r3 = require_dict(authority, "failed_r3_preflight")
+            identity.update(
+                {
+                    "failed_r3_id": failed_r3.get("failure_id"),
+                    "failed_r3_hash": failed_r3.get("failure_hash"),
+                    "failed_r3_job_id": require_dict(
+                        failed_r3, "scheduler"
+                    ).get("job_id"),
+                }
+            )
+        return identity
     path = repo_root.resolve() / READINESS_LOCK_RELATIVE
     if path.is_symlink() or not path.is_file():
         raise ValueError("formal finalization lacks a regular readiness lock")
@@ -876,9 +1023,10 @@ def load_production_checkpoint(
             raise ValueError("formal checkpoint validation requires repo_root")
         _, phase2a = load_phase2a_lock(repo_root)
         canonical_child = Path(require_string(phase2a, "canonical_directory")).resolve()
-        successor = execution.get("schema_version") == (
-            EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1
-        )
+        successor = execution.get("schema_version") in {
+            EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
+            EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
+        }
         if successor:
             if execution.get("object_kind") != SUCCESSOR_OBJECT_KIND:
                 raise ValueError("checkpoint successor schema/object-kind mismatch")
@@ -1055,6 +1203,7 @@ __all__ = [
     "FORMAL_CHECKPOINT_STATE",
     "MANAGED_FINALIZATION_SCHEMA_VERSION",
     "RECOVERY_LINEAGE_SCHEMA_VERSION",
+    "RECOVERY_LINEAGE_SCHEMA_VERSION_V2",
     "SUCCESSOR_FINALIZATION_BUNDLE_NAME",
     "ProductionCheckpoint",
     "is_successor_execution_manifest",
@@ -1066,6 +1215,7 @@ __all__ = [
     "read_tsv",
     "recursive_file_records",
     "readiness_identity_for_execution",
+    "recovery_lineage_exclusions",
     "recovery_lineage_from_execution",
     "validate_bc_only_s1_rows",
     "validate_recovery_lineage",

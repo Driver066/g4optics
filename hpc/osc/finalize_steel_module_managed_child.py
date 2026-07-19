@@ -31,6 +31,7 @@ from steel_module_production_checkpoint_lib import (
     managed_finalization_directory,
     publish_directory_no_replace,
     readiness_identity_for_execution,
+    recovery_lineage_exclusions,
     recovery_lineage_from_execution,
     write_recursive_checksums,
 )
@@ -460,23 +461,23 @@ def validate_selected_result_lineage(
     lineage = recovery_lineage_from_execution(execution)
     if lineage is None:
         return None
-    authority = lineage["recovery_authority"]
-    predecessor_attempt = authority["predecessor_attempt"]
-    forbidden_attempt = predecessor_attempt["attempt_id"]
-    forbidden_job = str(predecessor_attempt["job_id"])
+    forbidden_attempts, forbidden_jobs = recovery_lineage_exclusions(lineage)
     selected_attempts = {item.attempt["attempt_id"] for item in selected}
     selected_jobs = {item.job_id for item in selected}
     copied_accounting = set(accounting_attempts)
-    if forbidden_attempt in selected_attempts or forbidden_attempt in copied_accounting:
+    if (
+        selected_attempts & forbidden_attempts
+        or copied_accounting & forbidden_attempts
+    ):
         raise ValueError("successor finalization selected predecessor attempt evidence")
-    if forbidden_job in selected_jobs:
+    if selected_jobs & forbidden_jobs:
         raise ValueError("successor finalization selected predecessor scheduler job")
     for attempt_id in copied_accounting:
         accounting = load_frozen_accounting(execution, attempt_id)
         accounting_job = str(accounting.get("job_id", ""))
         if not accounting_job.isdigit():
             raise ValueError("successor finalization accounting job identity is invalid")
-        if accounting_job == forbidden_job:
+        if accounting_job in forbidden_jobs:
             raise ValueError(
                 "successor finalization copied predecessor scheduler accounting"
             )
@@ -825,6 +826,17 @@ def finalize(
                     ]["incident_hash"],
                 }
             )
+            failed_r3 = recovery_lineage.get("failed_r3_preflight")
+            if isinstance(failed_r3, dict):
+                execution_identity.update(
+                    {
+                        "failed_r3_id": failed_r3.get("failure_id"),
+                        "failed_r3_hash": failed_r3.get("failure_hash"),
+                        "failed_r3_job_id": failed_r3.get("scheduler", {}).get(
+                            "job_id"
+                        ),
+                    }
+                )
         stable_identity = {
             "execution": execution_identity,
             "program": program_identity,

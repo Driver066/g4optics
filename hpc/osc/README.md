@@ -555,37 +555,75 @@ validates the readiness-bound companion bytes, unique historical lineage, all
 32 failure logs, and the absence of simulation output. Successor execution
 materialization and retry remain separate, later gates.
 
-After the exact accepted incident has been sealed, R2 can preview and then
-materialize the dedicated successor without scheduler contact:
+Execution-v2 was subsequently materialized, but its first R3 job `50544247`
+failed before Apptainer because Slurm copied the directly submitted Python
+file into its spool and the sibling import was no longer resolvable. Preserve
+the four read-only inputs under `$R3ROOT` and seal this distinct failed
+preflight before creating the next execution generation:
 
 ```bash
-python3 hpc/osc/materialize_steel_module_production_successor_execution.py \
+FAILED_EXECUTION="$WORK/campaigns/steel-module-production-bc-s1-execution-v2"
+R3ROOT="$WORK/evidence/steel-module-production-r3"
+
+python3 hpc/osc/seal_steel_module_production_r3_failure.py \
+  --execution-dir "$FAILED_EXECUTION" \
+  --held-scontrol-input "$R3ROOT/held-scontrol-50544247.txt" \
+  --sacct-input "$R3ROOT/sacct-50544247.psv" \
+  --squeue-input "$R3ROOT/squeue-50544247.psv" \
+  --slurm-output-input "$R3ROOT/slurm-50544247.out" \
   --check-only
-python3 hpc/osc/materialize_steel_module_production_successor_execution.py \
+
+python3 hpc/osc/seal_steel_module_production_r3_failure.py \
+  --execution-dir "$FAILED_EXECUTION" \
+  --held-scontrol-input "$R3ROOT/held-scontrol-50544247.txt" \
+  --sacct-input "$R3ROOT/sacct-50544247.psv" \
+  --squeue-input "$R3ROOT/squeue-50544247.psv" \
+  --slurm-output-input "$R3ROOT/slurm-50544247.out" \
+  --seal
+```
+
+The formal sealer re-requires the four fixed OSC input SHA-256 values, the
+complete frozen v2 execution, exact traceback/accounting, absent v2 raw
+workspace, and zero event/seed consumption. It performs no scheduler call.
+Execution-v2 is permanently closed regardless of whether the bundle is being
+previewed or has been sealed.
+
+After the failed-preflight bundle exists, preview and materialize v3 without
+scheduler contact:
+
+```bash
+python3 hpc/osc/materialize_steel_module_production_successor_v3_execution.py \
+  --check-only
+python3 hpc/osc/materialize_steel_module_production_successor_v3_execution.py \
   --materialize
-python3 hpc/osc/validate_steel_module_production_successor_execution.py \
+python3 hpc/osc/validate_steel_module_production_successor_v3_execution.py \
   --check-only
 ```
 
 The successor is the fixed sibling
-`$WORK/campaigns/steel-module-production-bc-s1-execution-v2`. It binds the
-predecessor execution/readiness/attempt/job/event/accounting identities and the
-exact content-addressed incident. Its 32 task rows, scan arguments, 64 seeds,
-simulation source, executable, image, and Geant4 data identity must remain
-byte-for-byte equivalent to Phase-2A. R2 leaves `intents/`, `attempts/`, and
-`finalized/` empty and reports `submission_ready=false`; the historical
-readiness lock cannot authorize it. A separately authorized compute-node
-container preflight and a new additive recovery readiness lock are still
-required before even preparing the one-time `predecessor-retry` intent.
+`$WORK/campaigns/steel-module-production-bc-s1-execution-v3`. It binds the
+original production incident, complete closed-v2 authority, and exact failed
+R3 bundle. Its 32 task rows, scan arguments, 64 seeds, simulation source,
+executable, image, and Geant4 data identity remain byte-for-byte equivalent to
+Phase-2A/v2. V3 leaves `intents/`, `attempts/`, and `finalized/` empty and
+reports `submission_ready=false`; neither earlier readiness record can
+authorize it. A separately authorized compute-node container preflight and a
+new additive recovery-v2 readiness lock are still required before even
+preparing the one-time `predecessor-retry` intent.
 
-R3 is one non-array compute job. It invokes the pinned Apptainer image to test
-the exact production mount boundary but never invokes Geant4. The frozen R2
-control archive must be used as the job script source. A typical reviewed
+Replacement R3 is one non-array compute job. It invokes the pinned Apptainer
+image to test the exact production mount boundary but never invokes Geant4.
+The frozen v3 control archive must be used as the job-script source. The shell launcher
+is safe when Slurm copies it into `/var/spool`: it derives authority from the
+scheduler-established `--chdir` working directory, accepts no positional
+arguments, distrusts `SLURM_SUBMIT_DIR`, parses only the top-level execution
+hash in an isolated Python environment, and then runs the frozen Python probe
+by absolute path. A typical reviewed
 submission shape is shown below; `sbatch` and `scontrol release` remain separate
 explicit human actions and are not called by any R3 Python tool:
 
 ```bash
-EXECUTION="$WORK/campaigns/steel-module-production-bc-s1-execution-v2"
+EXECUTION="$WORK/campaigns/steel-module-production-bc-s1-execution-v3"
 CONTROL="$EXECUTION/sources/control"
 R3ROOT="$WORK/evidence/steel-module-production-r3"
 mkdir -p "$R3ROOT/raw" "$R3ROOT/accounting" "$R3ROOT/evidence"
@@ -600,8 +638,7 @@ SUBMISSION=$(sbatch --hold --parsable --no-requeue --export=NONE \
   --time=00:10:00 --nodes=1 --ntasks=1 --cpus-per-task=1 --mem=1G \
   --account PAS2524 --job-name "$JOB_NAME" --chdir "$EXECUTION" \
   --output "$R3ROOT/slurm-%j.out" \
-  "$CONTROL/hpc/osc/run_steel_module_production_r3_container_probe.py" \
-  --execution-dir "$EXECUTION" --workspace "$RAW")
+  "$CONTROL/hpc/osc/run_steel_module_production_r3_probe.sbatch")
 JOB_ID=${SUBMISSION%%;*}
 [[ "$JOB_ID" =~ ^[1-9][0-9]*$ ]] || { echo "invalid R3 job id" >&2; exit 1; }
 
@@ -647,8 +684,9 @@ python3 hpc/osc/generate_steel_module_production_successor_readiness.py \
 ```
 
 The candidate is not authority. It must be reviewed and then committed as
-`hpc/osc/configurations/steel-module-production-phase2b-recovery-v1.lock.json`
-in a clean, non-merge R4 commit whose only delta from frozen R2 is that file.
+`hpc/osc/configurations/steel-module-production-phase2b-recovery-v2.lock.json`
+in a clean, non-merge R4 commit whose only delta from the frozen v3
+implementation is that file.
 The manager revalidates the tracked lock and the complete R3 bundle before
 intent creation and again before scheduler contact.
 
@@ -656,7 +694,7 @@ After all 32 tasks have one valid selected success, the offline downstream
 sequence is:
 
 ```bash
-EXECUTION="$WORK/campaigns/steel-module-production-bc-s1-execution-v2"
+EXECUTION="$WORK/campaigns/steel-module-production-bc-s1-execution-v3"
 
 python3 hpc/osc/finalize_steel_module_managed_child.py \
   --execution-dir "$EXECUTION" --check-only
