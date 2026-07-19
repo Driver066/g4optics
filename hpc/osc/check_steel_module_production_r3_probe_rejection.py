@@ -18,6 +18,7 @@ from check_steel_module_production_successor import (
 )
 from steel_module_campaign_lib import canonical_json, sha256_bytes
 from steel_module_production_r3_probe_lib import (
+    RAW_PROBE_SCHEMA_VERSION_V2,
     REPORT_KEYS,
     canonical_r3_evidence_root,
     expected_r3_job_name,
@@ -91,7 +92,12 @@ def _check_formal_authority_root_dispatch(root: Path) -> None:
 
 
 def _make_rejected_raw(path: Path, successor: object) -> Path:
-    raw = _write_raw_workspace(path, successor, validate_success=False)
+    raw = _write_raw_workspace(
+        path,
+        successor,
+        validate_success=False,
+        schema_version=RAW_PROBE_SCHEMA_VERSION_V2,
+    )
     payload_path = raw / "probe_result.json"
     payload = json.loads(payload_path.read_text(encoding="utf-8"))
     payload["probe_passed"] = False
@@ -117,7 +123,7 @@ def _make_rejected_raw(path: Path, successor: object) -> Path:
     )
     _expect_failure(
         lambda: validate_raw_probe_workspace(raw, allow_test_mode=True),
-        "did not pass",
+        "workspace file set mismatch",
     )
     return raw
 
@@ -362,6 +368,33 @@ def main() -> int:
             if toctou_renamed.exists():
                 toctou_renamed.rename(mountpoint)
 
+        original_execution_snapshot = rejection_lib._execution_snapshot
+        snapshot_calls = 0
+
+        def rename_mountpoint_during_final_snapshot(
+            execution_dir: Path,
+        ) -> tuple[dict[str, str], str]:
+            nonlocal snapshot_calls
+            snapshot_calls += 1
+            result = original_execution_snapshot(execution_dir)
+            if snapshot_calls == 3:
+                mountpoint.rename(toctou_renamed)
+            return result
+
+        rejection_lib._execution_snapshot = (
+            rename_mountpoint_during_final_snapshot
+        )
+        try:
+            _expect_failure(
+                lambda: collect_r3_probe_rejection_evidence(**kwargs),
+                "name/token",
+            )
+            assert snapshot_calls == 3
+        finally:
+            rejection_lib._execution_snapshot = original_execution_snapshot
+            if toctou_renamed.exists():
+                toctou_renamed.rename(mountpoint)
+
         target = seal_r3_probe_rejection_evidence(**kwargs)
         recorded = validate_r3_probe_rejection_bundle(
             target,
@@ -377,7 +410,10 @@ def main() -> int:
         )
 
         passed = _write_raw_workspace(
-            root / "passed-raw", successor, validate_success=False
+            root / "passed-raw",
+            successor,
+            validate_success=False,
+            schema_version=RAW_PROBE_SCHEMA_VERSION_V2,
         )
         _expect_failure(
             lambda: validate_rejected_raw_probe_workspace(

@@ -381,10 +381,10 @@ def test_v4_r4_job_lineage(repo_root: Path, scratch: Path) -> None:
     )
 
 
-def test_formal_rejection_repo_root_propagation(
+def test_formal_rejection_rejects_custom_validator(
     repo_root: Path, scratch: Path
 ) -> None:
-    """A formal rejection validator must receive the caller's live root."""
+    """A formal rejection must never admit a fixture validator override."""
 
     scratch.mkdir()
     lineage = scratch / "lineage"
@@ -412,19 +412,17 @@ def test_formal_rejection_repo_root_propagation(
         calls.append((path, predecessor, test_mode, live_root))
         return payload
 
-    recorded = successor_lib._validated_r3_rejection(
-        rejection,
-        predecessor=v3,
-        test_mode=False,
-        repo_root=repo_root.resolve(),
-        validator=validator,
+    _assert_rejected(
+        lambda: successor_lib._validated_r3_rejection(
+            rejection,
+            predecessor=v3,
+            test_mode=False,
+            repo_root=repo_root.resolve(),
+            validator=validator,
+        ),
+        "formal R3 rejection accepted a custom validator",
     )
-    assert recorded is payload
-    assert calls == [(rejection, v3, False, repo_root.resolve())]
-    binding = successor_lib._rejection_binding(
-        rejection, recorded, predecessor=v3, test_mode=False
-    )
-    assert binding["scheduler"]["job_id"] == FORMAL_REJECTED_R3_JOB_ID
+    assert calls == []
 
 
 def test_success_sealer_rejects_closed_v3(scratch: Path) -> None:
@@ -502,7 +500,7 @@ def main() -> int:
         try:
             test_v4_materialization_and_lineage(repo_root, scratch / "materialize")
             test_v4_r4_job_lineage(repo_root, scratch / "readiness")
-            test_formal_rejection_repo_root_propagation(
+            test_formal_rejection_rejects_custom_validator(
                 repo_root, scratch / "formal-root"
             )
             test_success_sealer_rejects_closed_v3(scratch / "success-sealer")

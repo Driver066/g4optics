@@ -8,6 +8,10 @@ probe is run inside an already allocated compute job.  Terminal ``sacct`` and
 
 from __future__ import annotations
 
+import ctypes
+import errno
+import fcntl
+import hashlib
 import json
 import os
 import re
@@ -17,7 +21,9 @@ import shutil
 import socket
 import stat
 import subprocess
+import sys
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -35,6 +41,7 @@ from steel_module_production_checkpoint_lib import (
     verify_recursive_checksums,
     write_recursive_checksums,
 )
+from steel_module_production_phase2b_lib import _opened_portable_control_lock
 from steel_module_production_container_contract import (
     AdditionalBind,
     CONTAINER_EXECUTION_ROOT,
@@ -52,7 +59,14 @@ from steel_module_production_successor_lib import (
 )
 
 
-RAW_PROBE_SCHEMA_VERSION = "steel-module-production-r3-container-probe-raw-v2"
+# ``raw-v2`` is immutable historical evidence for rejected execution-v3 job
+# 50548308.  Active execution-v4 successes use the stricter lifecycle-aware
+# ``raw-v3`` contract below; the two schemas must never be interchangeable.
+RAW_PROBE_SCHEMA_VERSION_V2 = "steel-module-production-r3-container-probe-raw-v2"
+RAW_PROBE_SCHEMA_VERSION = "steel-module-production-r3-container-probe-raw-v3"
+MUTABLE_TREE_SNAPSHOT_SCHEMA_VERSION = (
+    "steel-module-production-r3-mutable-tree-snapshot-v1"
+)
 ACCOUNTING_INPUT_SCHEMA_VERSION = (
     "steel-module-production-r3-terminal-accounting-input-v2"
 )
@@ -89,6 +103,31 @@ RAW_WORKSPACE_FILES = frozenset(
         "stdout.txt",
     }
 )
+RETIREMENT_PARENT_NAME = "mountpoint-retirement"
+RETIREMENT_DESTINATION_NAME = "retired-mountpoint"
+RETIREMENT_MARKER_NAME = "retirement-marker.json"
+RETIREMENT_MARKER_SCHEMA_VERSION = (
+    "steel-module-production-r3-mountpoint-retirement-marker-v1"
+)
+RAW_V3_WORKSPACE_ENTRIES = RAW_WORKSPACE_FILES | {RETIREMENT_PARENT_NAME}
+
+MUTABLE_ROOTS = ("attempts", "finalized", "intents")
+MOUNTPOINT_MODE = 0o700
+
+
+@dataclass
+class _ProbeMountpointLease:
+    """Process-local authority for one transient bind target.
+
+    Device/inode identity deliberately stays in memory.  It is used only by
+    the creating process to authenticate deletion-free retirement and is
+    never serialized as reusable path-mutation authority.
+    """
+
+    parent_fd: int
+    name: str
+    device: int
+    inode: int
 
 
 WRITER_OPEN_REJECTED_FUNCTION = r"""
@@ -223,6 +262,565 @@ def _is_sha256(value: object) -> bool:
     )
 
 
+def _expected_retired_directory_link_count() -> int:
+    # Linux counts directory children only; APFS counts every directory entry.
+    # Formal execution is Linux, while deterministic local evidence tests and
+    # downloaded-bundle validation may run on macOS.
+    if sys.platform.startswith("linux"):
+        return 2
+    if sys.platform == "darwin":
+        return 3
+    raise ValueError("unsupported platform for R3 retirement link-count policy")
+
+
+def _sha256_regular_file_no_follow(path: Path) -> tuple[int, str]:
+    """Hash one regular file without ever following a symbolic link."""
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        result = os.fstat(descriptor)
+        if not stat.S_ISREG(result.st_mode):
+            raise ValueError(f"mutable-tree file changed type while hashing: {path}")
+        digest = hashlib.sha256()
+        while True:
+            block = os.read(descriptor, 1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+        final = os.fstat(descriptor)
+        if (
+            final.st_dev != result.st_dev
+            or final.st_ino != result.st_ino
+            or final.st_size != result.st_size
+            or final.st_mtime_ns != result.st_mtime_ns
+        ):
+            raise ValueError(f"mutable-tree file changed while hashing: {path}")
+        return result.st_size, digest.hexdigest()
+    finally:
+        os.close(descriptor)
+
+
+def _mutable_tree_snapshot(execution_dir: Path) -> dict[str, Any]:
+    """Snapshot all mutable roots without following links.
+
+    The record intentionally includes directories and special/link types, not
+    merely regular-file hashes.  This makes a transient mountpoint, a hostile
+    replacement, a residue, or an unexpected sibling visible in the evidence
+    boundary.
+    """
+
+    execution = execution_dir.expanduser().resolve()
+    records: list[dict[str, Any]] = []
+
+    def visit(path: Path, relative: str) -> None:
+        result = path.lstat()
+        mode = stat.S_IMODE(result.st_mode)
+        if stat.S_ISDIR(result.st_mode):
+            records.append({"path": relative, "type": "directory", "mode": mode})
+            for child in sorted(path.iterdir(), key=lambda value: value.name):
+                visit(child, f"{relative}/{child.name}")
+        elif stat.S_ISREG(result.st_mode):
+            size, digest = _sha256_regular_file_no_follow(path)
+            records.append(
+                {
+                    "path": relative,
+                    "type": "file",
+                    "mode": mode,
+                    "size_bytes": size,
+                    "sha256": digest,
+                }
+            )
+        elif stat.S_ISLNK(result.st_mode):
+            records.append(
+                {
+                    "path": relative,
+                    "type": "symlink",
+                    "mode": mode,
+                    "target": os.readlink(path),
+                }
+            )
+        else:
+            records.append({"path": relative, "type": "other", "mode": mode})
+
+    for name in MUTABLE_ROOTS:
+        visit(execution / name, name)
+    records.sort(key=lambda value: str(value["path"]))
+    payload: dict[str, Any] = {
+        "schema_version": MUTABLE_TREE_SNAPSHOT_SCHEMA_VERSION,
+        "scope": "intents-attempts-finalized-recursive-types-modes-file-hashes",
+        "records": records,
+    }
+    payload["snapshot_hash"] = _canonical_hash(payload)
+    return payload
+
+
+def _validate_mutable_tree_snapshot(snapshot: object) -> dict[str, Any]:
+    if not isinstance(snapshot, dict) or set(snapshot) != {
+        "schema_version",
+        "scope",
+        "records",
+        "snapshot_hash",
+    }:
+        raise ValueError("R3 mutable-tree snapshot field set mismatch")
+    unhashed = dict(snapshot)
+    recorded_hash = unhashed.pop("snapshot_hash", None)
+    records = snapshot.get("records")
+    if (
+        snapshot.get("schema_version") != MUTABLE_TREE_SNAPSHOT_SCHEMA_VERSION
+        or snapshot.get("scope")
+        != "intents-attempts-finalized-recursive-types-modes-file-hashes"
+        or not isinstance(records, list)
+        or not _is_sha256(recorded_hash)
+        or recorded_hash != _canonical_hash(unhashed)
+    ):
+        raise ValueError("R3 mutable-tree snapshot semantic hash mismatch")
+    seen: set[str] = set()
+    for record in records:
+        if not isinstance(record, dict):
+            raise ValueError("R3 mutable-tree snapshot record is not an object")
+        relative = record.get("path")
+        kind = record.get("type")
+        mode = record.get("mode")
+        if (
+            not isinstance(relative, str)
+            or not relative
+            or relative.startswith("/")
+            or ".." in Path(relative).parts
+            or Path(relative).parts[0] not in MUTABLE_ROOTS
+            or relative in seen
+            or kind not in {"directory", "file", "symlink", "other"}
+            or not isinstance(mode, int)
+            or isinstance(mode, bool)
+            or not 0 <= mode <= 0o777
+        ):
+            raise ValueError("R3 mutable-tree snapshot record identity is invalid")
+        seen.add(relative)
+        expected_keys = {
+            "directory": {"path", "type", "mode"},
+            "file": {"path", "type", "mode", "size_bytes", "sha256"},
+            "symlink": {"path", "type", "mode", "target"},
+            "other": {"path", "type", "mode"},
+        }[str(kind)]
+        if set(record) != expected_keys:
+            raise ValueError("R3 mutable-tree snapshot record fields are invalid")
+        if kind == "file" and (
+            not isinstance(record.get("size_bytes"), int)
+            or isinstance(record.get("size_bytes"), bool)
+            or record["size_bytes"] < 0
+            or not _is_sha256(record.get("sha256"))
+        ):
+            raise ValueError("R3 mutable-tree file record is invalid")
+        if kind == "symlink" and not isinstance(record.get("target"), str):
+            raise ValueError("R3 mutable-tree symlink record is invalid")
+    if [record["path"] for record in records] != sorted(seen):
+        raise ValueError("R3 mutable-tree snapshot records are not canonical")
+    return snapshot
+
+
+def _pristine_mutable_records() -> list[dict[str, Any]]:
+    return [
+        {"path": name, "type": "directory", "mode": MOUNTPOINT_MODE}
+        for name in MUTABLE_ROOTS
+    ]
+
+
+def _mountpoint_mutable_records(name: str) -> list[dict[str, Any]]:
+    records = [*_pristine_mutable_records()]
+    records.append(
+        {
+            "path": f"attempts/{name}",
+            "type": "directory",
+            "mode": MOUNTPOINT_MODE,
+        }
+    )
+    return sorted(records, key=lambda value: str(value["path"]))
+
+
+def _create_probe_mountpoint(execution_dir: Path, *, token: str) -> _ProbeMountpointLease:
+    """Exclusively create the authenticated bind target through a parent dirfd."""
+
+    if not TOKEN_RE.fullmatch(token):
+        raise ValueError("R3 mountpoint token is invalid")
+    attempts = execution_dir / "attempts"
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    parent_fd = os.open(attempts, flags)
+    name = ".r3-probe-" + token
+    try:
+        parent_stat = os.fstat(parent_fd)
+        visible_parent = attempts.lstat()
+        if (
+            not stat.S_ISDIR(parent_stat.st_mode)
+            or parent_stat.st_dev != visible_parent.st_dev
+            or parent_stat.st_ino != visible_parent.st_ino
+            or os.listdir(parent_fd)
+        ):
+            raise ValueError("R3 attempts parent changed after pristine validation")
+        os.mkdir(name, MOUNTPOINT_MODE, dir_fd=parent_fd)
+        result = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        lease = _ProbeMountpointLease(
+            parent_fd=parent_fd,
+            name=name,
+            device=result.st_dev,
+            inode=result.st_ino,
+        )
+        if (
+            not stat.S_ISDIR(result.st_mode)
+            or stat.S_IMODE(result.st_mode) != MOUNTPOINT_MODE
+            or result.st_nlink != 2
+            or sorted(os.listdir(parent_fd)) != [name]
+        ):
+            raise ValueError("R3 mountpoint creation boundary is invalid")
+        return lease
+    except BaseException:
+        # Never remove a path after an incomplete identity check.  A collision
+        # or replacement remains visible for incident review.
+        os.close(parent_fd)
+        raise
+
+
+def _rename_directory_no_replace(
+    source_parent_fd: int,
+    source_name: str,
+    destination_parent_fd: int,
+    destination_name: str,
+) -> str:
+    """Linux ``renameat2(RENAME_NOREPLACE)`` or fail closed."""
+
+    if not sys.platform.startswith("linux"):
+        raise OSError(errno.ENOSYS, "renameat2 is required on formal Linux")
+    libc = ctypes.CDLL(None, use_errno=True)
+    renameat2 = getattr(libc, "renameat2", None)
+    if renameat2 is None:
+        raise OSError(errno.ENOSYS, "renameat2 is unavailable")
+    renameat2.argtypes = [
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    ]
+    renameat2.restype = ctypes.c_int
+    result = renameat2(
+        source_parent_fd,
+        os.fsencode(source_name),
+        destination_parent_fd,
+        os.fsencode(destination_name),
+        1,  # RENAME_NOREPLACE
+    )
+    if result != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
+    return "linux-renameat2-noreplace"
+
+
+def _write_retirement_marker(leaf_fd: int, payload: dict[str, Any]) -> str:
+    content = (
+        json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    flags = (
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    descriptor = os.open(
+        RETIREMENT_MARKER_NAME, flags, 0o400, dir_fd=leaf_fd
+    )
+    try:
+        offset = 0
+        while offset < len(content):
+            written = os.write(descriptor, content[offset:])
+            if written <= 0:
+                raise OSError("short write while creating retirement marker")
+            offset += written
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    os.fsync(leaf_fd)
+    return sha256_bytes(content)
+
+
+def _retire_probe_mountpoint(
+    lease: _ProbeMountpointLease,
+    *,
+    workspace: Path,
+    marker_payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Atomically retain the exact leased inode; never delete any path."""
+
+    outcome: dict[str, Any] = {
+        "same_process_identity_verified": False,
+        "regular_directory_verified": False,
+        "mode_0700_verified": False,
+        "initially_empty_verified": False,
+        "no_sibling_verified": False,
+        "quarantine_parent_created_exclusively": False,
+        "atomic_noreplace_rename": False,
+        "rename_mechanism": None,
+        "source_absent_after_rename": False,
+        "attempts_pristine_after_rename": False,
+        "destination_identity_verified": False,
+        "marker_created_through_leaf_fd": False,
+        "marker_sha256": None,
+        "retained": False,
+        "deletion_performed": False,
+        "failure": None,
+    }
+    leaf_fd: int | None = None
+    workspace_fd: int | None = None
+    quarantine_fd: int | None = None
+    destination_fd: int | None = None
+    marker_fd: int | None = None
+    try:
+        names = sorted(os.listdir(lease.parent_fd))
+        outcome["no_sibling_verified"] = names == [lease.name]
+        if not outcome["no_sibling_verified"]:
+            outcome["failure"] = "unexpected-sibling-or-missing-mountpoint"
+            return outcome
+        result = os.stat(
+            lease.name, dir_fd=lease.parent_fd, follow_symlinks=False
+        )
+        outcome["same_process_identity_verified"] = (
+            result.st_dev == lease.device and result.st_ino == lease.inode
+        )
+        outcome["regular_directory_verified"] = stat.S_ISDIR(result.st_mode)
+        outcome["mode_0700_verified"] = (
+            stat.S_IMODE(result.st_mode) == MOUNTPOINT_MODE
+        )
+        if not all(
+            outcome[name]
+            for name in (
+                "same_process_identity_verified",
+                "regular_directory_verified",
+                "mode_0700_verified",
+            )
+        ):
+            outcome["failure"] = "mountpoint-identity-or-type-mismatch"
+            return outcome
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        leaf_fd = os.open(lease.name, flags, dir_fd=lease.parent_fd)
+        opened = os.fstat(leaf_fd)
+        if opened.st_dev != lease.device or opened.st_ino != lease.inode:
+            outcome["failure"] = "mountpoint-changed-before-retirement"
+            return outcome
+        outcome["initially_empty_verified"] = not os.listdir(leaf_fd)
+        if not outcome["initially_empty_verified"]:
+            outcome["failure"] = "mountpoint-not-empty"
+            return outcome
+
+        workspace_flags = (
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        workspace_fd = os.open(workspace, workspace_flags)
+        workspace_stat = os.fstat(workspace_fd)
+        visible_workspace = workspace.lstat()
+        if (
+            not stat.S_ISDIR(workspace_stat.st_mode)
+            or workspace_stat.st_dev != visible_workspace.st_dev
+            or workspace_stat.st_ino != visible_workspace.st_ino
+        ):
+            outcome["failure"] = "raw-workspace-changed-before-retirement"
+            return outcome
+        os.mkdir(
+            RETIREMENT_PARENT_NAME,
+            MOUNTPOINT_MODE,
+            dir_fd=workspace_fd,
+        )
+        outcome["quarantine_parent_created_exclusively"] = True
+        quarantine_fd = os.open(
+            RETIREMENT_PARENT_NAME, workspace_flags, dir_fd=workspace_fd
+        )
+        quarantine_stat = os.fstat(quarantine_fd)
+        if (
+            not stat.S_ISDIR(quarantine_stat.st_mode)
+            or stat.S_IMODE(quarantine_stat.st_mode) != MOUNTPOINT_MODE
+            or os.listdir(quarantine_fd)
+        ):
+            outcome["failure"] = "retirement-quarantine-is-unsafe"
+            return outcome
+
+        mechanism = _rename_directory_no_replace(
+            lease.parent_fd,
+            lease.name,
+            quarantine_fd,
+            RETIREMENT_DESTINATION_NAME,
+        )
+        outcome["atomic_noreplace_rename"] = True
+        outcome["rename_mechanism"] = mechanism
+        outcome["source_absent_after_rename"] = lease.name not in os.listdir(
+            lease.parent_fd
+        )
+        outcome["attempts_pristine_after_rename"] = not os.listdir(
+            lease.parent_fd
+        )
+        destination = os.stat(
+            RETIREMENT_DESTINATION_NAME,
+            dir_fd=quarantine_fd,
+            follow_symlinks=False,
+        )
+        outcome["destination_identity_verified"] = (
+            destination.st_dev == lease.device
+            and destination.st_ino == lease.inode
+            and stat.S_ISDIR(destination.st_mode)
+            and stat.S_IMODE(destination.st_mode) == MOUNTPOINT_MODE
+        )
+        if not all(
+            outcome[name]
+            for name in (
+                "source_absent_after_rename",
+                "attempts_pristine_after_rename",
+                "destination_identity_verified",
+            )
+        ):
+            outcome["failure"] = "retired-destination-identity-mismatch"
+            return outcome
+        destination_fd = os.open(
+            RETIREMENT_DESTINATION_NAME,
+            workspace_flags,
+            dir_fd=quarantine_fd,
+        )
+        destination_opened = os.fstat(destination_fd)
+        if (
+            destination_opened.st_dev != lease.device
+            or destination_opened.st_ino != lease.inode
+            or os.listdir(destination_fd)
+        ):
+            outcome["failure"] = "retired-destination-changed-before-marker"
+            return outcome
+        marker_sha = _write_retirement_marker(leaf_fd, marker_payload)
+        outcome["marker_created_through_leaf_fd"] = True
+        outcome["marker_sha256"] = marker_sha
+
+        final = os.stat(
+            RETIREMENT_DESTINATION_NAME,
+            dir_fd=quarantine_fd,
+            follow_symlinks=False,
+        )
+        marker = os.stat(
+            RETIREMENT_MARKER_NAME,
+            dir_fd=destination_fd,
+            follow_symlinks=False,
+        )
+        marker_fd = os.open(
+            RETIREMENT_MARKER_NAME,
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=destination_fd,
+        )
+        marker_digest = hashlib.sha256()
+        while True:
+            block = os.read(marker_fd, 1024 * 1024)
+            if not block:
+                break
+            marker_digest.update(block)
+        final_checks = {
+            "destination-device": final.st_dev == lease.device,
+            "destination-inode": final.st_ino == lease.inode,
+            "destination-directory": stat.S_ISDIR(final.st_mode),
+            "destination-mode": stat.S_IMODE(final.st_mode) == MOUNTPOINT_MODE,
+            "destination-link-count": final.st_nlink
+            == _expected_retired_directory_link_count(),
+            "marker-file": stat.S_ISREG(marker.st_mode),
+            "marker-mode": stat.S_IMODE(marker.st_mode) == 0o400,
+            "marker-link-count": marker.st_nlink == 1,
+            "marker-hash": marker_digest.hexdigest() == marker_sha,
+            "destination-entry-set": sorted(os.listdir(destination_fd))
+            == [RETIREMENT_MARKER_NAME],
+            "quarantine-entry-set": sorted(os.listdir(quarantine_fd))
+            == [RETIREMENT_DESTINATION_NAME],
+            "attempts-empty": not os.listdir(lease.parent_fd),
+        }
+        if not all(final_checks.values()):
+            failed = ",".join(
+                name for name, accepted in final_checks.items() if not accepted
+            )
+            outcome["failure"] = (
+                "retired-destination-changed-after-marker:" + failed
+            )
+            return outcome
+        os.fsync(destination_fd)
+        os.fsync(quarantine_fd)
+        os.fsync(workspace_fd)
+        os.fsync(lease.parent_fd)
+        outcome["retained"] = True
+        return outcome
+    except OSError as exc:
+        outcome["failure"] = f"oserror-{exc.errno}"
+        return outcome
+    finally:
+        if marker_fd is not None:
+            os.close(marker_fd)
+        if destination_fd is not None:
+            os.close(destination_fd)
+        if quarantine_fd is not None:
+            os.close(quarantine_fd)
+        if workspace_fd is not None:
+            os.close(workspace_fd)
+        if leaf_fd is not None:
+            os.close(leaf_fd)
+        os.close(lease.parent_fd)
+
+
+def _validate_retirement_tree(
+    workspace: Path,
+    *,
+    marker_payload: dict[str, Any],
+    expected_marker_sha256: str,
+) -> None:
+    parent = workspace / RETIREMENT_PARENT_NAME
+    destination = parent / RETIREMENT_DESTINATION_NAME
+    marker = destination / RETIREMENT_MARKER_NAME
+    paths = (parent, destination, marker)
+    if any(path.is_symlink() for path in paths):
+        raise ValueError("R3 retirement tree contains a symbolic link")
+    parent_stat = parent.lstat()
+    destination_stat = destination.lstat()
+    marker_stat = marker.lstat()
+    checks = {
+        "parent-directory": stat.S_ISDIR(parent_stat.st_mode),
+        "parent-mode": stat.S_IMODE(parent_stat.st_mode) == MOUNTPOINT_MODE,
+        "parent-link-count": parent_stat.st_nlink == 3,
+        "destination-directory": stat.S_ISDIR(destination_stat.st_mode),
+        "destination-mode": stat.S_IMODE(destination_stat.st_mode)
+        == MOUNTPOINT_MODE,
+        "destination-link-count": destination_stat.st_nlink
+        == _expected_retired_directory_link_count(),
+        "marker-file": stat.S_ISREG(marker_stat.st_mode),
+        "marker-mode": stat.S_IMODE(marker_stat.st_mode) == 0o400,
+        "marker-link-count": marker_stat.st_nlink == 1,
+        "parent-entry-set": sorted(path.name for path in parent.iterdir())
+        == [RETIREMENT_DESTINATION_NAME],
+        "destination-entry-set": sorted(
+            path.name for path in destination.iterdir()
+        )
+        == [RETIREMENT_MARKER_NAME],
+        "marker-payload": load_json(marker) == marker_payload,
+        "marker-sha-shape": _is_sha256(expected_marker_sha256),
+        "marker-sha": sha256_file(marker) == expected_marker_sha256,
+    }
+    if not all(checks.values()):
+        failed = ",".join(name for name, accepted in checks.items() if not accepted)
+        raise ValueError(
+            "R3 retirement tree semantic validation failed: " + failed
+        )
+
+
 def _write_exclusive_json(path: Path, value: object) -> None:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     descriptor = os.open(path, flags, 0o444)
@@ -307,6 +905,20 @@ def _execution_snapshot(execution_dir: Path) -> tuple[dict[str, str], str]:
     return records, _canonical_hash(records)
 
 
+def _stable_execution_boundary_snapshot(
+    execution_dir: Path,
+) -> tuple[dict[str, Any], dict[str, str], str]:
+    """Sandwich the regular-file scan between two complete tree snapshots."""
+
+    mutable_before = _mutable_tree_snapshot(execution_dir)
+    records, regular_hash = _execution_snapshot(execution_dir)
+    mutable_after = _mutable_tree_snapshot(execution_dir)
+    if mutable_before != mutable_after:
+        raise ValueError("R3 execution mutable tree changed during snapshot")
+    _validate_mutable_tree_snapshot(mutable_before)
+    return mutable_before, records, regular_hash
+
+
 def expected_r3_job_name(execution_hash: str) -> str:
     if not _is_sha256(execution_hash):
         raise ValueError("R3 job-name derivation requires an execution SHA-256")
@@ -349,6 +961,33 @@ def run_r3_container_probe(
     )
     if execution.manifest.get("schema_version") != SUCCESSOR_EXECUTION_SCHEMA_VERSION:
         raise ValueError("R3 probe requires the incident-bound successor execution")
+    lock_record = execution.manifest["artifacts"]["control_lock"]
+    with _opened_portable_control_lock(
+        execution.directory / lock_record["path"],
+        lock_record,
+        operation=fcntl.LOCK_EX,
+    ):
+        return _run_r3_container_probe_locked(
+            execution=execution,
+            control_root=control_root,
+            workspace=workspace,
+            environment_source=environment_source,
+            clean_environment=clean_environment,
+            apptainer_path=apptainer_path,
+        )
+
+
+def _run_r3_container_probe_locked(
+    *,
+    execution: Any,
+    control_root: Path,
+    workspace: Path,
+    environment_source: Mapping[str, str],
+    clean_environment: Mapping[str, str],
+    apptainer_path: Path | None,
+) -> Path:
+    """Run the complete lifecycle while the portable control lock is exclusive."""
+
     validate_successor_r2_boundary(execution, repo_root=control_root)
     job_id, job_name = _slurm_identity(
         environment_source,
@@ -364,8 +1003,24 @@ def run_r3_container_probe(
     challenge.write_bytes(secrets.token_bytes(64))
     challenge.chmod(0o444)
     challenge_sha = sha256_file(challenge)
+    marker_payload = {
+        "schema_version": RETIREMENT_MARKER_SCHEMA_VERSION,
+        "probe_token": token,
+        "execution_id": execution.execution_id,
+        "execution_hash": execution.execution_hash,
+        "challenge_sha256": challenge_sha,
+        "source_relative_path": f"attempts/.r3-probe-{token}",
+        "quarantine_relative_path": (
+            f"{RETIREMENT_PARENT_NAME}/{RETIREMENT_DESTINATION_NAME}"
+        ),
+        "deletion_performed": False,
+    }
 
-    before_records, before_hash = _execution_snapshot(execution_dir)
+    baseline_mutable, before_records, before_hash = (
+        _stable_execution_boundary_snapshot(execution_dir)
+    )
+    if baseline_mutable["records"] != _pristine_mutable_records():
+        raise ValueError("R3 probe did not start from the strict pristine boundary")
     sources = execution.manifest["sources"]
     simulation_root = execution_dir / sources["simulation"]["path"]
     control_source = execution_dir / sources["control_plane"]["path"]
@@ -415,66 +1070,198 @@ def run_r3_container_probe(
     selected_apptainer = Path(engine_identity["apptainer_path"])
     container_probe_root = CONTAINER_PROBE_PREFIX + token
     container_adjacent = CONTAINER_PROBE_PREFIX + "adjacent-" + token
-    prefix = build_production_apptainer_prefix(
-        apptainer=selected_apptainer,
-        inputs=ProductionContainerInputs(
-            image=image,
-            simulation_root=simulation_root,
-            control_root=control_source,
-            execution_root=execution_dir,
-            data_root=data_root,
-            executable_directory=executable.parent,
-        ),
-        additional_binds=(
-            AdditionalBind(workspace, container_probe_root, writable=True),
-        ),
+    lease = _create_probe_mountpoint(execution_dir, token=token)
+    try:
+        before_container_mutable, mounted_records, mounted_hash = (
+            _stable_execution_boundary_snapshot(execution_dir)
+        )
+    except BaseException as exc:
+        retirement = _retire_probe_mountpoint(
+            lease, workspace=workspace, marker_payload=marker_payload
+        )
+        if retirement.get("retained") is not True:
+            raise ValueError(
+                "R3 pre-container snapshot failed and mountpoint retirement was "
+                f"unsafe: {retirement.get('failure')}"
+            ) from exc
+        raise
+    if (
+        before_container_mutable["records"]
+        != _mountpoint_mutable_records(lease.name)
+        or mounted_records != before_records
+        or mounted_hash != before_hash
+    ):
+        retirement = _retire_probe_mountpoint(
+            lease, workspace=workspace, marker_payload=marker_payload
+        )
+        raise ValueError(
+            "R3 mountpoint pre-container snapshot is invalid; "
+            f"retirement_retained={retirement['retained']}"
+        )
+
+    result: subprocess.CompletedProcess[str] | None = None
+    report: dict[str, bool] | None = None
+    roundtrip_sha: str | None = None
+    after_container_mutable: dict[str, Any] | None = None
+    command: list[str] | None = None
+    probe_error: BaseException | None = None
+    try:
+        prefix = build_production_apptainer_prefix(
+            apptainer=selected_apptainer,
+            inputs=ProductionContainerInputs(
+                image=image,
+                simulation_root=simulation_root,
+                control_root=control_source,
+                execution_root=execution_dir,
+                data_root=data_root,
+                executable_directory=executable.parent,
+            ),
+            additional_binds=(
+                AdditionalBind(workspace, container_probe_root, writable=True),
+            ),
+        )
+        command = [
+            *prefix,
+            "bash",
+            "-lc",
+            CONTAINER_PROBE_SCRIPT,
+            "bash",
+            CONTAINER_EXECUTION_ROOT,
+            str(execution_dir),
+            container_probe_root,
+            container_adjacent,
+            token,
+            challenge_sha,
+        ]
+        result = subprocess.run(
+            command,
+            cwd=control_source,
+            env=clean_environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        after_container_mutable, post_container_records, post_container_hash = (
+            _stable_execution_boundary_snapshot(execution_dir)
+        )
+        if (
+            post_container_records != mounted_records
+            or post_container_hash != mounted_hash
+        ):
+            raise ValueError("R3 execution regular files changed during container probe")
+        _write_exclusive_text(workspace / "stdout.txt", result.stdout)
+        _write_exclusive_text(workspace / "stderr.txt", result.stderr)
+        report = _parse_container_report(workspace / "container-report.tsv")
+        roundtrip = workspace / "container-roundtrip.bin"
+        roundtrip_sha = sha256_file(roundtrip) if roundtrip.is_file() else None
+    except BaseException as exc:
+        probe_error = exc
+    retirement = _retire_probe_mountpoint(
+        lease, workspace=workspace, marker_payload=marker_payload
     )
-    command = [
-        *prefix,
-        "bash",
-        "-lc",
-        CONTAINER_PROBE_SCRIPT,
-        "bash",
-        CONTAINER_EXECUTION_ROOT,
-        str(execution_dir),
-        container_probe_root,
-        container_adjacent,
-        token,
-        challenge_sha,
-    ]
-    result = subprocess.run(
-        command,
-        cwd=control_source,
-        env=clean_environment,
-        capture_output=True,
-        text=True,
-        check=False,
+    if probe_error is not None:
+        if retirement.get("retained") is not True:
+            raise ValueError(
+                "R3 probe failed and its transient mountpoint was not safely "
+                f"retired: {retirement.get('failure')}"
+            ) from probe_error
+        raise probe_error
+    if retirement.get("retained") is not True:
+        raise ValueError(
+            "R3 transient mountpoint retirement failed: "
+            f"{retirement.get('failure')}"
+        )
+
+    after_retirement_mutable, after_records, after_hash = (
+        _stable_execution_boundary_snapshot(execution_dir)
     )
-    _write_exclusive_text(workspace / "stdout.txt", result.stdout)
-    _write_exclusive_text(workspace / "stderr.txt", result.stderr)
-    after_records, after_hash = _execution_snapshot(execution_dir)
-    report = _parse_container_report(workspace / "container-report.tsv")
-    roundtrip = workspace / "container-roundtrip.bin"
-    roundtrip_sha = sha256_file(roundtrip) if roundtrip.is_file() else None
-    workspace_files_before_result = {
-        path.name for path in workspace.iterdir() if path.is_file() and not path.is_symlink()
-    }
-    expected_before_result = RAW_WORKSPACE_FILES - {"probe_result.json"}
+    validate_successor_r2_boundary(execution, repo_root=control_root)
+    admission_mutable, admission_records, admission_hash = (
+        _stable_execution_boundary_snapshot(execution_dir)
+    )
+    generic_boundary_validated = True
+    _validate_retirement_tree(
+        workspace,
+        marker_payload=marker_payload,
+        expected_marker_sha256=str(retirement["marker_sha256"]),
+    )
+    workspace_entries_before_result = {path.name for path in workspace.iterdir()}
+    workspace_entries_safe = all(
+        not path.is_symlink() for path in workspace.iterdir()
+    )
+    expected_before_result = RAW_V3_WORKSPACE_ENTRIES - {"probe_result.json"}
     passed = (
-        result.returncode == 0
+        result is not None
+        and result.returncode == 0
+        and report is not None
         and all(report.values())
         and roundtrip_sha == challenge_sha
         and before_records == after_records
         and before_hash == after_hash
+        and admission_records == before_records
+        and admission_hash == before_hash
+        and baseline_mutable == after_retirement_mutable
+        and admission_mutable == baseline_mutable
+        and before_container_mutable == after_container_mutable
+        and before_container_mutable["records"]
+        == _mountpoint_mutable_records(lease.name)
         and not adjacent.exists()
-        and workspace_files_before_result == expected_before_result
+        and workspace_entries_before_result == expected_before_result
+        and workspace_entries_safe
+        and generic_boundary_validated
     )
+    if not passed:
+        raise ValueError(f"R3 container isolation probe failed; evidence: {workspace}")
+    assert result is not None and report is not None and command is not None
+    mountpoint_lifecycle = {
+        "relative_path": f"attempts/{lease.name}",
+        "mode": MOUNTPOINT_MODE,
+        "parent_opened_with_no_follow": True,
+        "created_with_parent_dirfd": True,
+        "created_exclusively": True,
+        "same_process_identity_only": True,
+        "retirement_same_identity_verified": retirement[
+            "same_process_identity_verified"
+        ],
+        "retirement_regular_directory_verified": retirement[
+            "regular_directory_verified"
+        ],
+        "retirement_mode_verified": retirement["mode_0700_verified"],
+        "retirement_initially_empty_verified": retirement[
+            "initially_empty_verified"
+        ],
+        "retirement_no_sibling_verified": retirement["no_sibling_verified"],
+        "quarantine_parent_created_exclusively": retirement[
+            "quarantine_parent_created_exclusively"
+        ],
+        "atomic_noreplace_rename": retirement["atomic_noreplace_rename"],
+        "rename_mechanism": retirement["rename_mechanism"],
+        "source_absent_after_rename": retirement[
+            "source_absent_after_rename"
+        ],
+        "attempts_pristine_after_rename": retirement[
+            "attempts_pristine_after_rename"
+        ],
+        "retirement_destination_identity_verified": retirement[
+            "destination_identity_verified"
+        ],
+        "retirement_marker_created_through_leaf_fd": retirement[
+            "marker_created_through_leaf_fd"
+        ],
+        "retirement_marker_sha256": retirement["marker_sha256"],
+        "quarantine_relative_path": marker_payload[
+            "quarantine_relative_path"
+        ],
+        "retirement_retained": retirement["retained"],
+        "deletion_performed": retirement["deletion_performed"],
+        "identity_persisted": False,
+    }
     payload: dict[str, Any] = {
         "schema_version": RAW_PROBE_SCHEMA_VERSION,
         "created_at_utc": utc_now(),
         "test_mode": False,
-        "accepted_compute_preflight_evidence": passed,
-        "probe_passed": passed,
+        "accepted_compute_preflight_evidence": True,
+        "probe_passed": True,
         "scheduler_submission_performed_by_tool": False,
         "scheduler_contact_performed_by_tool": False,
         "apptainer_invoked": True,
@@ -528,26 +1315,43 @@ def run_r3_container_probe(
         "execution_snapshot_record_count": len(before_records),
         "execution_snapshot_unchanged": before_records == after_records,
         "adjacent_host_sibling_absent": not adjacent.exists(),
+        "mutable_tree_snapshot_baseline": baseline_mutable,
+        "mutable_tree_snapshot_before_container": before_container_mutable,
+        "mutable_tree_snapshot_after_container": after_container_mutable,
+        "mutable_tree_snapshot_after_retirement": after_retirement_mutable,
+        "mountpoint_lifecycle": mountpoint_lifecycle,
+        "generic_v4_boundary_validated_after_retirement": generic_boundary_validated,
     }
     payload["raw_result_hash"] = _canonical_hash(payload)
     _write_exclusive_json(workspace / "probe_result.json", payload)
-    if not passed:
-        raise ValueError(f"R3 container isolation probe failed; evidence: {workspace}")
     return workspace
 
 
 def _validate_raw_probe_workspace_common(
     workspace: Path,
     *,
+    expected_schema: str,
     allow_test_mode: bool = False,
     require_recorded_location: bool = True,
 ) -> dict[str, Any]:
+    if expected_schema not in {
+        RAW_PROBE_SCHEMA_VERSION_V2,
+        RAW_PROBE_SCHEMA_VERSION,
+    }:
+        raise ValueError("unsupported raw R3 probe schema policy")
     requested = workspace.expanduser()
     if requested.is_symlink() or not requested.is_dir():
         raise ValueError("raw R3 probe workspace must be a regular directory")
     directory = requested.resolve()
     entries = {path.name for path in directory.iterdir()}
-    if entries != RAW_WORKSPACE_FILES or any(path.is_symlink() for path in directory.iterdir()):
+    expected_entries = (
+        RAW_V3_WORKSPACE_ENTRIES
+        if expected_schema == RAW_PROBE_SCHEMA_VERSION
+        else RAW_WORKSPACE_FILES
+    )
+    if entries != expected_entries or any(
+        path.is_symlink() for path in directory.iterdir()
+    ):
         raise ValueError("raw R3 probe workspace file set mismatch")
     payload = load_json(directory / "probe_result.json")
     required = {
@@ -589,6 +1393,15 @@ def _validate_raw_probe_workspace_common(
         "adjacent_host_sibling_absent",
         "raw_result_hash",
     }
+    if expected_schema == RAW_PROBE_SCHEMA_VERSION:
+        required |= {
+            "mutable_tree_snapshot_baseline",
+            "mutable_tree_snapshot_before_container",
+            "mutable_tree_snapshot_after_container",
+            "mutable_tree_snapshot_after_retirement",
+            "mountpoint_lifecycle",
+            "generic_v4_boundary_validated_after_retirement",
+        }
     if set(payload) != required:
         raise ValueError("raw R3 probe result key set mismatch")
     recorded_hash = payload.pop("raw_result_hash", None)
@@ -602,7 +1415,7 @@ def _validate_raw_probe_workspace_common(
     host_environment = payload.get("host_environment")
     test_mode = payload.get("test_mode")
     if (
-        payload.get("schema_version") != RAW_PROBE_SCHEMA_VERSION
+        payload.get("schema_version") != expected_schema
         or not isinstance(test_mode, bool)
         or (test_mode and not allow_test_mode)
         or not isinstance(
@@ -748,7 +1561,94 @@ def _validate_raw_probe_workspace_common(
     parsed_report = _parse_container_report(directory / "container-report.tsv")
     if parsed_report != report:
         raise ValueError("raw R3 container report disagrees with result")
+    if expected_schema == RAW_PROBE_SCHEMA_VERSION:
+        _validate_active_raw_probe_lifecycle(payload)
+        marker_payload = _expected_retirement_marker_payload(payload)
+        lifecycle = payload["mountpoint_lifecycle"]
+        _validate_retirement_tree(
+            directory,
+            marker_payload=marker_payload,
+            expected_marker_sha256=str(
+                lifecycle.get("retirement_marker_sha256", "")
+            ),
+        )
     return payload
+
+
+def _validate_active_raw_probe_lifecycle(payload: dict[str, Any]) -> None:
+    baseline = _validate_mutable_tree_snapshot(
+        payload.get("mutable_tree_snapshot_baseline")
+    )
+    before_container = _validate_mutable_tree_snapshot(
+        payload.get("mutable_tree_snapshot_before_container")
+    )
+    after_container = _validate_mutable_tree_snapshot(
+        payload.get("mutable_tree_snapshot_after_container")
+    )
+    after_retirement = _validate_mutable_tree_snapshot(
+        payload.get("mutable_tree_snapshot_after_retirement")
+    )
+    token = str(payload.get("probe_token", ""))
+    name = ".r3-probe-" + token
+    lifecycle = payload.get("mountpoint_lifecycle")
+    expected_lifecycle = {
+        "relative_path": f"attempts/{name}",
+        "mode": MOUNTPOINT_MODE,
+        "parent_opened_with_no_follow": True,
+        "created_with_parent_dirfd": True,
+        "created_exclusively": True,
+        "same_process_identity_only": True,
+        "retirement_same_identity_verified": True,
+        "retirement_regular_directory_verified": True,
+        "retirement_mode_verified": True,
+        "retirement_initially_empty_verified": True,
+        "retirement_no_sibling_verified": True,
+        "quarantine_parent_created_exclusively": True,
+        "atomic_noreplace_rename": True,
+        "rename_mechanism": "linux-renameat2-noreplace",
+        "source_absent_after_rename": True,
+        "attempts_pristine_after_rename": True,
+        "retirement_destination_identity_verified": True,
+        "retirement_marker_created_through_leaf_fd": True,
+        "retirement_marker_sha256": lifecycle.get("retirement_marker_sha256")
+        if isinstance(lifecycle, dict)
+        else None,
+        "quarantine_relative_path": (
+            f"{RETIREMENT_PARENT_NAME}/{RETIREMENT_DESTINATION_NAME}"
+        ),
+        "retirement_retained": True,
+        "deletion_performed": False,
+        "identity_persisted": False,
+    }
+    if (
+        baseline["records"] != _pristine_mutable_records()
+        or before_container["records"] != _mountpoint_mutable_records(name)
+        or after_container != before_container
+        or after_retirement != baseline
+        or lifecycle != expected_lifecycle
+        or not _is_sha256(expected_lifecycle["retirement_marker_sha256"])
+        or payload.get("generic_v4_boundary_validated_after_retirement")
+        is not True
+        or payload.get("execution_schema_version")
+        != SUCCESSOR_EXECUTION_SCHEMA_VERSION
+    ):
+        raise ValueError("active raw R3 mountpoint lifecycle validation failed")
+
+
+def _expected_retirement_marker_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    token = str(payload.get("probe_token", ""))
+    return {
+        "schema_version": RETIREMENT_MARKER_SCHEMA_VERSION,
+        "probe_token": token,
+        "execution_id": payload.get("execution_id"),
+        "execution_hash": payload.get("execution_hash"),
+        "challenge_sha256": payload.get("challenge_sha256"),
+        "source_relative_path": f"attempts/.r3-probe-{token}",
+        "quarantine_relative_path": (
+            f"{RETIREMENT_PARENT_NAME}/{RETIREMENT_DESTINATION_NAME}"
+        ),
+        "deletion_performed": False,
+    }
 
 
 def validate_raw_probe_workspace(
@@ -761,6 +1661,7 @@ def validate_raw_probe_workspace(
 
     payload = _validate_raw_probe_workspace_common(
         workspace,
+        expected_schema=RAW_PROBE_SCHEMA_VERSION,
         allow_test_mode=allow_test_mode,
         require_recorded_location=require_recorded_location,
     )
@@ -796,6 +1697,7 @@ def validate_rejected_raw_probe_workspace(
         raise ValueError("rejected R3 probe false-key policy is invalid")
     payload = _validate_raw_probe_workspace_common(
         workspace,
+        expected_schema=RAW_PROBE_SCHEMA_VERSION_V2,
         allow_test_mode=allow_test_mode,
         require_recorded_location=require_recorded_location,
     )
@@ -1285,6 +2187,11 @@ def validate_r3_probe_evidence(
     expected_records = {
         "evidence.json",
         *(f"raw/{name}" for name in RAW_WORKSPACE_FILES),
+        (
+            "raw/"
+            f"{RETIREMENT_PARENT_NAME}/{RETIREMENT_DESTINATION_NAME}/"
+            f"{RETIREMENT_MARKER_NAME}"
+        ),
         "accounting/SHA256SUMS",
         "accounting/held_scontrol.txt",
         "accounting/sacct.psv",
@@ -1376,6 +2283,7 @@ __all__ = [
     "CONTAINER_PROBE_PREFIX",
     "EVIDENCE_SCHEMA_VERSION",
     "RAW_PROBE_SCHEMA_VERSION",
+    "RAW_PROBE_SCHEMA_VERSION_V2",
     "REPORT_KEYS",
     "WRITER_OPEN_REJECTED_FUNCTION",
     "expected_r3_job_name",

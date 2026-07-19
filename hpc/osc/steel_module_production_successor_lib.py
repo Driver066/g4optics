@@ -1170,6 +1170,10 @@ def _validated_r3_rejection(
     repo_root: Path | None,
     validator: R3RejectionValidator | None,
 ) -> dict[str, Any]:
+    if validator is not None and not test_mode:
+        raise ValueError(
+            "formal R3 rejection validation cannot use a custom validator"
+        )
     if validator is not None:
         value = validator(path, predecessor, test_mode, repo_root)
     else:
@@ -1399,7 +1403,7 @@ def preview_successor_v4_execution(
         validator=rejection_validator,
     )
     rejection_probe = require_dict(rejection, "probe")
-    validate_rejected_successor_v3_boundary(
+    validate_rejected_successor_v3_boundary_stable(
         predecessor,
         probe_token=require_string(rejection_probe, "probe_token"),
         container_probe_root=require_string(
@@ -3262,7 +3266,7 @@ def _validate_v4_authority(
         validator=rejection_validator,
     )
     rejection_probe = require_dict(rejection, "probe")
-    validate_rejected_successor_v3_boundary(
+    validate_rejected_successor_v3_boundary_stable(
         predecessor,
         probe_token=require_string(rejection_probe, "probe_token"),
         container_probe_root=require_string(
@@ -3759,6 +3763,36 @@ def validate_rejected_successor_v3_boundary(
     return binding
 
 
+def validate_rejected_successor_v3_boundary_stable(
+    execution: ManagedExecution,
+    *,
+    probe_token: str,
+    container_probe_root: str,
+    repo_root: Path,
+    recorded_mountpoint: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate the historical mountpoint on both sides of a file snapshot."""
+
+    before = validate_rejected_successor_v3_boundary(
+        execution,
+        probe_token=probe_token,
+        container_probe_root=container_probe_root,
+        repo_root=repo_root,
+        recorded_mountpoint=recorded_mountpoint,
+    )
+    recursive_file_records(execution.directory, exclude=())
+    after = validate_rejected_successor_v3_boundary(
+        execution,
+        probe_token=probe_token,
+        container_probe_root=container_probe_root,
+        repo_root=repo_root,
+        recorded_mountpoint=before,
+    )
+    if after != before:
+        raise ValueError("historical R3 mountpoint changed during validation")
+    return before
+
+
 def successor_predecessor_retry_task_ids(
     execution: ManagedExecution,
 ) -> tuple[str, ...]:
@@ -4155,5 +4189,6 @@ __all__ = [
     "successor_recovery_readiness_path",
     "validate_successor_r2_boundary",
     "validate_rejected_successor_v3_boundary",
+    "validate_rejected_successor_v3_boundary_stable",
     "verify_successor_recovery_readiness",
 ]

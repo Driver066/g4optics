@@ -24,7 +24,7 @@ from steel_module_production_checkpoint_lib import (
 )
 from steel_module_production_phase2b_lib import ROOT_STATIC_MANIFEST, fsync_tree
 from steel_module_production_r3_probe_lib import (
-    RAW_PROBE_SCHEMA_VERSION,
+    RAW_PROBE_SCHEMA_VERSION_V2,
     RAW_WORKSPACE_FILES,
     REPORT_KEYS,
     _execution_snapshot,
@@ -122,6 +122,38 @@ def _snapshot_payload(
         "regular_file_snapshot_record_count": len(records),
         "historical_mountpoint": json.loads(json.dumps(historical_mountpoint)),
     }
+
+
+def _stable_snapshot_payload(
+    execution: Any,
+    *,
+    probe_token: str,
+    container_probe_root: str,
+    repo_root: Path,
+    recorded_mountpoint: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Snapshot regular files between two exact mountpoint validations."""
+
+    before = validate_rejected_successor_v3_boundary(
+        execution,
+        probe_token=probe_token,
+        container_probe_root=container_probe_root,
+        repo_root=repo_root,
+        recorded_mountpoint=recorded_mountpoint,
+    )
+    snapshot = _snapshot_payload(
+        execution.directory, historical_mountpoint=before
+    )
+    after = validate_rejected_successor_v3_boundary(
+        execution,
+        probe_token=probe_token,
+        container_probe_root=container_probe_root,
+        repo_root=repo_root,
+        recorded_mountpoint=before,
+    )
+    if after != before or snapshot["historical_mountpoint"] != after:
+        raise ValueError("historical R3 mountpoint changed during snapshot")
+    return snapshot
 
 
 def _validate_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -294,19 +326,18 @@ def collect_r3_probe_rejection_evidence(
         or raw.get("container_probe_root") != FORMAL_CONTAINER_PROBE_ROOT
     ):
         raise ValueError("formal R3 rejection job/probe identity mismatch")
-    historical_mountpoint = validate_rejected_successor_v3_boundary(
+    authority_root = (
+        repo_root
+        if repo_root is not None
+        else execution.directory / "sources/control"
+    )
+    before = _stable_snapshot_payload(
         execution,
         probe_token=str(raw["probe_token"]),
         container_probe_root=str(raw["container_probe_root"]),
-        repo_root=(
-            repo_root
-            if repo_root is not None
-            else execution.directory / "sources/control"
-        ),
+        repo_root=authority_root,
     )
-    before = _snapshot_payload(
-        execution.directory, historical_mountpoint=historical_mountpoint
-    )
+    historical_mountpoint = before["historical_mountpoint"]
     if (
         before["regular_file_records"] != initial_records
         or before["regular_file_snapshot_hash"] != initial_hash
@@ -354,21 +385,12 @@ def collect_r3_probe_rejection_evidence(
     if squeue_text.strip():
         raise ValueError("R3 rejection job remains active in supplied squeue")
     _validate_log(log_text, raw_workspace=raw_path)
-    final_mountpoint = validate_rejected_successor_v3_boundary(
+    after = _stable_snapshot_payload(
         execution,
         probe_token=str(raw["probe_token"]),
         container_probe_root=str(raw["container_probe_root"]),
-        repo_root=(
-            repo_root
-            if repo_root is not None
-            else execution.directory / "sources/control"
-        ),
+        repo_root=authority_root,
         recorded_mountpoint=historical_mountpoint,
-    )
-    if final_mountpoint != historical_mountpoint:
-        raise ValueError("historical R3 mountpoint changed during collection")
-    after = _snapshot_payload(
-        execution.directory, historical_mountpoint=historical_mountpoint
     )
     if before != after:
         raise ValueError("execution-v3 changed while collecting R3 rejection")
@@ -409,7 +431,7 @@ def collect_r3_probe_rejection_evidence(
             "squeue_terminal_empty": True,
         },
         "probe": {
-            "raw_schema_version": RAW_PROBE_SCHEMA_VERSION,
+            "raw_schema_version": RAW_PROBE_SCHEMA_VERSION_V2,
             "raw_result_hash": raw["raw_result_hash"],
             "probe_token": raw["probe_token"],
             "container_probe_root": raw["container_probe_root"],
@@ -548,7 +570,7 @@ def _validate_rejection_payload(
         or scheduler.get("squeue_terminal_empty") is not True
         or probe
         != {
-            "raw_schema_version": RAW_PROBE_SCHEMA_VERSION,
+            "raw_schema_version": RAW_PROBE_SCHEMA_VERSION_V2,
             "raw_result_hash": raw.get("raw_result_hash"),
             "probe_token": raw.get("probe_token"),
             "container_probe_root": raw.get("container_probe_root"),
@@ -768,20 +790,17 @@ def validate_r3_probe_rejection_bundle(
             raise ValueError("sealed formal R3 rejection input SHA-256 mismatch")
     if require_current_execution:
         current = _load_execution(execution, repo_root=repo_root, test_mode=test_mode)
-        validate_rejected_successor_v3_boundary(
+        authority_root = (
+            repo_root
+            if repo_root is not None
+            else current.directory / "sources/control"
+        )
+        current_snapshot = _stable_snapshot_payload(
             current,
             probe_token=str(raw["probe_token"]),
             container_probe_root=str(raw["container_probe_root"]),
-            repo_root=(
-                repo_root
-                if repo_root is not None
-                else current.directory / "sources/control"
-            ),
+            repo_root=authority_root,
             recorded_mountpoint=payload["probe"]["historical_mountpoint"],
-        )
-        current_snapshot = _snapshot_payload(
-            current.directory,
-            historical_mountpoint=payload["probe"]["historical_mountpoint"],
         )
         if current_snapshot != snapshot:
             raise ValueError("execution-v3 changed since R3 rejection capture")
