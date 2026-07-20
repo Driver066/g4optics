@@ -29,13 +29,14 @@ from steel_module_production_phase2b_lib import (
 )
 from steel_module_production_successor_lib import (
     SUCCESSOR_EXECUTION_SCHEMA_VERSION,
-    load_execution_for_frozen_worker,
+    load_execution_for_frozen_worker as load_legacy_execution_for_frozen_worker,
     verify_successor_recovery_readiness,
 )
 from steel_module_production_container_contract import (
     production_apptainer_host_environment,
     validate_apptainer_runtime_identity,
 )
+from steel_module_production_phase2c_lib import EXECUTION_V6_SCHEMA_VERSION
 
 
 def parse_args() -> argparse.Namespace:
@@ -53,15 +54,43 @@ def _artifact(path: Path, execution_dir: Path) -> dict[str, object]:
     return artifact_record(path, execution_dir, checksum=True)
 
 
+def _load_execution_for_frozen_worker(
+    execution_dir: Path, *, control_root: Path
+) -> Any:
+    manifest = load_json(execution_dir / "managed_execution.json")
+    if manifest.get("schema_version") == EXECUTION_V6_SCHEMA_VERSION:
+        from steel_module_production_phase2c_lib import (
+            load_execution_v6_for_frozen_worker,
+        )
+
+        return load_execution_v6_for_frozen_worker(
+            execution_dir, control_root=control_root
+        )
+    return load_legacy_execution_for_frozen_worker(
+        execution_dir, control_root=control_root
+    )
+
+
 def record(args: argparse.Namespace) -> Path:
     execution_dir = args.execution_dir.expanduser().resolve()
     control_root = args.control_source_root.expanduser().resolve()
-    execution = load_execution_for_frozen_worker(
+    execution = _load_execution_for_frozen_worker(
         execution_dir, control_root=control_root
     )
     intent = load_attempt_intent(execution, args.attempt_id)
     readiness: dict[str, Any] | None = None
-    if execution.manifest.get("schema_version") == SUCCESSOR_EXECUTION_SCHEMA_VERSION:
+    execution_schema = execution.manifest.get("schema_version")
+    if execution_schema == EXECUTION_V6_SCHEMA_VERSION:
+        from steel_module_production_phase2c_readiness import (
+            verify_phase2c_readiness,
+        )
+
+        readiness_path, readiness = verify_phase2c_readiness(
+            execution, repo_root=None
+        )
+        if intent.get("readiness_lock_sha256") != sha256_file(readiness_path):
+            raise ValueError("execution-v6 intent/R6-readiness checksum mismatch")
+    elif execution_schema == SUCCESSOR_EXECUTION_SCHEMA_VERSION:
         readiness_path, readiness = verify_successor_recovery_readiness(
             execution, repo_root=None
         )

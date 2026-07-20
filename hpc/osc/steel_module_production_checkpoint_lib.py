@@ -62,6 +62,7 @@ MANAGED_FINALIZATION_SCHEMA_VERSION = "steel-module-managed-finalization-v1"
 RECOVERY_LINEAGE_SCHEMA_VERSION = "steel-module-managed-recovery-lineage-v1"
 RECOVERY_LINEAGE_SCHEMA_VERSION_V2 = "steel-module-managed-recovery-lineage-v2"
 RECOVERY_LINEAGE_SCHEMA_VERSION_V3 = "steel-module-managed-recovery-lineage-v3"
+RECOVERY_LINEAGE_SCHEMA_VERSION_V4 = "steel-module-managed-recovery-lineage-v4"
 SUCCESSOR_AUTHORITY_SCHEMA_VERSION = (
     "steel-module-production-successor-authority-v1"
 )
@@ -107,6 +108,15 @@ def is_successor_execution_manifest(manifest: dict[str, Any]) -> bool:
 
     schema = manifest.get("schema_version")
     object_kind = manifest.get("object_kind")
+    # Phase-2C is intentionally kept out of the historical Phase-2B schema
+    # module.  Importing its exact schema lazily also avoids a module cycle:
+    # the v6 loader reuses these immutable finalization/checkpoint helpers.
+    from steel_module_production_phase2c_lib import EXECUTION_V6_SCHEMA_VERSION
+
+    if schema == EXECUTION_V6_SCHEMA_VERSION:
+        # The Phase-2C loader performs the complete object-kind and authority
+        # validation.  This predicate is only the fail-closed dispatch point.
+        return True
     if schema in {
         EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
         EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
@@ -167,6 +177,19 @@ def load_execution_for_downstream(
     if manifest_path.is_symlink() or not manifest_path.is_file():
         raise ValueError("managed execution manifest is missing or unsafe")
     manifest = load_json(manifest_path)
+    from steel_module_production_phase2c_lib import EXECUTION_V6_SCHEMA_VERSION
+
+    if manifest.get("schema_version") == EXECUTION_V6_SCHEMA_VERSION:
+        from steel_module_production_phase2c_lib import load_execution_v6
+
+        return load_execution_v6(
+            directory,
+            repo_root=repo_root,
+            allow_test_mode=allow_test_mode,
+            require_readiness=require_readiness,
+            verify_runtime=verify_runtime,
+            verify_live_predecessor=verify_live_predecessor,
+        )
     if is_successor_execution_manifest(manifest):
         from steel_module_production_successor_lib import load_successor_execution
 
@@ -194,6 +217,12 @@ def recovery_lineage_from_execution(execution: Any) -> dict[str, Any] | None:
     if not is_successor_execution_manifest(manifest):
         return None
     schema = manifest.get("schema_version")
+    from steel_module_production_phase2c_lib import EXECUTION_V6_SCHEMA_VERSION
+
+    if schema == EXECUTION_V6_SCHEMA_VERSION:
+        from steel_module_production_phase2c_lib import phase2c_recovery_lineage
+
+        return phase2c_recovery_lineage(execution)
     authority = require_dict(manifest, "recovery_authority")
     predecessor = require_dict(authority, "predecessor_execution")
     rejected_r3: dict[str, Any] | None = None
@@ -285,6 +314,32 @@ def validate_recovery_lineage(
     """Validate optional lineage, requiring it for every successor output."""
 
     schema = execution_record.get("schema_version")
+    from steel_module_production_phase2c_lib import EXECUTION_V6_SCHEMA_VERSION
+
+    if schema == EXECUTION_V6_SCHEMA_VERSION:
+        if not isinstance(lineage, dict):
+            raise ValueError("execution-v6 evidence lacks Phase-2C lineage")
+        from steel_module_production_phase2c_lib import (
+            validate_phase2c_recovery_lineage,
+        )
+
+        validated = validate_phase2c_recovery_lineage(
+            execution_record, lineage
+        )
+        attempts = validated.get("excluded_attempt_ids")
+        jobs = validated.get("excluded_job_ids")
+        if (
+            not isinstance(attempts, list)
+            or not attempts
+            or any(not isinstance(value, str) or not value for value in attempts)
+            or len(set(attempts)) != len(attempts)
+            or not isinstance(jobs, list)
+            or not jobs
+            or any(not isinstance(value, str) or not value.isdigit() for value in jobs)
+            or len(set(jobs)) != len(jobs)
+        ):
+            raise ValueError("Phase-2C recovery-lineage exclusions are invalid")
+        return validated
     if schema not in {
         EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
         EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
@@ -506,7 +561,15 @@ def recovery_lineage_exclusions(
 ) -> tuple[set[str], set[str]]:
     """Return immutable failed attempt/job identities excluded downstream."""
 
-    authority = require_dict(lineage, "recovery_authority")
+    if lineage.get("schema_version") == RECOVERY_LINEAGE_SCHEMA_VERSION_V4:
+        attempts_raw = lineage.get("excluded_attempt_ids")
+        jobs_raw = lineage.get("excluded_job_ids")
+        if not isinstance(attempts_raw, list) or not isinstance(jobs_raw, list):
+            raise ValueError("Phase-2C recovery-lineage exclusions are missing")
+        attempts = set(attempts_raw)
+        jobs = set(jobs_raw)
+    else:
+        authority = require_dict(lineage, "recovery_authority")
     if lineage.get("schema_version") == RECOVERY_LINEAGE_SCHEMA_VERSION:
         attempt = require_dict(authority, "predecessor_attempt")
         attempts = {require_string(attempt, "attempt_id")}
@@ -542,8 +605,10 @@ def recovery_lineage_exclusions(
             str(require_dict(rejected_r3, "scheduler").get("job_id", "")),
             str(administrative_r3.get("job_id", "")),
         }
-    else:
+    elif lineage.get("schema_version") != RECOVERY_LINEAGE_SCHEMA_VERSION_V4:
         raise ValueError("unsupported recovery-lineage exclusion schema")
+    if any(not isinstance(value, str) or not value for value in attempts):
+        raise ValueError("recovery-lineage excluded attempt is invalid")
     if any(not value or not value.isdigit() for value in jobs):
         raise ValueError("recovery-lineage excluded scheduler job is invalid")
     return attempts, jobs
@@ -584,18 +649,32 @@ def _load_canonical_successor_for_finalization(
     directory = requested.resolve()
     if str(directory) != raw_directory:
         raise ValueError("formal successor execution directory is not canonical")
-    from steel_module_production_successor_lib import load_successor_execution
+    from steel_module_production_phase2c_lib import EXECUTION_V6_SCHEMA_VERSION
 
-    execution = load_successor_execution(
-        directory,
-        repo_root=directory / "sources/control",
-        allow_test_mode=False,
-        require_readiness=False,
-        verify_runtime=True,
-        verify_phase2a_control_plane=False,
-        verify_live_predecessor=False,
-        allow_closed_v2=True,
-    )
+    if execution_record.get("schema_version") == EXECUTION_V6_SCHEMA_VERSION:
+        from steel_module_production_phase2c_lib import load_execution_v6
+
+        execution = load_execution_v6(
+            directory,
+            repo_root=directory / "sources/control",
+            allow_test_mode=False,
+            require_readiness=False,
+            verify_runtime=True,
+            verify_live_predecessor=False,
+        )
+    else:
+        from steel_module_production_successor_lib import load_successor_execution
+
+        execution = load_successor_execution(
+            directory,
+            repo_root=directory / "sources/control",
+            allow_test_mode=False,
+            require_readiness=False,
+            verify_runtime=True,
+            verify_phase2a_control_plane=False,
+            verify_live_predecessor=False,
+            allow_closed_v2=True,
+        )
     expected = {
         "directory": str(execution.directory),
         "schema_version": execution.manifest.get("schema_version"),
@@ -607,11 +686,23 @@ def _load_canonical_successor_for_finalization(
     for key, value in expected.items():
         if execution_record.get(key) != value:
             raise ValueError(f"formal finalization execution {key} mismatch")
-    authority = require_dict(execution.manifest, "recovery_authority")
-    if execution_record.get("recovery_authority_hash") != authority.get(
-        "authority_hash"
-    ):
-        raise ValueError("formal finalization recovery authority mismatch")
+    if execution_record.get("schema_version") == EXECUTION_V6_SCHEMA_VERSION:
+        phase2c_authority = require_dict(
+            execution.manifest, "phase2c_authority"
+        )
+        if (
+            execution_record.get("production_equivalence_hash")
+            != execution.manifest.get("production_equivalence_hash")
+            or execution_record.get("phase2c_authority_hash")
+            != phase2c_authority.get("authority_hash")
+        ):
+            raise ValueError("formal finalization Phase-2C authority mismatch")
+    else:
+        authority = require_dict(execution.manifest, "recovery_authority")
+        if execution_record.get("recovery_authority_hash") != authority.get(
+            "authority_hash"
+        ):
+            raise ValueError("formal finalization recovery authority mismatch")
     return execution
 
 
@@ -846,23 +937,31 @@ def validate_successor_seed_lineage(
 ) -> None:
     """Recompute every successor task/seed identity from the selected rows."""
 
-    if execution_record.get("schema_version") not in {
+    from steel_module_production_phase2c_lib import EXECUTION_V6_SCHEMA_VERSION
+
+    schema = execution_record.get("schema_version")
+    if schema not in {
         EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
         EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
         EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3,
+        EXECUTION_V6_SCHEMA_VERSION,
     }:
         return
     if lineage is None:
         raise ValueError("successor seed audit lacks recovery lineage")
     tasks = _tasks_from_finalized_rows(rows)
     identity = _successor_task_identity(tasks)
-    authority = require_dict(lineage, "recovery_authority")
-    retry = require_dict(authority, "retry_equivalence")
-    for key, expected in identity.items():
-        if retry.get(key) != expected:
-            raise ValueError(f"successor retry-equivalence {key} mismatch")
-    if retry.get("all_equal") is not True:
-        raise ValueError("successor retry-equivalence is not accepted")
+    if schema == EXECUTION_V6_SCHEMA_VERSION:
+        if lineage.get("schema_version") != RECOVERY_LINEAGE_SCHEMA_VERSION_V4:
+            raise ValueError("execution-v6 seed audit lacks Phase-2C lineage")
+    else:
+        authority = require_dict(lineage, "recovery_authority")
+        retry = require_dict(authority, "retry_equivalence")
+        for key, expected in identity.items():
+            if retry.get(key) != expected:
+                raise ValueError(f"successor retry-equivalence {key} mismatch")
+        if retry.get("all_equal") is not True:
+            raise ValueError("successor retry-equivalence is not accepted")
     for key in ("task_set_hash", "task_seed_mapping_hash", "seed_set_hash"):
         if execution_record.get(key) != identity[key]:
             raise ValueError(f"successor execution {key} mismatch")
@@ -916,10 +1015,13 @@ def validate_successor_selection_and_accounting(
 ) -> None:
     """Bind selected rows and every copied accounting snapshot to the successor."""
 
+    from steel_module_production_phase2c_lib import EXECUTION_V6_SCHEMA_VERSION
+
     if execution_record.get("schema_version") not in {
         EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
         EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
         EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3,
+        EXECUTION_V6_SCHEMA_VERSION,
     }:
         return
     if lineage is None:
@@ -1044,6 +1146,25 @@ def readiness_identity_for_execution(
 
     if execution.manifest.get("test_mode") is True:
         return {"required": False, "lock_sha256": None}
+    from steel_module_production_phase2c_lib import EXECUTION_V6_SCHEMA_VERSION
+
+    if execution.manifest.get("schema_version") == EXECUTION_V6_SCHEMA_VERSION:
+        from steel_module_production_phase2c_readiness import (
+            verify_phase2c_readiness,
+        )
+
+        path, value = verify_phase2c_readiness(execution, repo_root=repo_root)
+        return {
+            "required": True,
+            "authority": "phase2c-r6",
+            "path": str(path),
+            "schema_version": value.get("schema_version"),
+            "lock_sha256": sha256_file(path),
+            "readiness_hash": value.get("readiness_hash"),
+            "production_equivalence_hash": execution.manifest.get(
+                "production_equivalence_hash"
+            ),
+        }
     if is_successor_execution_manifest(execution.manifest):
         from steel_module_production_successor_lib import (
             verify_successor_recovery_readiness,
@@ -1685,6 +1806,8 @@ def load_managed_finalization(
         execution_record, lineage, rows, seed_audit
     )
     if canonical_execution is not None:
+        if recovery_lineage_from_execution(canonical_execution) != lineage:
+            raise ValueError("formal finalization recovery lineage changed")
         _validate_canonical_selected_artifacts(canonical_execution, rows)
         _validate_canonical_pilot_seed_registry(
             canonical_execution, seed_audit
@@ -1758,10 +1881,16 @@ def load_production_checkpoint(
             raise ValueError("formal checkpoint validation requires repo_root")
         _, phase2a = load_phase2a_lock(repo_root)
         canonical_child = Path(require_string(phase2a, "canonical_directory")).resolve()
+        from steel_module_production_phase2c_lib import (
+            EXECUTION_V6_SCHEMA_VERSION,
+            FORMAL_EXECUTION_V6_NAME,
+        )
+
         successor = execution.get("schema_version") in {
             EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
             EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
             EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3,
+            EXECUTION_V6_SCHEMA_VERSION,
         }
         if successor:
             if execution.get("object_kind") != SUCCESSOR_OBJECT_KIND:
@@ -1779,6 +1908,7 @@ def load_production_checkpoint(
                     FORMAL_SUCCESSOR_EXECUTION_NAME_V3,
                 EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3:
                     FORMAL_SUCCESSOR_EXECUTION_NAME,
+                EXECUTION_V6_SCHEMA_VERSION: FORMAL_EXECUTION_V6_NAME,
             }[execution.get("schema_version")]
         else:
             execution_name = FORMAL_EXECUTION_NAME
@@ -1949,6 +2079,8 @@ __all__ = [
     "MANAGED_FINALIZATION_SCHEMA_VERSION",
     "RECOVERY_LINEAGE_SCHEMA_VERSION",
     "RECOVERY_LINEAGE_SCHEMA_VERSION_V2",
+    "RECOVERY_LINEAGE_SCHEMA_VERSION_V3",
+    "RECOVERY_LINEAGE_SCHEMA_VERSION_V4",
     "SUCCESSOR_FINALIZATION_BUNDLE_NAME",
     "ProductionCheckpoint",
     "is_successor_execution_manifest",

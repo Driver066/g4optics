@@ -26,6 +26,7 @@ from record_steel_module_task_result import validate_run_config
 from steel_module_campaign_lib import CampaignTask, canonical_json, load_json, sha256_bytes, sha256_file
 from steel_module_production_checkpoint_lib import (
     MANAGED_FINALIZATION_SCHEMA_VERSION,
+    RECOVERY_LINEAGE_SCHEMA_VERSION_V4,
     is_successor_execution_manifest,
     load_execution_for_downstream,
     managed_finalization_directory,
@@ -813,19 +814,34 @@ def finalize(
             "binding_hash": execution.managed_child.binding["binding_hash"],
         }
         if recovery_lineage is not None:
-            execution_identity.update(
-                {
-                    "recovery_authority_hash": recovery_lineage[
-                        "recovery_authority"
-                    ]["authority_hash"],
-                    "predecessor_incident_id": recovery_lineage[
-                        "predecessor_incident"
-                    ]["incident_id"],
-                    "predecessor_incident_hash": recovery_lineage[
-                        "predecessor_incident"
-                    ]["incident_hash"],
-                }
-            )
+            if (
+                recovery_lineage.get("schema_version")
+                == RECOVERY_LINEAGE_SCHEMA_VERSION_V4
+            ):
+                execution_identity.update(
+                    {
+                        "phase2c_authority_hash": recovery_lineage[
+                            "phase2c_authority"
+                        ]["authority_hash"],
+                        "production_equivalence_hash": recovery_lineage[
+                            "production_equivalence_hash"
+                        ],
+                    }
+                )
+            else:
+                execution_identity.update(
+                    {
+                        "recovery_authority_hash": recovery_lineage[
+                            "recovery_authority"
+                        ]["authority_hash"],
+                        "predecessor_incident_id": recovery_lineage[
+                            "predecessor_incident"
+                        ]["incident_id"],
+                        "predecessor_incident_hash": recovery_lineage[
+                            "predecessor_incident"
+                        ]["incident_hash"],
+                    }
+                )
             failed_r3 = recovery_lineage.get("failed_r3_preflight")
             if isinstance(failed_r3, dict):
                 execution_identity.update(

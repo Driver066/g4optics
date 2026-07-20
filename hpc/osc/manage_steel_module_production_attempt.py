@@ -30,6 +30,7 @@ from steel_module_production_phase2b_lib import (
     ACCOUNTING_SCHEMA_VERSION_V2,
     ACCOUNTING_SCHEMA_VERSION,
     ACTOR_RE,
+    EXECUTION_SCHEMA_VERSION_PHASE2C_V6,
     FORMAL_ACCOUNT,
     HISTORICAL_CLOSED_ATTEMPT_ID,
     HISTORICAL_CLOSED_INTENT_SHA256,
@@ -60,7 +61,7 @@ CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 JOB_ID_RE = re.compile(r"^[1-9][0-9]*$")
 MUTATING_COMMANDS = {
     "prepare-intent", "submit-intent", "cancel-intent", "reconcile",
-    "freeze-accounting",
+    "release-intent", "freeze-accounting",
 }
 
 
@@ -90,19 +91,18 @@ def _run_with(
 
 
 def _formal_execution(repo_root: Path, *, readiness: bool) -> ManagedExecution:
-    from steel_module_production_successor_lib import (
-        FORMAL_SUCCESSOR_EXECUTION_NAME,
-        load_successor_execution,
+    from steel_module_production_phase2c_lib import (
+        FORMAL_EXECUTION_V6_NAME,
+        load_execution_v6,
     )
 
     _, phase2a = load_phase2a_lock(repo_root)
     child = Path(phase2a["canonical_directory"])
-    execution_dir = child.parent / FORMAL_SUCCESSOR_EXECUTION_NAME
-    return load_successor_execution(
+    execution_dir = child.parent / FORMAL_EXECUTION_V6_NAME
+    return load_execution_v6(
         execution_dir,
         repo_root=repo_root,
         require_readiness=readiness,
-        verify_live_predecessor=True,
     )
 
 
@@ -118,22 +118,20 @@ def _historical_status_execution(repo_root: Path) -> ManagedExecution:
 
 
 def _successor_directory(repo_root: Path) -> Path:
-    from steel_module_production_successor_lib import FORMAL_SUCCESSOR_EXECUTION_NAME
+    from steel_module_production_phase2c_lib import FORMAL_EXECUTION_V6_NAME
 
     _, phase2a = load_phase2a_lock(repo_root)
-    return Path(phase2a["canonical_directory"]).parent / FORMAL_SUCCESSOR_EXECUTION_NAME
+    return Path(phase2a["canonical_directory"]).parent / FORMAL_EXECUTION_V6_NAME
 
 
 def _verify_successor_readiness(
     execution: ManagedExecution, *, repo_root: Path | None
 ) -> tuple[Path, dict[str, Any]]:
-    # Local import avoids manager -> successor -> incident-sealer -> manager at
-    # module initialization while retaining one authoritative R4 verifier.
-    from steel_module_production_successor_lib import (
-        verify_successor_recovery_readiness,
+    from steel_module_production_phase2c_readiness import (
+        verify_phase2c_readiness,
     )
 
-    return verify_successor_recovery_readiness(execution, repo_root=repo_root)
+    return verify_phase2c_readiness(execution, repo_root=repo_root)
 
 
 def _readiness_sha(repo_root: Path, execution: ManagedExecution) -> str:
@@ -156,6 +154,49 @@ def _intent_readiness_is_current(
 def _verify_intent_hash(intent: dict[str, Any], expected: str) -> None:
     if intent.get("intent_sha256") != expected:
         raise ValueError("explicit intent SHA-256 does not match the frozen intent")
+
+
+def _validate_phase2c_intent_shape(
+    execution: ManagedExecution, intent: dict[str, Any]
+) -> None:
+    from steel_module_production_phase2b_lib import (
+        EXECUTION_SCHEMA_VERSION_PHASE2C_V6,
+    )
+
+    if execution.manifest.get("schema_version") != EXECUTION_SCHEMA_VERSION_PHASE2C_V6:
+        raise ValueError("formal production manager accepts only execution-v6")
+    mode = intent.get("mode")
+    if mode not in {"predecessor-retry", "resume", "retry-failed"}:
+        raise ValueError("execution-v6 intent mode is not authorized")
+    selected = require_dict(intent, "selected")
+    selected_ids = selected.get("logical_task_ids")
+    if not isinstance(selected_ids, list) or len(selected_ids) != len(set(selected_ids)):
+        raise ValueError("execution-v6 intent task selection is invalid")
+    all_ids = [task.logical_task_id for task in execution.tasks]
+    if mode == "predecessor-retry":
+        seeds = [
+            seed
+            for task in execution.tasks
+            for seed in (task.seed1, task.seed2)
+        ]
+        if (
+            selected_ids != all_ids
+            or selected.get("task_count") != 32
+            or selected.get("event_count") != 8000
+            or len(seeds) != 64
+            or len(set(seeds)) != 64
+        ):
+            raise ValueError(
+                "execution-v6 predecessor-retry must select exact 32/8000/64"
+            )
+    elif not any(
+        attempt_state(execution, attempt_id).status
+        == "terminal-accounting-frozen"
+        for attempt_id in list_attempt_ids(execution)
+    ):
+        raise ValueError(
+            "execution-v6 resume/retry-failed requires terminal prior evidence"
+        )
 
 
 def submission_command(execution: ManagedExecution, intent: dict[str, Any]) -> list[str]:
@@ -219,6 +260,16 @@ def _validate_held_job(
         "WorkDir": str(execution.directory),
         "Requeue": "0",
     }
+    if execution.manifest.get("schema_version") == EXECUTION_SCHEMA_VERSION_PHASE2C_V6:
+        expected.update(
+            {
+                "TimeLimit": "01:00:00",
+                "NumCPUs": "1",
+                "NumTasks": "1",
+                "CPUs/Task": "1",
+                "MinMemoryNode": "2G",
+            }
+        )
     output_pattern = scheduler["output_pattern"]
     output_regex = re.compile(
         "^" + re.escape(output_pattern)
@@ -289,9 +340,18 @@ def submit_intent(
     intent_sha256: str,
     actor: str,
     runner: CommandRunner = _run,
+    release_after_verification: bool = True,
 ) -> str:
     """Contact Slurm once, initially held; any uncertainty is quarantined."""
 
+    phase2c_v6 = (
+        getattr(execution, "manifest", {}).get("schema_version")
+        == EXECUTION_SCHEMA_VERSION_PHASE2C_V6
+    )
+    if phase2c_v6 and release_after_verification:
+        raise ValueError(
+            "execution-v6 submit must remain held for explicit release-intent"
+        )
     require_production_execution_open(execution)
     intent = load_attempt_intent(execution, attempt_id)
     _verify_intent_hash(intent, intent_sha256)
@@ -301,7 +361,7 @@ def submit_intent(
     if intent.get("readiness_lock_sha256") is None:
         raise ValueError("intent is not bound to a readiness lock")
     command = submission_command(execution, intent)
-    with execution_lock(execution.directory):
+    with execution_lock(execution):
         current_intent = load_attempt_intent(execution, attempt_id)
         _verify_intent_hash(current_intent, intent_sha256)
         attempt_ids = list_attempt_ids(execution)
@@ -363,6 +423,8 @@ def submit_intent(
         },
         actor=actor,
     )
+    if not release_after_verification:
+        return job_id
     try:
         released = _run_with(
             runner, ["scontrol", "release", job_id], cwd=execution.directory
@@ -384,6 +446,142 @@ def submit_intent(
         execution, attempt_id, "job-released", {"job_id": job_id}, actor=actor
     )
     return job_id
+
+
+def release_verified_intent(
+    execution: ManagedExecution,
+    *,
+    attempt_id: str,
+    intent_sha256: str,
+    actor: str,
+    runner: CommandRunner = _run,
+) -> str:
+    """Revalidate and explicitly release one already verified held v6 array."""
+
+    require_production_execution_open(execution)
+    with execution_lock(execution):
+        intent = load_attempt_intent(execution, attempt_id)
+        _verify_intent_hash(intent, intent_sha256)
+        _intent_readiness_is_current(execution, intent)
+        state = attempt_state(execution, attempt_id)
+        if state.status != "verified-held" or state.job_id is None:
+            raise ValueError("explicit release requires one verified held attempt")
+        job_id = state.job_id
+        try:
+            matches, raw = _query_matching_jobs(
+                execution, intent, runner=runner
+            )
+        except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
+            append_attempt_event(
+                execution,
+                attempt_id,
+                "release-ambiguous",
+                {"job_id": job_id, "reason": type(exc).__name__},
+                actor=actor,
+                lock_held=True,
+            )
+            raise ValueError("scheduler identity query failed before release") from exc
+        matched_ids = [row["job_id"] for row in matches]
+        if len(matches) > 1:
+            append_attempt_event(
+                execution,
+                attempt_id,
+                "submission-permanently-ambiguous",
+                {
+                    "job_id": job_id,
+                    "match_count": len(matches),
+                    "job_ids": matched_ids,
+                    "squeue_psv": raw["squeue"],
+                    "sacct_psv": raw["sacct"],
+                    "release_blocked": True,
+                },
+                actor=actor,
+                lock_held=True,
+            )
+            raise ValueError(
+                "multiple exact scheduler matches; release is permanently blocked"
+            )
+        if len(matches) != 1 or matched_ids[0] != job_id:
+            append_attempt_event(
+                execution,
+                attempt_id,
+                "release-ambiguous",
+                {
+                    "job_id": job_id,
+                    "reason": "recorded-job-not-unique",
+                    "job_ids": matched_ids,
+                    "squeue_psv": raw["squeue"],
+                    "sacct_psv": raw["sacct"],
+                },
+                actor=actor,
+                lock_held=True,
+            )
+            raise ValueError("recorded held job is not the unique scheduler match")
+        try:
+            _validate_held_job(execution, intent, job_id, runner=runner)
+        except ValueError as exc:
+            append_attempt_event(
+                execution,
+                attempt_id,
+                "release-ambiguous",
+                {"job_id": job_id, "reason": str(exc)},
+                actor=actor,
+                lock_held=True,
+            )
+            raise ValueError("held production array changed before release") from exc
+        append_attempt_event(
+            execution,
+            attempt_id,
+            "release-invoked",
+            {
+                "job_id": job_id,
+                "squeue_sha256": __import__("hashlib").sha256(
+                    raw["squeue"].encode()
+                ).hexdigest(),
+                "sacct_sha256": __import__("hashlib").sha256(
+                    raw["sacct"].encode()
+                ).hexdigest(),
+            },
+            actor=actor,
+            lock_held=True,
+        )
+        try:
+            released = _run_with(
+                runner, ["scontrol", "release", job_id], cwd=execution.directory
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            append_attempt_event(
+                execution,
+                attempt_id,
+                "release-outcome-ambiguous",
+                {"job_id": job_id, "reason": type(exc).__name__},
+                actor=actor,
+                lock_held=True,
+            )
+            raise ValueError("Slurm release outcome is ambiguous") from exc
+        if released.returncode != 0:
+            append_attempt_event(
+                execution,
+                attempt_id,
+                "release-outcome-ambiguous",
+                {
+                    "job_id": job_id,
+                    "return_code": released.returncode,
+                    "stderr": released.stderr[-1000:],
+                },
+                actor=actor,
+                lock_held=True,
+            )
+            raise ValueError("Slurm release outcome is ambiguous")
+        append_attempt_event(
+            execution,
+            attempt_id,
+            "job-released",
+            {"job_id": job_id},
+            actor=actor,
+            lock_held=True,
+        )
+        return job_id
 
 
 def _query_matching_jobs(
@@ -487,12 +685,16 @@ def reconcile_attempt(
     now_utc: str | None = None,
 ) -> str:
     require_production_execution_open(execution)
+    phase2c_v6 = (
+        getattr(execution, "manifest", {}).get("schema_version")
+        == EXECUTION_SCHEMA_VERSION_PHASE2C_V6
+    )
     intent = load_attempt_intent(execution, attempt_id)
     _verify_intent_hash(intent, intent_sha256)
     state = attempt_state(execution, attempt_id)
     recoverable_states = {
         "submission-ambiguous", "submitted-held", "verified-held",
-        "release-ambiguous",
+        "release-ambiguous", "release-invoked",
     }
     if state.status not in recoverable_states:
         raise ValueError("attempt is not in a recoverable scheduler state")
@@ -511,6 +713,8 @@ def reconcile_attempt(
         if state.job_id is not None and job_id != state.job_id:
             raise ValueError("scheduler match conflicts with the recorded job ID")
         require_held = state.status in {"submission-ambiguous", "submitted-held"}
+        if phase2c_v6 and state.status == "verified-held":
+            require_held = True
         try:
             row = _validate_held_job(
                 execution, intent, job_id, runner=runner,
@@ -526,7 +730,9 @@ def reconcile_attempt(
                 task_count=intent["selected"]["task_count"],
             )
             if (
-                state.status in {"verified-held", "release-ambiguous"}
+                state.status in {
+                    "verified-held", "release-ambiguous", "release-invoked"
+                }
                 and previously_verified
                 and state.job_id == job_id
                 and terminal_job is not None
@@ -581,7 +787,7 @@ def reconcile_attempt(
             and row.get("Reason") == "JobHeldUser"
         )
         if held:
-            if state.status == "release-ambiguous":
+            if state.status in {"release-ambiguous", "release-invoked"}:
                 append_attempt_event(
                     execution, attempt_id, "job-verified",
                     {
@@ -592,6 +798,8 @@ def reconcile_attempt(
                         "account_comparison": row["AccountComparison"],
                     }, actor=actor,
                 )
+            if phase2c_v6:
+                return f"reconciled-held:{job_id}"
             try:
                 released = _run_with(
                     runner, ["scontrol", "release", job_id], cwd=execution.directory
@@ -632,9 +840,14 @@ def reconcile_attempt(
              "reconciled": True}, actor=actor,
         )
         state = attempt_state(execution, attempt_id)
-    if state.status == "release-ambiguous":
+    if state.status in {"release-ambiguous", "release-invoked"}:
+        observation_event = (
+            "release-invoked-scheduler-observation"
+            if state.status == "release-invoked"
+            else "release-scheduler-observation"
+        )
         append_attempt_event(
-            execution, attempt_id, "release-scheduler-observation",
+            execution, attempt_id, observation_event,
             {**observation_payload, "job_id": state.job_id}, actor=actor,
         )
         if confirm_no_job:
@@ -959,7 +1172,7 @@ def freeze_terminal_accounting(
     def accounting_lock() -> Any:
         if historical_incident_recovery:
             return historical_recovery_execution_lock(execution)
-        return execution_lock(execution.directory)
+        return execution_lock(execution)
 
     target = execution.directory / "attempts" / attempt_id / "accounting"
     with accounting_lock():
@@ -1104,6 +1317,14 @@ def parse_args() -> argparse.Namespace:
     submit_mode.add_argument("--submit", action="store_true")
     submit.add_argument("--actor", default=getpass.getuser())
 
+    release = sub.add_parser("release-intent", allow_abbrev=False)
+    release.add_argument("--attempt-id", required=True)
+    release.add_argument("--intent-sha256", required=True)
+    release_mode = release.add_mutually_exclusive_group(required=True)
+    release_mode.add_argument("--check-only", action="store_true")
+    release_mode.add_argument("--release", action="store_true")
+    release.add_argument("--actor", default=getpass.getuser())
+
     cancel = sub.add_parser("cancel-intent", allow_abbrev=False)
     cancel.add_argument("--attempt-id", required=True)
     cancel.add_argument("--intent-sha256", required=True)
@@ -1133,15 +1354,12 @@ def main() -> int:
             if successor_dir.exists() or successor_dir.is_symlink():
                 if successor_dir.is_symlink() or not successor_dir.is_dir():
                     raise ValueError("canonical recovery-successor path is unsafe")
-                from steel_module_production_successor_lib import (
-                    load_successor_execution,
-                )
+                from steel_module_production_phase2c_lib import load_execution_v6
 
-                execution = load_successor_execution(
+                execution = load_execution_v6(
                     successor_dir,
                     repo_root=repo_root,
                     require_readiness=False,
-                    verify_live_predecessor=True,
                 )
                 try:
                     _verify_successor_readiness(
@@ -1156,7 +1374,7 @@ def main() -> int:
                 print(f"submission_ready: {str(submission_ready).lower()}")
                 print("historical_execution_closed: true")
                 print(f"predecessor_execution_id: {historical.execution_id}")
-                print("recovery_successor_present: true")
+                print("execution_v6_present: true")
                 print(f"intents: {len(list_attempt_ids(execution))}")
                 for attempt_id in list_attempt_ids(execution):
                     state = attempt_state(execution, attempt_id)
@@ -1168,7 +1386,7 @@ def main() -> int:
             print(f"execution_hash: {execution.execution_hash}")
             print("submission_ready: false")
             print("historical_execution_closed: true")
-            print("recovery_successor_present: false")
+            print("execution_v6_present: false")
             print(f"intents: {len(list_attempt_ids(execution))}")
             for attempt_id in list_attempt_ids(execution):
                 state = attempt_state(execution, attempt_id)
@@ -1179,10 +1397,19 @@ def main() -> int:
         require_manager_command_allowed(execution, args.command)
         readiness_sha = _readiness_sha(repo_root, execution)
         if args.command == "prepare-intent":
+            if args.mode in {"resume", "retry-failed"} and not any(
+                attempt_state(execution, attempt_id).status
+                == "terminal-accounting-frozen"
+                for attempt_id in list_attempt_ids(execution)
+            ):
+                raise ValueError(
+                    "execution-v6 resume/retry-failed requires terminal prior evidence"
+                )
             value = prepare_attempt_intent(
                 execution, attempt_id=args.attempt_id, mode=args.mode, actor=args.actor,
                 write=args.write_intent, readiness_lock_sha256=readiness_sha,
             )
+            _validate_phase2c_intent_shape(execution, value)
             print(f"intent: {'written' if args.write_intent else 'check-only'}")
             print(f"attempt_id: {value['attempt_id']}")
             print(f"intent_sha256: {value['intent_sha256']}")
@@ -1192,6 +1419,7 @@ def main() -> int:
 
         intent = load_attempt_intent(execution, args.attempt_id)
         _verify_intent_hash(intent, args.intent_sha256)
+        _validate_phase2c_intent_shape(execution, intent)
         _intent_readiness_is_current(execution, intent)
         if intent.get("readiness_lock_sha256") != readiness_sha:
             raise ValueError("intent readiness-lock digest is stale")
@@ -1204,8 +1432,27 @@ def main() -> int:
                 job_id = submit_intent(
                     execution, attempt_id=args.attempt_id,
                     intent_sha256=args.intent_sha256, actor=args.actor,
+                    release_after_verification=False,
                 )
-                print(f"submitted and released held Slurm array: {job_id}")
+                print(f"submitted and verified held Slurm array: {job_id}")
+                print("The array remains held; use release-intent separately.")
+            return 0
+        if args.command == "release-intent":
+            state = attempt_state(execution, args.attempt_id)
+            if state.status != "verified-held" or state.job_id is None:
+                raise ValueError("release check requires one verified held attempt")
+            if args.check_only:
+                print("release-intent check: PASS")
+                print("command:", shlex.join(["scontrol", "release", state.job_id]))
+                print("No scheduler command was invoked.")
+            else:
+                job_id = release_verified_intent(
+                    execution,
+                    attempt_id=args.attempt_id,
+                    intent_sha256=args.intent_sha256,
+                    actor=args.actor,
+                )
+                print(f"released verified held Slurm array: {job_id}")
             return 0
         if args.command == "cancel-intent":
             if attempt_state(execution, args.attempt_id).status != "prepared":

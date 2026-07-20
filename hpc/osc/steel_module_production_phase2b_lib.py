@@ -61,12 +61,16 @@ EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3 = (
 EXECUTION_SCHEMA_VERSION_SUCCESSOR_V4 = (
     "steel-module-production-managed-successor-execution-v4"
 )
+EXECUTION_SCHEMA_VERSION_PHASE2C_V6 = (
+    "steel-module-production-managed-execution-v6"
+)
 SUCCESSOR_OBJECT_KIND = "managed-production-recovery-successor"
 # Keep the public legacy name stable.  The canonical Phase-2B materializer
 # remains v1 unless a successor explicitly selects the portable lock protocol.
 EXECUTION_SCHEMA_VERSION = EXECUTION_SCHEMA_VERSION_V1
 CONTROL_LOCK_PROTOCOL_V1 = "inode-bound-v1"
 CONTROL_LOCK_PROTOCOL_V2 = "portable-flock-v2"
+CONTROL_LOCK_PROTOCOL_V3_EMPTY = "portable-flock-v3-empty"
 CONTROL_LOCK_TOKEN_RE = re.compile(r"^[0-9a-f]{64}$")
 HISTORICAL_CLOSED_EXECUTION_ID = (
     "sm-v1-production-bc-s1-execution-193d261c3059"
@@ -204,8 +208,29 @@ ATTEMPT_EVENT_TRANSITIONS: dict[str, set[str]] = {
         "submitted-held", "submission-not-found-confirmed",
         "submission-permanently-ambiguous", "scheduler-observation",
     },
-    "submitted-held": {"job-verified", "release-ambiguous"},
-    "job-verified": {"job-released", "release-ambiguous"},
+    "submitted-held": {
+        "job-verified", "release-ambiguous",
+        "submission-permanently-ambiguous",
+    },
+    "job-verified": {
+        "job-released", "release-invoked", "release-ambiguous",
+        "submission-permanently-ambiguous",
+    },
+    "release-invoked": {
+        "job-verified", "job-released", "release-outcome-ambiguous",
+        "release-invoked-scheduler-observation",
+        "submission-permanently-ambiguous",
+    },
+    "release-outcome-ambiguous": {
+        "job-verified", "job-released",
+        "release-invoked-scheduler-observation",
+        "submission-permanently-ambiguous",
+    },
+    "release-invoked-scheduler-observation": {
+        "job-verified", "job-released",
+        "release-invoked-scheduler-observation",
+        "submission-permanently-ambiguous",
+    },
     "release-ambiguous": {
         "job-verified", "job-released", "release-scheduler-observation",
         "submission-permanently-ambiguous",
@@ -402,6 +427,28 @@ def _validate_portable_lock_stat(
 
 
 def _validate_portable_lock_record(record: dict[str, Any]) -> bytes:
+    if record.get("protocol") == CONTROL_LOCK_PROTOCOL_V3_EMPTY:
+        expected_keys = {
+            "path", "protocol", "mode", "size_bytes", "sha256",
+            "link_count", "device_inode_authority", "creation_device",
+            "creation_inode",
+        }
+        if set(record) != expected_keys:
+            raise ValueError("empty portable control-lock record shape mismatch")
+        if (
+            record.get("path") != ".control.lock"
+            or record.get("mode") != 0o600
+            or record.get("size_bytes") != 0
+            or record.get("sha256") != EMPTY_SHA256
+            or record.get("link_count") != 1
+            or record.get("device_inode_authority") is not False
+            or not isinstance(record.get("creation_device"), int)
+            or record["creation_device"] < 0
+            or not isinstance(record.get("creation_inode"), int)
+            or record["creation_inode"] < 0
+        ):
+            raise ValueError("empty portable control-lock identity mismatch")
+        return b""
     expected_keys = {
         "path", "protocol", "content_token", "mode", "size_bytes", "sha256",
         "link_count", "creation_device", "creation_inode",
@@ -688,6 +735,10 @@ def _control_lock_record_from_manifest(
         EXECUTION_SCHEMA_VERSION_SUCCESSOR_V4,
     }:
         return CONTROL_LOCK_PROTOCOL_V2, record
+    if schema == EXECUTION_SCHEMA_VERSION_PHASE2C_V6:
+        if record.get("protocol") != CONTROL_LOCK_PROTOCOL_V3_EMPTY:
+            raise ValueError("execution-v6 portable control-lock protocol mismatch")
+        return CONTROL_LOCK_PROTOCOL_V3_EMPTY, record
     raise ValueError("unsupported managed-execution schema")
 
 
@@ -725,8 +776,10 @@ def historical_recovery_execution_lock(
 
 
 @contextmanager
-def execution_lock(execution: ManagedExecution | Path) -> Iterator[None]:
-    if isinstance(execution, ManagedExecution):
+def execution_lock(execution: ManagedExecution | Path | Any) -> Iterator[None]:
+    if not isinstance(execution, (str, os.PathLike)) and hasattr(
+        execution, "directory"
+    ) and hasattr(execution, "manifest"):
         directory = execution.directory
         manifest = execution.manifest
     else:
@@ -1934,7 +1987,7 @@ def append_attempt_event(
 
     if lock_held:
         return append_locked()
-    with execution_lock(execution.directory):
+    with execution_lock(execution):
         return append_locked()
 
 
@@ -1963,9 +2016,12 @@ def attempt_state(execution: ManagedExecution, attempt_id: str) -> AttemptState:
         "submission-ambiguous": "submission-ambiguous",
         "scheduler-observation": "submission-ambiguous",
         "submission-not-found-confirmed": "cancelled",
-        "submission-permanently-ambiguous": "submission-ambiguous",
+        "submission-permanently-ambiguous": "permanently-quarantined",
         "submitted-held": "submitted-held",
         "job-verified": "verified-held",
+        "release-invoked": "release-invoked",
+        "release-outcome-ambiguous": "release-invoked",
+        "release-invoked-scheduler-observation": "release-invoked",
         "release-ambiguous": "release-ambiguous",
         "release-scheduler-observation": "release-ambiguous",
         "job-released": "released-active",
@@ -1974,7 +2030,11 @@ def attempt_state(execution: ManagedExecution, attempt_id: str) -> AttemptState:
     status = status_map[previous_type]
     return AttemptState(
         attempt_id, status, intent, events, job_id, True,
-        status in {"submission-ambiguous", "release-ambiguous"},
+        status in {
+            "submission-ambiguous", "release-ambiguous",
+            "release-invoked",
+            "permanently-quarantined",
+        },
         status in {"cancelled", "terminal-accounting-frozen"},
     )
 
@@ -1992,13 +2052,24 @@ def validate_worker_scheduler_identity(
     A checksum-valid intent is necessary but not sufficient authority to spend
     production seeds.  This check rejects direct/manual worker invocation and
     jobs from another submission before a task directory or Geant4 process can
-    be created.  ``verified-held`` is accepted to avoid the small race between
-    successful ``scontrol release`` and appending the local ``job-released``
-    event; in both states the exact scheduler job has already been verified.
+    be created.  ``release-invoked`` is accepted to close the race between the
+    exact release authorization, Slurm starting a task, and the manager
+    recording the outcome.  For execution-v6, both pre-release
+    ``verified-held`` and ordinary ``release-ambiguous`` remain rejected;
+    legacy companions retain their historical verified-held admission.
     """
 
     state = attempt_state(execution, attempt_id)
-    if state.status not in {"verified-held", "released-active"}:
+    phase2c_v6 = (
+        execution.manifest.get("schema_version")
+        == EXECUTION_SCHEMA_VERSION_PHASE2C_V6
+    )
+    allowed_states = (
+        {"release-invoked", "released-active"}
+        if phase2c_v6
+        else {"verified-held", "released-active"}
+    )
+    if state.status not in allowed_states:
         raise ValueError("managed worker attempt is not verified for execution")
     if state.job_id is None:
         raise ValueError("managed worker attempt has no verified Slurm job")
@@ -2078,13 +2149,37 @@ def _selected_task_ids_from_prior(
             "cannot select tasks while a prior intent is prepared, active, or unresolved"
         )
     all_ids = tuple(task.logical_task_id for task in execution.tasks)
+    phase2c_v6 = (
+        execution.manifest.get("schema_version")
+        == EXECUTION_SCHEMA_VERSION_PHASE2C_V6
+    )
+    if (
+        phase2c_v6
+        and mode in {"resume", "retry-failed"}
+        and not any(
+            state.status == "terminal-accounting-frozen" for state in attempts
+        )
+    ):
+        raise ValueError(
+            "execution-v6 resume/retry-failed requires terminal prior evidence"
+        )
     if successor and not attempts and mode != "predecessor-retry":
         raise ValueError(
             "the first successor intent must use predecessor-retry"
         )
     if mode == "predecessor-retry":
-        if attempts:
-            raise ValueError("predecessor-retry requires no prior successor intents")
+        harmless_closed_attempts = all(
+            state.status == "cancelled"
+            and state.job_id is None
+            and state.events
+            and state.events[-1]["event_type"]
+            in {"intent-cancelled", "submission-not-found-confirmed"}
+            for state in attempts
+        )
+        if attempts and not harmless_closed_attempts:
+            raise ValueError(
+                "predecessor-retry prior intents are not harmless closed attempts"
+            )
         authority = require_dict(execution.manifest, "recovery_authority")
         disposition = require_dict(authority, "zero_consumption")
         if (
@@ -2155,6 +2250,20 @@ def require_production_execution_open(execution: ManagedExecution) -> None:
             "incident; use the additive recovery sealer, not a new intent"
         )
     manifest = getattr(execution, "manifest", {})
+    if manifest.get("schema_version") == EXECUTION_SCHEMA_VERSION_PHASE2C_V6:
+        try:
+            from steel_module_production_phase2c_readiness import (
+                verify_phase2c_readiness,
+            )
+
+            verify_phase2c_readiness(execution, repo_root=None)
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise ValueError(
+                "Phase-2C execution-v6 cannot create or mutate production "
+                "attempts before valid R6 readiness: "
+                f"{exc}"
+            ) from exc
+        return
     if (
         manifest.get("schema_version")
         in {
@@ -2193,13 +2302,25 @@ def prepare_attempt_intent(
 ) -> dict[str, Any]:
     require_production_execution_open(execution)
     if execution.manifest.get("object_kind") == SUCCESSOR_OBJECT_KIND:
-        from steel_module_production_successor_lib import (
-            verify_successor_recovery_readiness,
-        )
+        if (
+            execution.manifest.get("schema_version")
+            == EXECUTION_SCHEMA_VERSION_PHASE2C_V6
+        ):
+            from steel_module_production_phase2c_readiness import (
+                verify_phase2c_readiness,
+            )
 
-        readiness_path, _ = verify_successor_recovery_readiness(
-            execution, repo_root=None
-        )
+            readiness_path, _ = verify_phase2c_readiness(
+                execution, repo_root=None
+            )
+        else:
+            from steel_module_production_successor_lib import (
+                verify_successor_recovery_readiness,
+            )
+
+            readiness_path, _ = verify_successor_recovery_readiness(
+                execution, repo_root=None
+            )
         if readiness_lock_sha256 != sha256_file(readiness_path):
             raise ValueError("successor intent recovery-readiness digest is stale")
     _safe_id(attempt_id, "attempt ID")
@@ -2291,7 +2412,7 @@ def prepare_attempt_intent(
         for path in temp.iterdir():
             path.chmod(0o555 if path.name == "job-wrapper.sh" else 0o444)
         fsync_tree(temp)
-        with execution_lock(execution.directory):
+        with execution_lock(execution):
             if list_attempt_ids(execution) != prior_ids:
                 raise ValueError("attempt lineage changed concurrently")
             if target.exists() or target.is_symlink():

@@ -11,6 +11,7 @@ out_files/
 
 # Locally downloaded OSC campaign artifacts
 test/OpNovice2/campaign/
+test/g4optics_snapshot_exports/
 
 # Local-language mirrors of tracked decision records
 docs/decisions/*.local.zh.md

@@ -1,7 +1,7 @@
 # Steel Module Production Phase-2C: Production-ready execution-v6
 
-Status: D6 decision checkpoint accepted; implementation, OSC preflight, clean
-execution-v6 materialization, and R6 readiness remain pending.
+Status: D6 decision checkpoint accepted and C6 implementation complete; OSC
+preflight, clean execution-v6 materialization, and R6 readiness remain pending.
 
 Decision checkpoint date: 2026-07-19
 
@@ -44,11 +44,13 @@ Simulation source, physics, executable, runtime image, Geant4 data, and
 environment identities remain unchanged. Execution-v5 and every earlier
 execution are permanently closed, read-only historical evidence.
 
-Phase-2C may use one separately and explicitly authorized held, non-array,
-no-Geant4 compute preflight. Phase-2C does not create a production intent,
-submit BC-S1 production, invoke Geant4, produce production results, or unlock
-`FIXED`, `BC-S2`, `BC-S3`, or `BC-S4`. It ends at an R6 readiness lock with
-zero production intents and zero production Slurm jobs.
+Each sacrificial twin may use at most one separately and explicitly authorized
+held, non-array, no-Geant4 compute preflight. A checksum-valid failed twin may
+lead to a new content-addressed retry twin and a new authorization, but never to
+a second `sbatch` for the same twin. Phase-2C does not create a production
+intent, submit BC-S1 production, invoke Geant4, produce production results, or
+unlock `FIXED`, `BC-S2`, `BC-S3`, or `BC-S4`. It ends at an R6 readiness lock
+with zero production intents and zero production Slurm jobs.
 
 ## 2. Accepted predecessor evidence
 
@@ -69,19 +71,24 @@ for every Phase-2C object.
 
 ## 3. Identity model and canonical objects
 
-Phase-2C introduces four versioned schemas:
+Phase-2C uses these versioned authority and evidence schemas:
 
 - `steel-module-production-phase2c-preflight-twin-v1`;
 - `steel-module-production-managed-execution-v6`;
 - `steel-module-production-phase2c-preflight-evidence-v1`;
+- `steel-module-production-phase2c-preflight-failure-evidence-v1`;
+- `steel-module-production-phase2c-production-equivalence-v1`;
+- `steel-module-production-phase2c-c6-osc-acceptance-v1`;
 - `steel-module-production-phase2c-readiness-lock-v1`.
 
 The canonical OSC locations are:
 
 ```text
 $WORK/campaigns/steel-module-production-bc-s1-preflight-v6
+$WORK/campaigns/steel-module-production-bc-s1-preflight-v6-retry-<NN>-<hash12>
 $WORK/campaigns/steel-module-production-bc-s1-execution-v6
 $WORK/evidence/steel-module-production-phase2c/
+$WORK/evidence/steel-module-production-phase2c/c6-acceptance/c6-acceptance-<hash12>/
 hpc/osc/configurations/steel-module-production-phase2c-v1.lock.json
 ```
 
@@ -89,8 +96,11 @@ Content-addressed identities use these forms:
 
 ```text
 sm-v1-production-bc-s1-preflight-v6-<hash12>
+sm-v1-production-bc-s1-preflight-v6-retry-<NN>-<hash12>
 sm-v1-production-bc-s1-execution-v6-<hash12>
 sm-v1-phase2c-preflight-<hash12>
+sm-v1-phase2c-preflight-failure-<hash12>
+sm-v1-phase2c-c6-acceptance-<hash12>
 ```
 
 The preflight twin and execution-v6 share one
@@ -199,11 +209,24 @@ production_equivalence_hash exact
 ```
 
 An ambiguous or failed submission never triggers another automatic `sbatch`.
-Only the already submitted job may be reconciled. After failure evidence is
-sealed, that twin is permanently closed and execution-v6 cannot be
-materialized. A retry requires a new content-addressed twin and a new explicit
-preflight authorization, but it does not create an execution-v7 production
-chain.
+Only the already submitted job may be reconciled. A terminal failed job is
+eligible for reviewed failure sealing after terminal accounting is frozen. A
+zero-match ambiguity is retry-eligible only after two `squeue` plus `sacct`
+observations separated by at least ten minutes. Multiple matching scheduler
+jobs enter permanent quarantine and are not retry-eligible.
+
+If held-job identity verification itself fails, the rejected job is never
+released or adopted. The manager deliberately has no automatic cancellation
+path: an operator must obtain separate authorization to cancel the exact job
+ID recorded in the immutable journal, wait for terminal accounting, and record
+that intervention in the reviewed failure rationale before sealing the twin.
+
+After failure evidence is sealed, that twin is permanently closed and cannot
+materialize execution-v6. A retry requires a new content-addressed twin, copied
+only from the checksum-valid failed twin, and a new explicit preflight
+authorization. Each retry twin again has a one-job limit. Failed job identities
+remain nonproduction exclusions in the final lineage; retry does not create an
+execution-v7 production chain.
 
 ## 6. Execution-v6 production admission
 
@@ -217,6 +240,21 @@ After valid R6 readiness, the first possible production intent is fixed to
 original 64 seeds. `initial`, one-task smoke, any task subset, and altered seed
 mapping are rejected. Future `resume` or `retry-failed` becomes eligible only
 after a checksum-valid terminal production attempt exists.
+
+A predecessor-retry intent cancelled before scheduler contact, or a submission
+ambiguity closed by the required two zero-match observations, consumes no
+production authority. A later exact `predecessor-retry` may replace a lineage
+containing only those harmless closed intents. Any recorded job, active state,
+terminal production attempt, or permanent quarantine prevents that shortcut.
+
+The production array remains held after submission verification. Reconciliation
+may recover or confirm that held identity but cannot release execution-v6;
+only the separately invoked, checksum-bound `release-intent` route may call
+`scontrol release`. Immediately before that call, the immutable journal records
+`release-invoked`; workers may admit only that exact verified state or the
+subsequent `job-released` state. Pre-release ambiguity remains inadmissible.
+An uncertain return after invocation retains worker authority for the same
+already-released array and must be reconciled without another `sbatch`.
 
 The Phase-2C implementation must route the complete future evidence path for
 execution-v6 without exercising it in this phase:
@@ -241,10 +279,11 @@ Phase-2C has three version-control checkpoints:
 2. **C6 implementation commit.** Code, documentation, adversarial fixtures,
    fake-scheduler tests, and synthetic execution-v6 downstream validation are
    frozen. No tracked R6 readiness lock exists yet.
-3. **R6 readiness-lock commit.** After OSC accepts C6, the one authorized
+3. **R6 readiness-lock commit.** After OSC accepts C6, one twin's authorized
    preflight succeeds, evidence is sealed, and a clean equivalent execution-v6
    is materialized, the reviewed non-authoritative proposal supplies the sole
-   tracked delta in R6.
+   tracked delta in R6. Any earlier failed preflight jobs remain sealed in retry
+   lineage and do not become production authority.
 
 R6 must be the direct non-merge child of final C6. Its only tracked difference
 from C6 is:
@@ -270,7 +309,11 @@ real_production_submission  false
 
 The R6 formal validator proves the lock-only direct-child relationship, clean
 checkout, protected byte identities, preflight evidence, equivalence, and zero
-production contact.
+production contact. It disables Git rename detection and requires one literal
+add-only `100644` readiness-lock blob, while C6 must contain no lock at that
+path. It also requires exactly one checksum-valid current-C6 acceptance bundle
+inside the canonical external evidence root; an external copy, symlink, or
+second current-C6 bundle invalidates readiness.
 
 ## 8. Required verification
 
@@ -298,10 +341,11 @@ Automated fixtures and OSC acceptance must cover, at minimum:
   program, and v1/v2 analyzers.
 
 OSC acceptance requires a clean C6 checkout; passing top-level and focused
-checkers; twin materialization and validation; separately authorized held-job
-identity and release; terminal accounting and evidence validation;
-execution-v6 equivalence and empty-root validation; and final verification of
-the lock-only R6 child.
+checkers; a content-addressed C6 OSC acceptance bundle that records both passes
+and zero scheduler/Geant4 contact; twin materialization and validation;
+separately authorized held-job identity and release; terminal accounting and
+evidence validation; execution-v6 equivalence and empty-root validation; and
+final verification of the lock-only R6 child.
 
 ## 9. Rollout and mandatory stop
 
@@ -310,15 +354,19 @@ The fixed operational order is:
 1. commit and push D6;
 2. implement, test, commit, and push C6;
 3. pull clean C6 on OSC and run all checkers;
-4. check then materialize the preflight twin without scheduler contact;
-5. obtain separate human authorization and write the preflight authorization;
-6. inspect the submit check, then explicitly submit the held preflight;
-7. verify held identity and obtain separate human authorization to release;
-8. freeze accounting, seal evidence, and audit semantics and checksums;
-9. materialize and validate the clean execution-v6 from the accepted twin;
-10. produce and review the non-authoritative R6 proposal;
-11. create, push, pull, and formally validate the lock-only R6 commit;
-12. stop.
+4. freeze and validate the content-addressed C6 OSC acceptance bundle;
+5. check then materialize the preflight twin without scheduler contact;
+6. obtain separate human authorization and write the preflight authorization;
+7. inspect the submit check, then explicitly submit that twin's held preflight;
+8. verify held identity and obtain separate human authorization to release;
+9. freeze terminal accounting and seal either success or reviewed failure
+   evidence;
+10. for a retry-eligible failure, materialize a new retry twin and return to
+    step 6; for permanent quarantine, stop without execution-v6;
+11. materialize and validate clean execution-v6 from the accepted twin;
+12. produce and review the non-authoritative R6 proposal;
+13. create, push, pull, and formally validate the lock-only R6 commit;
+14. stop.
 
 Phase-2C stops before any production intent, BC-S1 production `sbatch`, Geant4
 invocation, production finalization or analysis, or later-child unlock. Only a

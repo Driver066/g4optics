@@ -831,6 +831,299 @@ authorized clean successor (expected execution-v6) that binds the accepted v5
 evidence while starting with new, empty mutable roots. That future step is
 outside this phase and does not authorize a scheduler submission.
 
+#### Phase 2C: sacrificial preflight twin and clean execution-v6
+
+Phase 2C implements that clean successor without running the production scan.
+Its complete decision contract is in
+`docs/decisions/steel-module-production-phase2c-v1.md`. The implementation
+commit C6 must not contain
+`hpc/osc/configurations/steel-module-production-phase2c-v1.lock.json`. C6 also
+must not create a production intent, submit the 32-task BC-S1 array, or invoke
+Geant4. Each sacrificial twin may submit at most one separately authorized,
+held, non-array, no-Geant4 preflight. A checksum-valid failed twin may lead to
+a new content-addressed retry twin and a new authorization, but the same twin
+must never call `sbatch` twice.
+
+On OSC, begin from the canonical source and work roots. The activation helper
+checks and exports the same values, activates the analysis environment, and
+returns to the source repository:
+
+```bash
+REPO=/users/PAS2524/anolddriver66/projects/g4optics
+WORK=/users/PAS2524/anolddriver66/g4optics-rn
+
+cd "$REPO"
+source hpc/osc/activate_steel_module_osc.sh
+test "$REPO" = /users/PAS2524/anolddriver66/projects/g4optics
+test "$WORK" = /users/PAS2524/anolddriver66/g4optics-rn
+test ! -e hpc/osc/configurations/steel-module-production-phase2c-v1.lock.json
+git status --short
+```
+
+At clean C6, record `git rev-parse HEAD`, require the complete checker and the
+focused Phase-2C checker to pass, and only then preview and materialize the
+canonical sacrificial twin. None of these commands contacts Slurm:
+
+```bash
+C6_COMMIT=$(git rev-parse HEAD)
+python3 hpc/osc/check_steel_module_campaign_infrastructure.py
+python3 hpc/osc/check_steel_module_production_phase2c.py
+
+python3 hpc/osc/materialize_steel_module_production_preflight_v6.py \
+  --check-only
+python3 hpc/osc/materialize_steel_module_production_preflight_v6.py \
+  --materialize
+python3 hpc/osc/validate_steel_module_production_preflight_v6.py \
+  --check-only
+python3 hpc/osc/manage_steel_module_production_phase2c_preflight.py status
+```
+
+The initial fixed twin is
+`$WORK/campaigns/steel-module-production-bc-s1-preflight-v6`. It has no
+production authority. Its static production inputs and the later execution-v6
+share one `production_equivalence_hash`; its preflight journal instead lives
+under `$WORK/evidence/steel-module-production-phase2c/preflight-control`.
+If reviewed failure evidence later closes it, the retry materializer publishes
+a sibling named
+`steel-module-production-bc-s1-preflight-v6-retry-<NN>-<hash12>` from the
+checksum-valid failed twin. The manager always selects the latest validated
+twin; every retry requires a new authorization.
+
+Creating the preflight authorization is a separate two-step operation. First
+preview it, then explicitly write it. The check-only payload has no authority
+even though its stable semantic hash is designed to match the subsequently
+written payload. Copy the complete `authorization_sha256` printed by the
+`--write-authorization` command into `AUTH_SHA256`.
+
+```bash
+python3 hpc/osc/manage_steel_module_production_phase2c_preflight.py \
+  prepare --check-only --actor "$USER"
+
+# Separate human authorization is required before this write.
+python3 hpc/osc/manage_steel_module_production_phase2c_preflight.py \
+  prepare --write-authorization --actor "$USER"
+
+AUTH_SHA256=<full-written-authorization-sha256>
+python3 hpc/osc/manage_steel_module_production_phase2c_preflight.py status
+```
+
+Next review the exact held-submission command without contacting Slurm. Stop
+again for explicit human authorization before using `--submit`. This is the
+only Phase-2C command that invokes `sbatch`; it submits exactly one non-array
+job with `--hold`, `--no-requeue`, `--export=NONE`, account `PAS2524`, one CPU,
+1 GiB, and a ten-minute limit. A successful return leaves the job held.
+
+```bash
+python3 hpc/osc/manage_steel_module_production_phase2c_preflight.py \
+  submit --authorization-sha256 "$AUTH_SHA256" --check-only
+
+# STOP: run only after explicit authorization of the printed command and hash.
+python3 hpc/osc/manage_steel_module_production_phase2c_preflight.py \
+  submit --authorization-sha256 "$AUTH_SHA256" --submit --actor "$USER"
+
+python3 hpc/osc/manage_steel_module_production_phase2c_preflight.py \
+  verify-held --authorization-sha256 "$AUTH_SHA256" --actor "$USER"
+```
+
+`verify-held` performs scheduler reads and appends one immutable identity event
+to the external preflight journal. It must report the exact job name,
+case-insensitive `PAS2524/pas2524` account, non-array shape, frozen launcher and
+work directory, and `PENDING / JobHeldUser`. Preview release separately. Stop
+for a second explicit human authorization before `--release`; release mutates
+only that already verified job and never calls `sbatch`.
+
+If `verify-held` rejects the scheduler identity while the exact recorded job
+remains held, do not release, adopt, or resubmit it. The manager intentionally
+does not auto-cancel this exceptional case. Obtain separate authorization for
+`scancel <exact-job-id-from-status-and-journal>`, wait until `squeue` is empty
+and `sacct` is terminal, then freeze accounting and include that intervention
+in the reviewed failure rationale before sealing the twin.
+
+```bash
+python3 hpc/osc/manage_steel_module_production_phase2c_preflight.py \
+  release --authorization-sha256 "$AUTH_SHA256" --check-only
+
+# STOP: run only after separate authorization to release this exact held job.
+python3 hpc/osc/manage_steel_module_production_phase2c_preflight.py \
+  release --authorization-sha256 "$AUTH_SHA256" --release --actor "$USER"
+```
+
+If submission or release is ambiguous, do not submit again. Preserve the
+existing job and use only the reconciliation route for the same authorization:
+
+```bash
+python3 hpc/osc/manage_steel_module_production_phase2c_preflight.py \
+  reconcile --authorization-sha256 "$AUTH_SHA256" --actor "$USER"
+```
+
+For an ambiguous zero-match submission, two `reconcile` observations using
+both `squeue` and `sacct`, separated by at least ten minutes, are required
+before reviewed failure sealing can declare it retry-eligible. Multiple
+matching jobs enter permanent quarantine; never adopt one arbitrarily and
+never submit another job for that twin.
+
+After a submitted preflight becomes terminal, freeze accounting before Slurm
+retention expires. If the job failed, do not run the success-evidence sealer.
+Preview and then seal reviewed failure evidence. The preview prints
+`retry_eligible`; only `true` permits creation of a new twin. Failure sealing
+performs no scheduler command and permanently closes the failed twin:
+
+```bash
+python3 hpc/osc/manage_steel_module_production_phase2c_preflight.py \
+  freeze-accounting --authorization-sha256 "$AUTH_SHA256" --actor "$USER"
+
+FAILURE_RATIONALE='concise reviewed reason for this preflight failure'
+python3 hpc/osc/seal_steel_module_production_phase2c_preflight_failure.py \
+  --authorization-sha256 "$AUTH_SHA256" \
+  --reviewer "$USER" --rationale "$FAILURE_RATIONALE" --check-only
+python3 hpc/osc/seal_steel_module_production_phase2c_preflight_failure.py \
+  --authorization-sha256 "$AUTH_SHA256" \
+  --reviewer "$USER" --rationale "$FAILURE_RATIONALE" --seal
+python3 hpc/osc/validate_steel_module_production_preflight_v6.py \
+  --check-only
+```
+
+For a safely reviewed zero-match ambiguity there is no terminal job accounting;
+run the same failure-sealing commands only after the required two observations.
+For `retry_eligible: true`, preview and publish the next content-addressed twin.
+The materializer detects the sealed predecessor and switches to retry mode:
+
+```bash
+python3 hpc/osc/materialize_steel_module_production_preflight_v6.py \
+  --check-only
+python3 hpc/osc/materialize_steel_module_production_preflight_v6.py \
+  --materialize
+python3 hpc/osc/validate_steel_module_production_preflight_v6.py \
+  --check-only
+
+unset AUTH_SHA256
+# Return to prepare --check-only and obtain a new explicit authorization.
+```
+
+If failure sealing reports `retry_eligible: false`, stop: execution-v6 cannot
+be materialized from that twin and this recovery path has no automatic retry.
+
+For a successful terminal preflight, freeze accounting, preview the success
+evidence seal, and then publish it. Copy the printed content-addressed directory
+basename into `EVIDENCE_ID` and validate it. Accounting freeze performs
+scheduler reads; success sealing and evidence validation perform no scheduler
+command.
+
+```bash
+python3 hpc/osc/manage_steel_module_production_phase2c_preflight.py \
+  freeze-accounting --authorization-sha256 "$AUTH_SHA256" --actor "$USER"
+
+python3 hpc/osc/seal_steel_module_production_phase2c_preflight_evidence.py \
+  --authorization-sha256 "$AUTH_SHA256" --check-only
+python3 hpc/osc/seal_steel_module_production_phase2c_preflight_evidence.py \
+  --authorization-sha256 "$AUTH_SHA256" --seal
+
+EVIDENCE_ID=sm-v1-phase2c-preflight-<hash12>
+python3 hpc/osc/validate_steel_module_production_phase2c_preflight_evidence.py \
+  --evidence-id "$EVIDENCE_ID" --check-only
+python3 hpc/osc/validate_steel_module_production_preflight_v6.py \
+  --check-only
+```
+
+Accepted evidence must prove that Apptainer was invoked, Geant4 was not
+invoked, zero events and production seeds were consumed, and the sacrificial
+twin is permanently closed. Only then may the clean canonical execution-v6 be
+previewed and materialized. These commands do not contact Slurm:
+
+```bash
+python3 hpc/osc/materialize_steel_module_production_execution_v6.py \
+  --check-only
+python3 hpc/osc/materialize_steel_module_production_execution_v6.py \
+  --materialize
+python3 hpc/osc/validate_steel_module_production_execution_v6.py \
+  --check-only
+```
+
+The output is
+`$WORK/campaigns/steel-module-production-bc-s1-execution-v6`. It is copied
+from the checksum-valid twin static tree, has the same
+`production_equivalence_hash`, and starts with empty `intents/`, `attempts/`,
+and `finalized/`. It remains non-submittable until the separate R6 lock-only
+commit is accepted.
+
+Still at clean C6, first freeze the content-addressed C6 OSC acceptance bundle.
+This command reruns the top-level and focused checkers, records both complete
+outputs and hashes, requires the focused forbidden-scheduler sentinel, and
+proves zero real Slurm calls and no Geant4 invocation. It writes no tracked
+lock. Copy the printed `output` path into `C6_ACCEPTANCE` and verify its
+checksum manifest:
+
+```bash
+test "$(git rev-parse HEAD)" = "$C6_COMMIT"
+git status --short
+python3 hpc/osc/generate_steel_module_production_phase2c_acceptance.py --write
+
+C6_ACCEPTANCE=/absolute/path/printed/by-the-command
+(
+  cd "$C6_ACCEPTANCE"
+  sha256sum --quiet -c SHA256SUMS
+)
+```
+
+There must be exactly one valid acceptance bundle for this C6. Historical
+acceptance bundles may remain, but a second bundle for the same C6, a symlink,
+or a current-C6 bundle outside the canonical evidence root is rejected. Now generate
+the non-authoritative readiness proposal in the external Phase-2C evidence
+root. This writes no tracked lock and contacts no scheduler:
+
+```bash
+test "$(git rev-parse HEAD)" = "$C6_COMMIT"
+git status --short
+python3 hpc/osc/generate_steel_module_production_phase2c_readiness.py \
+  --write-proposal
+
+PROPOSAL="$WORK/evidence/steel-module-production-phase2c/steel-module-production-phase2c-readiness-proposal.json"
+sha256sum "$PROPOSAL"
+```
+
+Download and review that exact proposal before creating R6 in the source
+repository. The lock writer is intentionally a different command and requires
+both the reviewed proposal path and reviewer identity:
+
+```bash
+# Run in a clean checkout whose HEAD is still exact C6.
+cd "$REPO"
+test "$(git rev-parse HEAD)" = "$C6_COMMIT"
+git status --short
+python3 hpc/osc/generate_steel_module_production_phase2c_readiness.py \
+  --write-lock --proposal /absolute/path/to/reviewed-proposal.json \
+  --reviewer "$USER"
+
+git diff --name-status --no-renames "$C6_COMMIT" HEAD
+```
+
+The last command must list exactly one add-only row,
+`A<TAB>hpc/osc/configurations/steel-module-production-phase2c-v1.lock.json`.
+Commit that single ordinary non-executable tracked file as R6; R6 must be the
+direct non-merge child of C6.
+After pushing R6 and pulling it on OSC, validate the clean lock-only checkout:
+
+```bash
+python3 hpc/osc/validate_steel_module_production_phase2c_readiness.py \
+  --check-only
+python3 hpc/osc/manage_steel_module_production_attempt.py status
+```
+
+The terminal state must report readiness true, exactly one accepted preflight
+job, zero production intents, and zero production Slurm jobs. **Stop here.** Do
+not run `prepare-intent`, do not submit BC-S1, and do not invoke Geant4 during
+Phase 2C. The first future production intent is the separately reviewed
+`predecessor-retry` for all 32 tasks, 8,000 events, and the original 64 seeds;
+it belongs to the next phase. That future array remains held after submit
+verification; `reconcile` can recover the same identity but cannot release it.
+Only a separate checksum-bound `release-intent` command may call
+`scontrol release`. A cancelled never-submitted intent, or a submission proven
+absent by the two-snapshot rule, may be replaced by another exact
+`predecessor-retry`; no job or seeds were consumed. Immediately before release,
+the journal records `release-invoked`, which is the only ambiguous release
+window admitted by workers. Multiple exact scheduler matches instead create a
+permanent quarantine and block release.
+
 The downstream finalizer, checkpoint, analyzer, renderer, and progression
 recorder remain applicable only after such a future production successor has
 actually run all 32 tasks and produced valid selected results. The production

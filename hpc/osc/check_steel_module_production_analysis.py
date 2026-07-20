@@ -10,15 +10,29 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import analyze_steel_module_campaign as v1
 import analyze_steel_module_production_checkpoint as analyzer
+import check_steel_module_production_finalization as finalization_fixture
+import finalize_steel_module_managed_child as managed_finalizer
 import record_steel_module_progression as recorder
 import render_steel_module_production_review as renderer_module
+from build_steel_module_production_checkpoint import build_checkpoint
 from plot_steel_module_analysis_v2 import (
     sha256_file,
     verify_checksum_manifest,
     write_recursive_checksums,
+)
+from realistic_neutron_event_audit import (
+    EVENT_SCHEMA_FIELDS,
+    SIPM_SENSOR_FIELDS,
+    read_and_audit_root,
+)
+from steel_module_production_checkpoint_lib import (
+    load_production_checkpoint,
+    managed_finalization_directory,
 )
 
 
@@ -93,6 +107,326 @@ def synthetic_groups() -> tuple[
         blocks[thickness] = endpoint_blocks
         located[thickness] = endpoint_located
     return groups, blocks, located, task_ids
+
+
+def phase2c_root_arrays(task: object, np: object) -> dict[str, object]:
+    """Build one complete causal-audit ROOT payload for a BC-S1 block."""
+
+    count = 250
+    block = int(task.seed_block)
+    scale = {4: 1, 24: 3}[int(task.tile_thickness_mm)]
+    arrays = {
+        field: np.zeros(count, dtype=np.float64)
+        for field in (*EVENT_SCHEMA_FIELDS, *SIPM_SENSOR_FIELDS)
+    }
+    arrays["event_id"] = np.arange(count, dtype=np.int64)
+    arrays["shoot_z_mm"].fill(40.0)
+    arrays["primary_kinetic_energy_mev"].fill(1000.0)
+    for field in (
+        "hit_x_mm",
+        "hit_y_mm",
+        "hit_z_mm",
+        "scint_centroid_x_mm",
+        "scint_centroid_y_mm",
+        "scint_centroid_z_mm",
+        "primary_neutron_tile_entry_x_mm",
+        "primary_neutron_tile_entry_y_mm",
+        "primary_neutron_tile_entry_z_mm",
+        "collection_efficiency",
+    ):
+        arrays[field].fill(np.nan)
+
+    for entry in range(count):
+        positive = (entry + block * 7) % 5 == 0
+        sipm = scale * (2 + entry % 7) if positive else 0
+        if block == 15 and entry == count - 1:
+            sipm = scale * 300
+        active = sipm > 0
+        generated = sipm * 20
+        scintillation = sipm * 18
+        arrays["generated_optical_photons"][entry] = generated
+        arrays["scintillation_photons"][entry] = scintillation
+        arrays["cerenkov_photons"][entry] = generated - scintillation
+        arrays["sipm_detected_photons"][entry] = sipm
+        arrays["sipm_sensor_0_detected_photons"][entry] = sipm
+        arrays["collection_efficiency_valid"][entry] = int(active)
+        arrays["primary_neutron_elastic_count"][entry] = int(active)
+        arrays["primary_neutron_elastic_flag"][entry] = int(active)
+        arrays["primary_neutron_any_interaction_flag"][entry] = int(active)
+        arrays["steel_edep_mev"][entry] = float(active)
+        arrays["scint_centroid_valid"][entry] = int(active)
+        if active:
+            arrays["collection_efficiency"][entry] = sipm / generated
+            arrays["scint_centroid_x_mm"][entry] = 0.0
+            arrays["scint_centroid_y_mm"][entry] = 0.0
+            arrays["scint_centroid_z_mm"][entry] = 0.0
+    return arrays
+
+
+def write_phase2c_root(
+    path: Path, task: object, np: object, uproot: object
+) -> dict[str, int | float]:
+    arrays = phase2c_root_arrays(task, np)
+    with uproot.recreate(path) as root_file:
+        root_file.mktree(
+            "scan", {field: values.dtype for field, values in arrays.items()}
+        )
+        root_file["scan"].extend(arrays)
+    _, report = read_and_audit_root(
+        path, expected_events=int(task.events), context=str(task.logical_task_id)
+    )
+    return report
+
+
+def phase2c_seed_audit(
+    tasks: tuple[object, ...], identity: dict[str, object]
+) -> tuple[dict[str, object], dict[str, object]]:
+    program = {
+        "program_id": "fixture-phase2c-program",
+        "program_hash": "9" * 64,
+    }
+    audit = {
+        "schema_version": "steel-module-managed-seed-audit-v1",
+        "valid": True,
+        "production_seed_count": 64,
+        "production_unique_seed_count": 64,
+        "production_seed_set_hash": identity["seed_set_hash"],
+        "sealed_pilot_seed_count": 240,
+        "sealed_pilot_unique_seed_count": 240,
+        "sealed_pilot_seed_set_hash": "5" * 64,
+        "overlap_count": 0,
+        "overlap": [],
+        "parent_registry_reconciled": True,
+        "phase2a_plan_reconciled": True,
+        "run_config_reconciled": True,
+        "task_result_reconciled": True,
+        "tasks": [
+            {
+                "logical_task_id": task.logical_task_id,
+                "seed_block": task.seed_block,
+                "seed1": task.seed1,
+                "seed2": task.seed2,
+            }
+            for task in tasks
+        ],
+    }
+    return program, audit
+
+
+def phase2c_v6_finalizer_checkpoint_analyzer_e2e(root: Path) -> None:
+    """Carry one test-only v6 child through finalization, checkpoint, and analysis."""
+
+    if (
+        importlib.util.find_spec("numpy") is None
+        or importlib.util.find_spec("uproot") is None
+    ):
+        raise AssertionError("Phase-2C integrated evidence requires NumPy and uproot")
+    import numpy as np  # type: ignore[import-not-found]
+    import uproot  # type: ignore[import-not-found]
+
+    execution = finalization_fixture.fixture_phase2c_successor(root)
+    execution_dir = execution.directory
+    execution_dir.mkdir(parents=True)
+    tasks = finalization_fixture.fixture_tasks(execution_dir)
+    identity = finalization_fixture.fixture_task_identity(execution_dir)
+    execution.tasks = tasks
+    execution.campaign_id = "fixture-phase2c-bc-s1"
+    execution.plan_hash = "1" * 64
+    execution.git_commit = "2" * 40
+    execution.managed_child = SimpleNamespace(
+        binding={
+            "binding_hash": "3" * 64,
+            "child": {
+                "child_plan_hash": "4" * 64,
+                "task_set_hash": identity["task_set_hash"],
+                "parent_task_plan_hash": "5" * 64,
+                "task_seed_mapping_hash": identity["task_seed_mapping_hash"],
+                "seed_set_hash": identity["seed_set_hash"],
+            },
+        }
+    )
+    execution.manifest.update(
+        {
+            "accepted_statistical_evidence": False,
+            "test_mode": True,
+            "sealed_pilot": {
+                "directory": "/fixture/sealed-pilot",
+                "campaign_id": "fixture-sealed-pilot",
+                "plan_hash": "6" * 64,
+                "simulation_commit": "7" * 40,
+                "finalized_checksums_sha256": "8" * 64,
+                "analysis_v2_checksums_sha256": "9" * 64,
+                "analysis_v2_config_sha256": "a" * 64,
+                "analysis_commit": "b" * 40,
+            },
+        }
+    )
+
+    attempt_id = "fixture-predecessor-retry"
+    job_id = "70000001"
+    selected: list[managed_finalizer.ManagedCandidate] = []
+    attempt_root = execution_dir / "attempts" / attempt_id
+    for task in tasks:
+        task_dir = attempt_root / "tasks" / task.logical_task_id
+        task_dir.mkdir(parents=True)
+        paths = {
+            "run_config": task_dir / "run_config.json",
+            "macro": task_dir / "run.mac",
+            "simulation_log": task_dir / "simulation.log",
+            "root": task_dir / "result.root",
+            "summary": task_dir / "summary.csv",
+            "efficiency_map": task_dir / "efficiency_map.csv",
+        }
+        write_json(paths["run_config"], {"fixture": True})
+        paths["macro"].write_text("# fixture\n", encoding="utf-8")
+        paths["simulation_log"].write_text("fixture complete\n", encoding="utf-8")
+        report = write_phase2c_root(paths["root"], task, np, uproot)
+        summary = {key: str(value) for key, value in report.items()}
+        write_csv(paths["summary"], list(summary), [summary])
+        paths["efficiency_map"].write_text("sensor,photons\n0,0\n", encoding="utf-8")
+        artifacts = {
+            name: {
+                "path": str(path.relative_to(execution_dir)),
+                "sha256": sha256_file(path),
+            }
+            for name, path in paths.items()
+        }
+        marker = {
+            "schema_version": "steel-module-production-test-result-v1",
+            "logical_task_id": task.logical_task_id,
+            "artifacts": artifacts,
+        }
+        marker_path = task_dir / "task_result.json"
+        write_json(marker_path, marker)
+        selected.append(
+            managed_finalizer.ManagedCandidate(
+                task=task,
+                attempt={"attempt_id": attempt_id},
+                array_index=task.task_index,
+                job_id=job_id,
+                marker_path=marker_path,
+                marker=marker,
+                paths=paths,
+                summary=summary,
+                event_report=report,
+            )
+        )
+    accounting = attempt_root / "accounting"
+    accounting.mkdir()
+    write_json(
+        accounting / "frozen.json",
+        {"attempt_id": attempt_id, "job_id": job_id},
+    )
+    finalized_container = execution_dir / "finalized"
+    finalized_container.mkdir(mode=0o700)
+    execution_dir.chmod(0o555)
+    try:
+        output = managed_finalization_directory(execution_dir, execution.manifest)
+        with patch.object(
+            managed_finalizer,
+            "_program_and_seed_audit",
+            return_value=phase2c_seed_audit(tasks, identity),
+        ), patch.object(
+            managed_finalizer,
+            "load_frozen_accounting",
+            return_value={"attempt_id": attempt_id, "job_id": job_id},
+        ):
+            managed_finalizer.finalize(
+                execution,
+                root,
+                output,
+                selected,
+                [],
+                [attempt_id],
+                selection={},
+                selection_file_sha256=None,
+            )
+        checkpoint_dir = build_checkpoint(
+            output,
+            root / "checkpoints",
+            allow_test_mode=True,
+            verify_root_files=True,
+        )
+        loaded = load_production_checkpoint(
+            checkpoint_dir,
+            allow_test_mode=True,
+            require_readiness=False,
+            verify_root_files=True,
+        )
+        assert loaded.manifest["test_mode"] is True
+        assert loaded.manifest["accepted_statistical_evidence"] is False
+        assert len(loaded.task_rows) == 32
+        checkpoint = analyzer.load_json(checkpoint_dir / "checkpoint.json")
+        source_children = analyzer.load_json(checkpoint_dir / "source_children.json")
+        event_audit = analyzer.load_json(checkpoint_dir / "event_audit.json")
+        task_rows = analyzer.read_table(checkpoint_dir / "task_index.tsv", delimiter="\t")
+        analyzer.validate_checkpoint_shape(checkpoint, task_rows)
+        groups, blocks, located = analyzer.load_checkpoint_events(
+            checkpoint_dir,
+            checkpoint,
+            task_rows,
+            event_audit,
+            source_children,
+        )
+        assert {thickness: len(events) for thickness, events in groups.items()} == {
+            4: 4000,
+            24: 4000,
+        }
+        assert len({row["root"] for row in task_rows}) == 32
+        located_by_thickness: dict[int, list[analyzer.LocatedEvent]] = {
+            4: [],
+            24: [],
+        }
+        task_ids: dict[tuple[int, int], str] = {}
+        identities = {
+            row["logical_task_id"]: (
+                int(row["tile_thickness_mm"]),
+                int(row["seed_block"]),
+            )
+            for row in task_rows
+        }
+        for item in located:
+            thickness, block = identities[item.logical_task_id]
+            located_by_thickness[thickness].append(item)
+            task_ids[(thickness, block)] = item.logical_task_id
+        result = analyzer.analyze_event_groups(
+            groups,
+            blocks,
+            located_by_thickness,
+            task_ids,
+            pilot={
+                "ratio": 2.5,
+                "ci95_low": 0.5,
+                "ci95_high": 4.5,
+                "relative_half_width": 0.8,
+                "events_per_endpoint": 1000,
+            },
+            np=np,
+        )
+        assert result.primary["ratio"] == 3.0
+        assert result.primary["valid_resamples"] == 10_000
+        assert len(result.loo_rows) == 32
+
+        tampered_root = Path(task_rows[0]["root"])
+        with tampered_root.open("ab") as stream:
+            stream.write(b"phase2c-tamper")
+        entered_analysis_core = False
+        try:
+            analyzer.load_checkpoint_events(
+                checkpoint_dir,
+                checkpoint,
+                task_rows,
+                event_audit,
+                source_children,
+            )
+            entered_analysis_core = True
+        except ValueError as exc:
+            assert "checkpoint ROOT checksum mismatch" in str(exc)
+        else:
+            raise AssertionError("tampered ROOT reached the production analysis core")
+        assert entered_analysis_core is False
+    finally:
+        execution_dir.chmod(0o755)
 
 
 def core_analysis_check() -> None:
@@ -641,8 +975,15 @@ def main() -> int:
         text = path.read_text(encoding="utf-8")
         assert "sbatch" not in text and "scontrol" not in text and "sacct" not in text
     with tempfile.TemporaryDirectory(prefix="steel-module-phase2b-analysis-") as raw:
-        review_and_recorder_check(repo_root, Path(raw))
-    print("steel-module production analysis/review/progression: PASS")
+        scratch = Path(raw)
+        phase2c_v6_finalizer_checkpoint_analyzer_e2e(
+            scratch / "phase2c-v6-e2e"
+        )
+        review_and_recorder_check(repo_root, scratch)
+    print(
+        "steel-module production analysis/review/progression: PASS "
+        "(v6 finalizer/checkpoint/analyzer synthetic E2E included)"
+    )
     return 0
 
 

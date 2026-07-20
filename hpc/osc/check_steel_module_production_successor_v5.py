@@ -238,6 +238,16 @@ def test_v5_materialization(repo_root: Path, scratch: Path) -> None:
         v5.directory,
         {"job_id": held_job_id, "held_scheduler": held_identity},
     )
+    for field in ("command", "work_dir", "stdout"):
+        altered = dict(held_identity)
+        altered[field] = "/fixture/wrong-" + field
+        _assert_rejected(
+            lambda altered=altered: successor_lib._validate_formal_r3_held_job_paths(
+                v5.directory,
+                {"job_id": held_job_id, "held_scheduler": altered},
+            ),
+            f"formal R3 path verifier accepted wrong {field}",
+        )
     (failure / "source-evidence.txt").write_text(
         "tampered fixture scheduler evidence\n", encoding="utf-8"
     )

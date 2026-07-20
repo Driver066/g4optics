@@ -2235,6 +2235,17 @@ def seal_r3_probe_evidence(
         verify_runtime=not test_mode,
         verify_live_predecessor=True,
     )
+    if not test_mode:
+        # Re-derive the formal launcher, working directory, and output path at
+        # the final evidence boundary.  The accounting bundle is immutable,
+        # but accepting its internally self-consistent held-job record without
+        # this independent comparison would allow a wrong formal job path to
+        # be sealed as accepted compute evidence.
+        from steel_module_production_successor_lib import (
+            _validate_formal_r3_held_job_paths,
+        )
+
+        _validate_formal_r3_held_job_paths(execution.directory, accounting)
     if execution.manifest.get("schema_version") not in {
         SUCCESSOR_EXECUTION_SCHEMA_VERSION,
         SUCCESSOR_EXECUTION_SCHEMA_VERSION_V5,

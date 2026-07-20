@@ -17,6 +17,8 @@ from typing import Any
 from unittest.mock import patch
 
 import finalize_steel_module_managed_child as finalizer
+import record_steel_module_production_task_result as task_result_recorder
+import steel_module_production_phase2c_readiness as phase2c_readiness
 import steel_module_production_checkpoint_lib as checkpoint_lib
 import steel_module_production_phase2b_lib as phase2b_lib
 from build_steel_module_production_checkpoint import build_checkpoint
@@ -30,6 +32,7 @@ from steel_module_production_checkpoint_lib import (
     MANAGED_FINALIZATION_SCHEMA_VERSION,
     RECOVERY_LINEAGE_SCHEMA_VERSION_V2,
     RECOVERY_LINEAGE_SCHEMA_VERSION_V3,
+    RECOVERY_LINEAGE_SCHEMA_VERSION_V4,
     SUCCESSOR_FINALIZATION_BUNDLE_NAME,
     load_managed_finalization,
     load_execution_for_downstream,
@@ -37,6 +40,7 @@ from steel_module_production_checkpoint_lib import (
     managed_finalization_directory,
     recovery_lineage_from_execution,
     validate_bc_only_s1_rows,
+    validate_recovery_lineage,
     verify_recursive_checksums,
     write_checkpoint_atomic,
     write_recursive_checksums,
@@ -53,6 +57,9 @@ from steel_module_production_program_lib import (
     seed_pair_registry_hash,
     seed_set_hash,
     task_set_hash,
+)
+from steel_module_production_phase2c_lib import (
+    EXECUTION_V6_SCHEMA_VERSION,
 )
 from steel_module_production_successor_lib import (
     _validate_successor_mutable_state_after_intent,
@@ -306,6 +313,30 @@ def fixture_successor_v4(root: Path) -> SimpleNamespace:
         execution_id="fixture-successor-v4",
         execution_hash="f" * 64,
         manifest=manifest,
+    )
+
+
+def fixture_phase2c_successor(root: Path) -> SimpleNamespace:
+    execution_dir = (root / "execution-v6").resolve()
+    authority: dict[str, Any] = {
+        "schema_version": "steel-module-production-phase2c-authority-fixture-v1",
+        "production_equivalence_hash": "7" * 64,
+        "preflight_evidence_hash": "8" * 64,
+        "excluded_attempt_ids": ["20260718T175107Z-initial"],
+        "excluded_job_ids": ["50532143", "50561809", "60000000"],
+    }
+    authority["authority_hash"] = sha256_bytes(canonical_json(authority))
+    return SimpleNamespace(
+        directory=execution_dir,
+        execution_id="fixture-execution-v6",
+        execution_hash="6" * 64,
+        manifest={
+            "schema_version": EXECUTION_V6_SCHEMA_VERSION,
+            "object_kind": SUCCESSOR_OBJECT_KIND,
+            "execution_generation": "production-ready-execution-v6",
+            "phase2c_authority": authority,
+            "production_equivalence_hash": "7" * 64,
+        },
     )
 
 
@@ -573,6 +604,212 @@ def check_execution_dispatch(root: Path) -> None:
             kwargs = successor_loader.call_args.kwargs
             assert kwargs["require_readiness"] is True
             assert kwargs["verify_live_predecessor"] is True
+    v6_dir = root / "dispatch-execution-v6"
+    v6_dir.mkdir()
+    json_write(
+        v6_dir / "managed_execution.json",
+        {
+            "schema_version": EXECUTION_V6_SCHEMA_VERSION,
+            "object_kind": SUCCESSOR_OBJECT_KIND,
+        },
+    )
+    v6_sentinel = object()
+    with patch(
+        "steel_module_production_phase2c_lib.load_execution_v6",
+        return_value=v6_sentinel,
+    ) as v6_loader:
+        assert (
+            load_execution_for_downstream(
+                v6_dir,
+                repo_root=root,
+                require_readiness=True,
+                verify_live_predecessor=True,
+            )
+            is v6_sentinel
+        )
+        kwargs = v6_loader.call_args.kwargs
+        assert kwargs["require_readiness"] is True
+        assert kwargs["verify_live_predecessor"] is True
+    worker_sentinel = object()
+    with patch(
+        "steel_module_production_phase2c_lib.load_execution_v6_for_frozen_worker",
+        return_value=worker_sentinel,
+    ) as worker_loader:
+        assert (
+            task_result_recorder._load_execution_for_frozen_worker(
+                v6_dir, control_root=root
+            )
+            is worker_sentinel
+        )
+        worker_loader.assert_called_once_with(v6_dir, control_root=root)
+    legacy_worker_sentinel = object()
+    with patch.object(
+        task_result_recorder,
+        "load_legacy_execution_for_frozen_worker",
+        return_value=legacy_worker_sentinel,
+    ) as legacy_worker_loader:
+        assert (
+            task_result_recorder._load_execution_for_frozen_worker(
+                old_dir, control_root=root
+            )
+            is legacy_worker_sentinel
+        )
+        legacy_worker_loader.assert_called_once_with(
+            old_dir, control_root=root
+        )
+
+
+def check_phase2c_lineage_contract(root: Path) -> None:
+    """Keep all historical and sacrificial-preflight jobs out of v6 results."""
+
+    authority: dict[str, Any] = {
+        "schema_version": "steel-module-production-phase2c-authority-fixture-v1",
+        "production_equivalence_hash": "7" * 64,
+        "preflight_evidence_hash": "8" * 64,
+        "excluded_attempt_ids": ["20260718T175107Z-initial"],
+        "excluded_job_ids": ["50532143", "50561809", "60000000"],
+    }
+    authority["authority_hash"] = sha256_bytes(canonical_json(authority))
+    execution = {
+        "directory": str((root / "execution-v6").resolve()),
+        "schema_version": EXECUTION_V6_SCHEMA_VERSION,
+        "object_kind": SUCCESSOR_OBJECT_KIND,
+        "execution_generation": "production-ready-execution-v6",
+        "execution_id": "fixture-execution-v6",
+        "execution_hash": "6" * 64,
+        "phase2c_authority_hash": authority["authority_hash"],
+        "production_equivalence_hash": "7" * 64,
+    }
+    lineage: dict[str, Any] = {
+        "schema_version": RECOVERY_LINEAGE_SCHEMA_VERSION_V4,
+        "successor_execution": {
+            key: execution[key]
+            for key in (
+                "directory",
+                "schema_version",
+                "object_kind",
+                "execution_generation",
+                "execution_id",
+                "execution_hash",
+            )
+        },
+        "phase2c_authority": authority,
+        "production_equivalence_hash": "7" * 64,
+        "excluded_attempt_ids": authority["excluded_attempt_ids"],
+        "excluded_job_ids": authority["excluded_job_ids"],
+        "result_scope": {
+            "source_execution_directory": execution["directory"],
+            "selected_results": "execution-v6-production-successes-only",
+            "historical_execution_outputs_included": False,
+            "historical_execution_accounting_included": False,
+            "phase2c_preflight_outputs_included": False,
+            "phase2c_preflight_accounting_included": False,
+        },
+    }
+    lineage["lineage_hash"] = sha256_bytes(canonical_json(lineage))
+    assert validate_recovery_lineage(execution, lineage) == lineage
+    assert checkpoint_lib.recovery_lineage_exclusions(lineage) == (
+        {"20260718T175107Z-initial"},
+        {"50532143", "50561809", "60000000"},
+    )
+    tampered = json.loads(json.dumps(lineage))
+    tampered["excluded_job_ids"].remove("60000000")
+    expect_failure(
+        validate_recovery_lineage,
+        execution,
+        tampered,
+        contains="semantic hash mismatch",
+    )
+    resigned = json.loads(json.dumps(lineage))
+    resigned["excluded_job_ids"].remove("60000000")
+    resigned.pop("lineage_hash")
+    resigned["lineage_hash"] = sha256_bytes(canonical_json(resigned))
+    expect_failure(
+        validate_recovery_lineage,
+        execution,
+        resigned,
+        contains="authority mismatch",
+    )
+    execution_object = SimpleNamespace(
+        directory=Path(execution["directory"]),
+        execution_id=execution["execution_id"],
+        execution_hash=execution["execution_hash"],
+        manifest={
+            "schema_version": EXECUTION_V6_SCHEMA_VERSION,
+            "object_kind": SUCCESSOR_OBJECT_KIND,
+            "execution_generation": execution["execution_generation"],
+            "phase2c_authority": authority,
+            "production_equivalence_hash": execution[
+                "production_equivalence_hash"
+            ],
+        },
+    )
+    assert recovery_lineage_from_execution(execution_object) == lineage
+    valid = SimpleNamespace(
+        attempt={"attempt_id": "20260722T120000Z-predecessor-retry"},
+        job_id="70000000",
+        marker_path=execution_object.directory / "attempts/new/task_result.json",
+        paths={"root": execution_object.directory / "attempts/new/output.root"},
+    )
+    with patch.object(
+        finalizer,
+        "load_frozen_accounting",
+        return_value={"job_id": valid.job_id},
+    ):
+        assert finalizer.validate_selected_result_lineage(
+            execution_object, [valid], [valid.attempt["attempt_id"]]
+        ) == lineage
+    for forbidden_job in authority["excluded_job_ids"]:
+        forbidden = SimpleNamespace(
+            attempt=valid.attempt,
+            job_id=forbidden_job,
+            marker_path=valid.marker_path,
+            paths=valid.paths,
+        )
+        expect_failure(
+            finalizer.validate_selected_result_lineage,
+            execution_object,
+            [forbidden],
+            [],
+            contains="selected predecessor scheduler job",
+        )
+    forbidden_attempt = SimpleNamespace(
+        attempt={"attempt_id": authority["excluded_attempt_ids"][0]},
+        job_id=valid.job_id,
+        marker_path=valid.marker_path,
+        paths=valid.paths,
+    )
+    expect_failure(
+        finalizer.validate_selected_result_lineage,
+        execution_object,
+        [forbidden_attempt],
+        [forbidden_attempt.attempt["attempt_id"]],
+        contains="predecessor attempt evidence",
+    )
+
+
+def check_phase2c_operational_readiness_snapshot(root: Path) -> None:
+    """R6 binds the initial empty snapshot without rejecting later intents."""
+
+    execution_root = root / "phase2c-readiness-after-intent"
+    for name in ("intents", "attempts", "finalized"):
+        (execution_root / name).mkdir(parents=True)
+    (execution_root / "intents" / "fixture-predecessor-retry").mkdir()
+    execution = SimpleNamespace(directory=execution_root)
+    snapshot = phase2c_readiness._empty_mutable_snapshot(
+        execution, require_currently_empty=False
+    )
+    assert snapshot["records"] == {
+        "intents": [],
+        "attempts": [],
+        "finalized": [],
+    }
+    expect_failure(
+        phase2c_readiness._empty_mutable_snapshot,
+        execution,
+        require_currently_empty=True,
+        contains="mutable root is not empty: intents",
+    )
 
 
 def write_successor_finalization(
@@ -595,18 +832,33 @@ def write_successor_finalization(
     identity = fixture_task_identity(root)
     validation_path = target / "validation_report.json"
     validation = json.loads(validation_path.read_text(encoding="utf-8"))
-    validation["execution"] = {
+    execution_record = {
         "directory": str(successor.directory),
         "schema_version": successor.manifest["schema_version"],
         "object_kind": successor.manifest["object_kind"],
         "execution_generation": successor.manifest["execution_generation"],
         "execution_id": successor.execution_id,
         "execution_hash": successor.execution_hash,
-        "recovery_authority_hash": lineage["recovery_authority"]["authority_hash"],
         "task_set_hash": identity["task_set_hash"],
         "task_seed_mapping_hash": identity["task_seed_mapping_hash"],
         "seed_set_hash": identity["seed_set_hash"],
     }
+    if lineage["schema_version"] == RECOVERY_LINEAGE_SCHEMA_VERSION_V4:
+        execution_record.update(
+            {
+                "phase2c_authority_hash": lineage["phase2c_authority"][
+                    "authority_hash"
+                ],
+                "production_equivalence_hash": lineage[
+                    "production_equivalence_hash"
+                ],
+            }
+        )
+    else:
+        execution_record["recovery_authority_hash"] = lineage[
+            "recovery_authority"
+        ]["authority_hash"]
+    validation["execution"] = execution_record
     validation["recovery_lineage"] = lineage
     validation["accounting_attempts"] = ["fixture-attempt"]
     json_write(validation_path, validation)
@@ -1578,6 +1830,47 @@ def check_successor_v4_provenance(finalization: Path, root: Path) -> None:
         )
 
 
+def check_phase2c_v6_provenance(finalization: Path, root: Path) -> None:
+    """Run v6 lineage through whole-child finalization and BC-ONLY-S1."""
+
+    successor = fixture_phase2c_successor(root)
+    successor_finalization, lineage = write_successor_finalization(
+        finalization,
+        root,
+        successor=successor,
+    )
+    assert lineage["schema_version"] == RECOVERY_LINEAGE_SCHEMA_VERSION_V4
+    validation, rows = load_managed_finalization(
+        successor_finalization,
+        allow_test_mode=True,
+        verify_root_files=False,
+    )
+    assert validation["recovery_lineage"] == lineage
+    assert validation["execution"]["production_equivalence_hash"] == "7" * 64
+    assert len(rows) == 32
+    assert {row["slurm_job_id"] for row in rows} == {"12345"}
+    assert not (
+        {row["slurm_job_id"] for row in rows}
+        & set(lineage["excluded_job_ids"])
+    )
+    checkpoint = build_checkpoint(
+        successor_finalization,
+        root / "execution-v6-checkpoints",
+        allow_test_mode=True,
+        verify_root_files=False,
+    )
+    loaded = load_production_checkpoint(
+        checkpoint,
+        allow_test_mode=True,
+        verify_root_files=False,
+    )
+    assert loaded.manifest["execution"]["schema_version"] == (
+        EXECUTION_V6_SCHEMA_VERSION
+    )
+    assert loaded.manifest["recovery_lineage"] == lineage
+    assert loaded.manifest["source_children"]["recovery_lineage"] == lineage
+
+
 def check_candidate_selection(root: Path) -> None:
     tasks = tuple(
         CampaignTask(
@@ -2139,12 +2432,17 @@ def main() -> int:
         finalization = write_finalization(scratch)
         check_candidate_selection(scratch)
         check_execution_dispatch(scratch)
+        check_phase2c_lineage_contract(scratch)
+        check_phase2c_operational_readiness_snapshot(scratch)
         check_successor_provenance(finalization, scratch)
         check_successor_v3_provenance(
             finalization, scratch / "successor-v3-provenance"
         )
         check_successor_v4_provenance(
             finalization, scratch / "successor-v4-provenance"
+        )
+        check_phase2c_v6_provenance(
+            finalization, scratch / "execution-v6-provenance"
         )
         check_canonical_finalization_rebinding(
             scratch / "canonical-finalization-rebinding"
@@ -2213,8 +2511,8 @@ def main() -> int:
 
     print(
         "steel-module managed finalization/checkpoint: PASS "
-        "(32 tasks, 8000 events, successor lineage, GPFS publication fallback, "
-        "tamper/concurrency/BC-ONLY-S1 gates)"
+        "(32 tasks, 8000 events, v1-v6 successor lineage, "
+        "GPFS publication fallback, tamper/concurrency/BC-ONLY-S1 gates)"
     )
     return 0
 

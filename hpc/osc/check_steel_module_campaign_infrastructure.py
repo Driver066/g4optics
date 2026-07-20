@@ -976,6 +976,10 @@ def main() -> int:
         cwd=repo_root,
     )
     run(
+        [sys.executable, "hpc/osc/check_steel_module_production_phase2c.py"],
+        cwd=repo_root,
+    )
+    run(
         [sys.executable, "hpc/osc/check_steel_module_production_finalization.py"],
         cwd=repo_root,
     )
@@ -989,9 +993,10 @@ def main() -> int:
         "(18-task smoke, 120-task frozen pilot, 914-task production program, "
         "managed BC-S1 Phase-2A/2B, OSC-shaped incident fixture, "
         "closed R2/v3/v4 plus failed/rejected/pre-workspace-R3 evidence, "
-        "incident-bound v5 successor, GPFS-compatible portable-lock gate, "
+        "incident-bound v5 successor, Phase-2C twin and production-ready v6, "
+        "GPFS-compatible portable-lock gate, "
         "copy-safe R3 no-Geant4 evidence, "
-        "three-generation whole-child finalizer and checkpoint, "
+        "v1-v6 successor-lineage whole-child finalizer and checkpoint, "
         "v1/v2/production analyzers, offline review and progression recorder)"
     )
     return 0
