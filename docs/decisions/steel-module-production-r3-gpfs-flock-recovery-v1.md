@@ -1,9 +1,10 @@
 # Steel-module R3 GPFS flock recovery v1
 
-Status: implementation and OSC validation in progress. This record authorizes
-only the recovery needed to obtain one successful, no-Geant4 R3
-container-isolation preflight. It does not authorize a production intent,
-Geant4 execution, or a BC-S1 production submission.
+Status: completed on OSC. The accepted execution-v5 R3 evidence described in
+Section 6 closes this recovery. This record authorized only the recovery needed
+to obtain one successful, no-Geant4 R3 container-isolation preflight. It did
+not and does not authorize a production intent, Geant4 execution, or a BC-S1
+production submission.
 
 This is an additive amendment to
 `steel-module-production-r3-writer-probe-recovery-v1.md`. It does not change
@@ -135,3 +136,43 @@ future_successor_required          true
 production_intents                 0
 production_jobs                    []
 ```
+
+## 6. Accepted completion checkpoint
+
+The recovery ended with the following immutable execution-v5 and scheduler
+identities:
+
+```text
+execution_id   sm-v1-production-bc-s1-execution-v5-704c313624aa
+execution_hash dd774195e93a5c5e479815fd265c2de629fa71f22a30cae0a13284e0e828b73e
+job_id         50561809
+evidence_id    sm-v1-r3-container-probe-732cc54bbeb7
+evidence_hash  732cc54bbeb7f42a2c537d7c343db6ca090b169b6ec700c21ec2d4b98af73c24
+```
+
+The full evidence hash above is read from the checksum-valid `evidence.json`
+inside the accepted evidence bundle; it is not inferred from the twelve-digit
+ID suffix. The bundle and its recursive checksum manifest passed semantic and
+checksum validation on OSC. It records:
+
+```text
+accepted_compute_preflight_evidence true
+apptainer_invoked                   true
+geant4_invoked                      false
+execution_closed                    true
+future_successor_required           true
+production_intent_count             0
+production_attempt_count            0
+```
+
+Job `50561809` was the single authorized, non-array R3 compute preflight. It
+proved the frozen container and mount-isolation path without invoking Geant4,
+committing events, or consuming production seeds. Its retained authenticated
+probe workspace closes execution-v5 permanently; execution-v5 is evidence and
+must never become a production workspace.
+
+Any later BC-S1 production therefore requires a new clean execution with its
+own independently reviewed authority. The accepted next design is the
+Phase-2C execution-v6 contract in
+`steel-module-production-phase2c-v1.md`; this completed recovery record does
+not itself grant that authority.
