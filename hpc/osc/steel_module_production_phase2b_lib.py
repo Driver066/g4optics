@@ -58,6 +58,9 @@ EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2 = (
 EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3 = (
     "steel-module-production-managed-successor-execution-v3"
 )
+EXECUTION_SCHEMA_VERSION_SUCCESSOR_V4 = (
+    "steel-module-production-managed-successor-execution-v4"
+)
 SUCCESSOR_OBJECT_KIND = "managed-production-recovery-successor"
 # Keep the public legacy name stable.  The canonical Phase-2B materializer
 # remains v1 unless a successor explicitly selects the portable lock protocol.
@@ -436,10 +439,23 @@ def _opened_portable_control_lock(
     _validate_portable_lock_stat(before_path, record)
     if not hasattr(os, "O_NOFOLLOW"):
         raise ValueError("portable control lock requires O_NOFOLLOW support")
-    # flock does not require write access.  Opening read-only permits successor
-    # executions to make the token-bound lock host-read-only while preserving
-    # the legacy portable-v2 0600 contract.
-    flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    lock_kind = operation & (fcntl.LOCK_SH | fcntl.LOCK_EX)
+    if lock_kind not in {fcntl.LOCK_SH, fcntl.LOCK_EX}:
+        raise ValueError("portable control lock operation is unsupported")
+    # GPFS requires a write-capable descriptor for an exclusive flock.  Keep
+    # validation read-only, but require the recorded 0600 authority and open
+    # O_RDWR for every mutation lease.  In particular, a historical 0400 lock
+    # fails closed here before open/flock; this function never repairs modes.
+    if lock_kind == fcntl.LOCK_EX:
+        if record["mode"] != 0o600:
+            raise ValueError(
+                "portable control lock requires recorded mode 0600 for "
+                "exclusive acquisition"
+            )
+        access_mode = os.O_RDWR
+    else:
+        access_mode = os.O_RDONLY
+    flags = access_mode | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
     try:
         descriptor = os.open(lock_path, flags)
     except OSError as exc:
@@ -669,6 +685,7 @@ def _control_lock_record_from_manifest(
         EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1,
         EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2,
         EXECUTION_SCHEMA_VERSION_SUCCESSOR_V3,
+        EXECUTION_SCHEMA_VERSION_SUCCESSOR_V4,
     }:
         return CONTROL_LOCK_PROTOCOL_V2, record
     raise ValueError("unsupported managed-execution schema")
@@ -2417,6 +2434,7 @@ __all__ = [
     "ACCOUNTING_SCHEMA_VERSION", "ACCOUNTING_SCHEMA_VERSION_V1",
     "ACCOUNTING_SCHEMA_VERSION_V2", "AttemptState", "EVENT_SCHEMA_VERSION",
     "CONTROL_LOCK_PROTOCOL_V1", "CONTROL_LOCK_PROTOCOL_V2",
+    "EXECUTION_SCHEMA_VERSION_SUCCESSOR_V4",
     "EXECUTION_SCHEMA_VERSION", "EXECUTION_SCHEMA_VERSION_V1",
     "EXECUTION_SCHEMA_VERSION_V2", "EXECUTION_SCHEMA_VERSION_SUCCESSOR_V1",
     "EXECUTION_SCHEMA_VERSION_SUCCESSOR_V2",

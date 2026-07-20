@@ -50,15 +50,19 @@ from steel_module_production_container_contract import (
     production_apptainer_host_environment,
 )
 from steel_module_production_successor_lib import (
+    FORMAL_SUCCESSOR_EXECUTION_NAME,
+    FORMAL_SUCCESSOR_EXECUTION_NAME_V3,
+    FORMAL_SUCCESSOR_EXECUTION_NAME_V5,
     SUCCESSOR_EXECUTION_SCHEMA_VERSION,
     SUCCESSOR_EXECUTION_SCHEMA_VERSION_V3,
+    SUCCESSOR_EXECUTION_SCHEMA_VERSION_V5,
     load_successor_execution,
     validate_successor_r2_boundary,
 )
 
 
 # ``raw-v2`` is immutable historical evidence for rejected execution-v3 job
-# 50548308.  Active execution-v4 successes use the stricter lifecycle-aware
+# 50548308.  Successful active successors use the stricter lifecycle-aware
 # ``raw-v3`` contract below; the two schemas must never be interchangeable.
 RAW_PROBE_SCHEMA_VERSION_V2 = "steel-module-production-r3-container-probe-raw-v2"
 RAW_PROBE_SCHEMA_VERSION = "steel-module-production-r3-container-probe-raw-v3"
@@ -806,7 +810,11 @@ def validate_closed_successor_v4_probe_boundary(
     marker_payload: dict[str, Any],
     expected_marker_sha256: str,
 ) -> dict[str, Any]:
-    """Validate the sole closed-v4 mountpoint left by a successful probe."""
+    """Validate the sole retained mountpoint left by a successful probe.
+
+    The public name remains stable for historical v4 evidence; the same
+    content contract applies to an active v5 successor.
+    """
 
     execution = execution_dir.expanduser().resolve()
     token = str(marker_payload.get("probe_token", ""))
@@ -1004,8 +1012,11 @@ def run_r3_container_probe(
         verify_phase2a_control_plane=False,
         verify_live_predecessor=False,
     )
-    if execution.manifest.get("schema_version") != SUCCESSOR_EXECUTION_SCHEMA_VERSION:
-        raise ValueError("R3 probe requires the incident-bound successor execution")
+    if execution.manifest.get("schema_version") not in {
+        SUCCESSOR_EXECUTION_SCHEMA_VERSION,
+        SUCCESSOR_EXECUTION_SCHEMA_VERSION_V5,
+    }:
+        raise ValueError("R3 probe requires an active incident-bound successor")
     lock_record = execution.manifest["artifacts"]["control_lock"]
     with _opened_portable_control_lock(
         execution.directory / lock_record["path"],
@@ -1327,7 +1338,7 @@ def _run_r3_container_probe_locked(
         "geant4_invoked": False,
         "execution_id": execution.execution_id,
         "execution_hash": execution.execution_hash,
-        "execution_schema_version": SUCCESSOR_EXECUTION_SCHEMA_VERSION,
+        "execution_schema_version": execution.manifest["schema_version"],
         "execution_directory": str(execution_dir),
         "slurm_job_id": job_id,
         "slurm_job_name": job_name,
@@ -1581,7 +1592,13 @@ def _validate_raw_probe_workspace_common(
                 "size_bytes",
             )
         )
-        or lock_diagnostics.get("mode") != 0o400
+        or lock_diagnostics.get("mode")
+        != (
+            0o600
+            if payload.get("execution_schema_version")
+            == SUCCESSOR_EXECUTION_SCHEMA_VERSION_V5
+            else 0o400
+        )
         or lock_diagnostics.get("link_count") != 1
         or not _is_sha256(lock_diagnostics.get("sha256"))
         or lock_diagnostics.get("cross_node_numeric_identity_required") is not False
@@ -1595,6 +1612,7 @@ def _validate_raw_probe_workspace_common(
         not in {
             SUCCESSOR_EXECUTION_SCHEMA_VERSION_V3,
             SUCCESSOR_EXECUTION_SCHEMA_VERSION,
+            SUCCESSOR_EXECUTION_SCHEMA_VERSION_V5,
         }
         or not _is_sha256(payload.get("execution_hash"))
         or not _is_sha256(recorded_hash)
@@ -1724,7 +1742,10 @@ def _validate_active_raw_probe_lifecycle(
         or payload.get("closed_execution_snapshot_record_count")
         != payload.get("execution_snapshot_record_count") + 1
         or payload.get("execution_schema_version")
-        != SUCCESSOR_EXECUTION_SCHEMA_VERSION
+        not in {
+            SUCCESSOR_EXECUTION_SCHEMA_VERSION,
+            SUCCESSOR_EXECUTION_SCHEMA_VERSION_V5,
+        }
     ):
         raise ValueError("active raw R3 mountpoint lifecycle validation failed")
     marker_copy = directory / RAW_RETIREMENT_MARKER_COPY_NAME
@@ -1777,7 +1798,10 @@ def validate_raw_probe_workspace(
         is not (not test_mode)
         or payload.get("probe_passed") is not True
         or payload.get("execution_schema_version")
-        != SUCCESSOR_EXECUTION_SCHEMA_VERSION
+        not in {
+            SUCCESSOR_EXECUTION_SCHEMA_VERSION,
+            SUCCESSOR_EXECUTION_SCHEMA_VERSION_V5,
+        }
         or any(value is not True for value in report.values())
     ):
         raise ValueError("raw R3 probe did not pass every isolation check")
@@ -1884,11 +1908,34 @@ def _held_scheduler_identity(
         raise ValueError("R3 held-job scheduler identity is not accepted")
     if formal_execution_dir is not None:
         execution = formal_execution_dir.expanduser().resolve()
+        execution_schema = load_json(
+            execution / "managed_execution.json"
+        ).get("schema_version")
+        if (
+            execution_schema == SUCCESSOR_EXECUTION_SCHEMA_VERSION_V5
+            and execution.name == FORMAL_SUCCESSOR_EXECUTION_NAME_V5
+        ):
+            launcher_name = "run_steel_module_production_r3_probe_v5.sbatch"
+        elif (
+            execution_schema == SUCCESSOR_EXECUTION_SCHEMA_VERSION
+            and execution.name == FORMAL_SUCCESSOR_EXECUTION_NAME
+        ):
+            launcher_name = "run_steel_module_production_r3_probe.sbatch"
+        elif (
+            execution_schema == SUCCESSOR_EXECUTION_SCHEMA_VERSION_V3
+            and execution.name == FORMAL_SUCCESSOR_EXECUTION_NAME_V3
+        ):
+            # Historical execution-v3 rejection evidence still binds the
+            # original copied-safe launcher.  It remains validation-only and
+            # is never admitted by the active held-job CLI.
+            launcher_name = "run_steel_module_production_r3_probe.sbatch"
+        else:
+            raise ValueError("R3 held-job execution schema is unsupported")
         expected = {
             "Command": str(
                 execution
                 / "sources/control/hpc/osc/"
-                "run_steel_module_production_r3_probe.sbatch"
+                / launcher_name
             ),
             "WorkDir": str(execution),
             "StdOut": str(
@@ -1935,14 +1982,17 @@ def validate_held_r3_job_snapshot(
         verify_runtime=not test_mode,
         verify_live_predecessor=not test_mode,
     )
-    if execution.manifest.get("schema_version") != SUCCESSOR_EXECUTION_SCHEMA_VERSION:
-        raise ValueError("held R3 validation requires the active successor-v4")
+    if execution.manifest.get("schema_version") not in {
+        SUCCESSOR_EXECUTION_SCHEMA_VERSION,
+        SUCCESSOR_EXECUTION_SCHEMA_VERSION_V5,
+    }:
+        raise ValueError("held R3 validation requires an active successor")
     validate_successor_r2_boundary(execution, repo_root=control_root)
     if (
         not JOB_ID_RE.fullmatch(job_id)
         or job_name != expected_r3_job_name(execution.execution_hash)
     ):
-        raise ValueError("held R3 job ID/name differs from successor-v4")
+        raise ValueError("held R3 job ID/name differs from active successor")
     identity = _held_scheduler_identity(
         snapshot.read_text(encoding="utf-8"),
         job_id=job_id,
@@ -2185,9 +2235,12 @@ def seal_r3_probe_evidence(
         verify_runtime=not test_mode,
         verify_live_predecessor=True,
     )
-    if execution.manifest.get("schema_version") != SUCCESSOR_EXECUTION_SCHEMA_VERSION:
+    if execution.manifest.get("schema_version") not in {
+        SUCCESSOR_EXECUTION_SCHEMA_VERSION,
+        SUCCESSOR_EXECUTION_SCHEMA_VERSION_V5,
+    }:
         raise ValueError(
-            "successful R3 probe evidence requires the active successor-v4"
+            "successful R3 probe evidence requires an active successor"
         )
     marker_payload = _expected_retirement_marker_payload(raw)
     marker_sha = str(
@@ -2207,7 +2260,7 @@ def seal_r3_probe_evidence(
         or len(current_records)
         != raw.get("closed_execution_snapshot_record_count")
     ):
-        raise ValueError("closed successor-v4 differs from raw R3 evidence")
+        raise ValueError("closed successor differs from raw R3 evidence")
     if (
         raw.get("slurm_job_id") != accounting.get("job_id")
         or raw.get("slurm_job_name") != accounting.get("job_name")
@@ -2376,7 +2429,10 @@ def validate_r3_probe_evidence(
         or (test_mode and not allow_test_mode)
         or test_mode != raw.get("test_mode")
         or raw.get("execution_schema_version")
-        != SUCCESSOR_EXECUTION_SCHEMA_VERSION
+        not in {
+            SUCCESSOR_EXECUTION_SCHEMA_VERSION,
+            SUCCESSOR_EXECUTION_SCHEMA_VERSION_V5,
+        }
         or payload.get("accepted_compute_preflight_evidence")
         is not (not test_mode)
         or payload.get("scheduler_submission_performed_by_tool") is not False

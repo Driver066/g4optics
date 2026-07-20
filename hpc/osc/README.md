@@ -671,19 +671,70 @@ job `50548308` are failed compute-preflight history; job `50547698` remains a
 separate administrative launcher rejection and must not be counted as a
 compute preflight.
 
-Replacement R3 is one non-array compute job. It invokes the pinned Apptainer
-image to test the exact production mount boundary but never invokes Geant4.
-The frozen v4 control archive must be used as the job-script source. The shell
-launcher is safe when Slurm copies it into `/var/spool`: it derives authority
-from the scheduler-established `--chdir` working directory, accepts no
-positional arguments, distrusts `SLURM_SUBMIT_DIR`, parses only the top-level
-execution hash in an isolated Python environment, and then runs the frozen
-Python probe by absolute path. A typical reviewed submission shape is shown
-below; `sbatch` and `scontrol release` remain separate explicit human actions
-and are not called by any R3 Python tool:
+Execution-v4's released R3 job `50558158` failed before creating its raw
+workspace or entering the protected probe body. OSC GPFS reproduced the exact
+root cause: an exclusive `flock` on an `O_RDONLY` descriptor returns `EBADF`,
+while `O_RDWR + LOCK_EX` succeeds. Execution-v4 had frozen its portable lock
+at mode `0400`, so it cannot be repaired or retried in place. Freeze the exact
+three scheduler rows and empty terminal queue externally, then preview and seal
+the content-addressed pre-workspace failure:
 
 ```bash
-EXECUTION="$WORK/campaigns/steel-module-production-bc-s1-execution-v4"
+V4="$WORK/campaigns/steel-module-production-bc-s1-execution-v4"
+R3ROOT="$WORK/evidence/steel-module-production-r3"
+FAILED_JOB=50558158
+
+python3 hpc/osc/seal_steel_module_production_r3_preworkspace_failure.py \
+  --execution-dir "$V4" \
+  --held-scontrol-input "$R3ROOT/held-scontrol-$FAILED_JOB.txt" \
+  --sacct-input "$R3ROOT/sacct-$FAILED_JOB.psv" \
+  --squeue-input "$R3ROOT/squeue-$FAILED_JOB.psv" \
+  --slurm-output-input "$R3ROOT/slurm-$FAILED_JOB.out" \
+  --check-only
+
+python3 hpc/osc/seal_steel_module_production_r3_preworkspace_failure.py \
+  --execution-dir "$V4" \
+  --held-scontrol-input "$R3ROOT/held-scontrol-$FAILED_JOB.txt" \
+  --sacct-input "$R3ROOT/sacct-$FAILED_JOB.psv" \
+  --squeue-input "$R3ROOT/squeue-$FAILED_JOB.psv" \
+  --slurm-output-input "$R3ROOT/slurm-$FAILED_JOB.out" \
+  --seal
+```
+
+The formal sealer fixes the full execution-v4 identity, job ID/name, exact
+input paths and SHA-256 values, `FAILED/1:0` parent and batch plus
+`COMPLETED/0:0` extern, exact one-line `EBADF` log, absent raw workspace,
+empty `intents/attempts/finalized`, and zero Apptainer/Geant4/event/seed use.
+It performs no scheduler call. Execution-v4 is permanently closed after the
+released job even though its mutable roots stayed empty.
+
+After that bundle exists, preview, materialize, and validate the clean
+execution-v5 without scheduler contact:
+
+```bash
+python3 hpc/osc/materialize_steel_module_production_successor_v5_execution.py \
+  --check-only
+python3 hpc/osc/materialize_steel_module_production_successor_v5_execution.py \
+  --materialize
+python3 hpc/osc/validate_steel_module_production_successor_v5_execution.py \
+  --check-only
+```
+
+Execution-v5 binds the immutable v4 failure while preserving all 32 tasks,
+8,000 events, 64 production seeds, simulation/runtime/physics identities, and
+empty mutable roots. Its portable lock and manifest are both mode `0600`.
+Shared validation continues to open the lock read-only; an exclusive probe
+lease uses `O_RDWR`. Historical `0400` locks fail closed for exclusive use and
+are never chmodded.
+
+The replacement R3 is one non-array compute job. It invokes the pinned
+Apptainer image to test the exact production mount boundary but never invokes
+Geant4. The frozen v5 control archive and v5-specific copied-safe launcher must
+be used. `sbatch` and `scontrol release` remain separate explicit actions and
+are never called by an R3 Python tool:
+
+```bash
+EXECUTION="$WORK/campaigns/steel-module-production-bc-s1-execution-v5"
 CONTROL="$EXECUTION/sources/control"
 R3ROOT="$WORK/evidence/steel-module-production-r3"
 mkdir -p "$R3ROOT/raw" "$R3ROOT/accounting" "$R3ROOT/evidence"
@@ -698,7 +749,7 @@ SUBMISSION=$(sbatch --hold --parsable --no-requeue --export=NONE \
   --time=00:10:00 --nodes=1 --ntasks=1 --cpus-per-task=1 --mem=1G \
   --account PAS2524 --job-name "$JOB_NAME" --chdir "$EXECUTION" \
   --output "$R3ROOT/slurm-%j.out" \
-  "$CONTROL/hpc/osc/run_steel_module_production_r3_probe.sbatch")
+  "$CONTROL/hpc/osc/run_steel_module_production_r3_probe_v5.sbatch")
 JOB_ID=${SUBMISSION%%;*}
 [[ "$JOB_ID" =~ ^[1-9][0-9]*$ ]] || { echo "invalid R3 job id" >&2; exit 1; }
 
@@ -727,8 +778,9 @@ python3 hpc/osc/validate_steel_module_production_r3_held_job.py \
 
 Stop here. The validator must print `PASS`, and a human must independently
 review the captured row for the exact job name, case-insensitive `PAS2524`
-account, `PENDING / JobHeldUser`, `Requeue=0`, non-array shape, execution-v4
-`WorkDir`, frozen launcher `Command`, and requested `StdOut`. If any field
+account, `PENDING / JobHeldUser`, `Requeue=0`, non-array shape, execution-v5
+`WorkDir`, frozen launcher `Command`, and requested `StdOut`. Also confirm the
+ten-minute, one-node, one-CPU, 1-GiB resource shape. If any field
 differs, preserve the held job and stop for review.
 
 Only after that distinct review may the one release write be issued as a
@@ -738,10 +790,11 @@ separate command:
 scontrol release "$JOB_ID"
 ```
 
-After release, require one terminal parent plus its batch and extern steps,
-all `COMPLETED / 0:0`, and an empty terminal `squeue` result. Then freeze the
-externally collected read-only accounting and seal the content-addressed
-successful bundle:
+After release, require exactly one parent, one `.batch`, and one `.extern` row;
+all three must be `COMPLETED / 0:0` under account `PAS2524`
+case-insensitively, and terminal `squeue` must be empty. This exact-three-row
+review is an explicit human gate in addition to the freezer. Then freeze the
+externally collected read-only accounting and seal the successful bundle:
 
 ```bash
 sacct -n -P -j "$JOB_ID" \
@@ -765,20 +818,18 @@ python3 hpc/osc/seal_steel_module_production_r3_probe_evidence.py \
   --execution-dir "$EXECUTION"
 ```
 
-Successful execution-v4 probe evidence is the end of this recovery phase.
+Successful execution-v5 probe evidence is the end of this recovery phase.
 The exact leased probe mountpoint remains under `attempts/` with a read-only,
 content-bound marker; it is neither deleted nor renamed. The raw workspace
 contains a byte-identical marker copy, and the accepted bundle records
 `execution_closed=true` and `future_successor_required=true`.
 
-Therefore **do not** run the recovery-readiness generator against
-execution-v4, do not create an intent there, and do not use execution-v4 for
-production, finalization, or checkpoint construction. Its non-empty closed
-boundary is immutable successful-preflight history. Any later BC-S1 production
-requires a separately reviewed and authorized clean successor (expected to be
-execution-v5) that binds the accepted v4 evidence while starting with new,
-empty mutable roots. That future materializer/readiness step is deliberately
-outside this phase and does not yet authorize a scheduler submission.
+Therefore do not generate readiness or create an intent under execution-v4 or
+execution-v5, and do not use either for production, finalization, or checkpoint
+construction. Any later BC-S1 production requires a separately reviewed and
+authorized clean successor (expected execution-v6) that binds the accepted v5
+evidence while starting with new, empty mutable roots. That future step is
+outside this phase and does not authorize a scheduler submission.
 
 The downstream finalizer, checkpoint, analyzer, renderer, and progression
 recorder remain applicable only after such a future production successor has

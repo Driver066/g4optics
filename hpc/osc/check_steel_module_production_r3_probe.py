@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 import steel_module_production_successor_lib as successor_lib
 import steel_module_production_r3_probe_lib as r3_probe_lib
+import steel_module_production_phase2b_lib as phase2b_lib
 from check_steel_module_production_successor import (
     _fixture_r3_failure_identity,
     _make_sealed_incident_fixture,
@@ -636,6 +637,23 @@ def _test_mountpoint_lease_adversaries(scratch: Path) -> None:
 
 def _test_active_probe_failure_cleanup(repo_root: Path, scratch: Path) -> None:
     successor = _make_active_v4_fixture(repo_root, scratch / "fixture")
+    # execution-v4 is now immutable 0400 failure evidence.  Exercise the
+    # active GPFS/O_RDWR lifecycle through a test-only v5 view while preserving
+    # the historical v4 fixture for validation elsewhere in this checker.
+    lock_path = successor.directory / ".control.lock"
+    lock_path.chmod(0o600)
+    active_manifest = json.loads(json.dumps(successor.manifest))
+    active_manifest["schema_version"] = (
+        r3_probe_lib.SUCCESSOR_EXECUTION_SCHEMA_VERSION_V5
+    )
+    active_manifest["artifacts"]["control_lock"]["mode"] = 0o600
+    successor = phase2b_lib.ManagedExecution(
+        successor.directory,
+        successor.managed_child,
+        active_manifest,
+        successor.tasks,
+        successor.scan_args,
+    )
     home = scratch / "home"
     (home / "geant4-data/11.4.2").mkdir(parents=True)
     apptainer = scratch / "apptainer"
@@ -983,9 +1001,19 @@ def _test_accounting_and_evidence(repo_root: Path, scratch: Path) -> None:
         "Command=/fixture/frozen-r3-runner.py WorkDir=/fixture/execution "
         f"StdOut=/fixture/slurm-{job_id}.out\n"
     )
-    formal_execution = scratch / "formal-work/campaigns/formal-successor"
+    formal_execution = (
+        scratch
+        / "formal-work/campaigns/steel-module-production-bc-s1-execution-v4"
+    )
     formal_execution.mkdir(parents=True)
     formal_execution = formal_execution.resolve()
+    (formal_execution / "managed_execution.json").write_text(
+        json.dumps(
+            {"schema_version": r3_probe_lib.SUCCESSOR_EXECUTION_SCHEMA_VERSION}
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     formal_command = (
         formal_execution
         / "sources/control/hpc/osc/"
@@ -1247,12 +1275,17 @@ def _test_source_boundaries(repo_root: Path) -> None:
     assert "run_steel_module_production_r3_container_probe.py" in launcher
 
 
-def _test_spool_copy_safe_launcher(repo_root: Path, scratch: Path) -> None:
+def _test_spool_copy_safe_launcher(
+    repo_root: Path,
+    scratch: Path,
+    *,
+    canonical_name: str = "steel-module-production-bc-s1-execution-v4",
+    launcher_name: str = "run_steel_module_production_r3_probe.sbatch",
+) -> None:
     """Prove the Slurm-copied shell trampoline does not follow its own path."""
 
     scratch.mkdir(parents=True)
     scratch = scratch.resolve()
-    canonical_name = "steel-module-production-bc-s1-execution-v4"
     work_root = scratch / "users/PAS2524/fixture/g4optics-rn"
     execution = work_root / "campaigns" / canonical_name
     control = execution / "sources/control/hpc/osc"
@@ -1285,7 +1318,7 @@ def _test_spool_copy_safe_launcher(repo_root: Path, scratch: Path) -> None:
 
     spool = scratch / "var/spool/slurmd/job70000123"
     spool.mkdir(parents=True)
-    launcher_source = repo_root / "hpc/osc/run_steel_module_production_r3_probe.sbatch"
+    launcher_source = repo_root / "hpc/osc" / launcher_name
     launcher = spool / "slurm_script"
     shutil.copyfile(launcher_source, launcher)
     launcher.chmod(0o755)
@@ -1307,7 +1340,13 @@ def _test_spool_copy_safe_launcher(repo_root: Path, scratch: Path) -> None:
     )
     fake_python.chmod(0o755)
     fake_apptainer = fake_bin / "apptainer"
-    fake_apptainer.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
+    apptainer_invoked = scratch / "forbidden-apptainer-was-invoked"
+    fake_apptainer.write_text(
+        "#!/bin/sh\n"
+        f"printf invoked > {shlex.quote(str(apptainer_invoked))}\n"
+        "exit 99\n",
+        encoding="utf-8",
+    )
     fake_apptainer.chmod(0o755)
 
     scheduler_environment = {
@@ -1350,6 +1389,7 @@ def _test_spool_copy_safe_launcher(repo_root: Path, scratch: Path) -> None:
     assert "APPTAINER_BIND=" not in invocation
     assert "UNRELATED_INHERITED_SECRET=" not in invocation
     assert str(spool) not in invocation
+    assert not apptainer_invoked.exists()
 
     # The copied launcher must preserve the frozen runner's nonzero exit code.
     # This prevents a failed probe from being mistaken for COMPLETED / 0:0.
@@ -1364,6 +1404,7 @@ def _test_spool_copy_safe_launcher(repo_root: Path, scratch: Path) -> None:
         check=False,
     )
     assert propagated.returncode == 1
+    assert not apptainer_invoked.exists()
 
     valid_manifest = (execution / "managed_execution.json").read_text(
         encoding="utf-8"
@@ -1459,6 +1500,7 @@ def _test_spool_copy_safe_launcher(repo_root: Path, scratch: Path) -> None:
     )
     assert with_argument.returncode == 2
     assert not capture.exists()
+    assert not apptainer_invoked.exists()
 
 
 def _test_r4_git_gate(scratch: Path) -> None:

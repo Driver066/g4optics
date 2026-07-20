@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import errno
 import os
 import shutil
 import subprocess
@@ -287,6 +288,72 @@ def test_portable_control_lock_v2(repo_root: Path, scratch: Path) -> None:
     assert loaded.manifest["artifacts"]["control_lock"]["creation_inode"] != (
         loaded.directory / ".control.lock"
     ).stat().st_ino
+
+    # Model the GPFS contract observed on OSC: LOCK_EX on an O_RDONLY
+    # descriptor raises EBADF, while the same lock on O_RDWR succeeds.  The
+    # production helper must choose the latter without weakening any token,
+    # path, link-count, mode, or hash check.
+    gpfs = make_execution(repo_root, scratch, "lock-v2-gpfs-exclusive")
+    real_flock = phase2b_lib.fcntl.flock
+    exclusive_access_modes: list[int] = []
+
+    def gpfs_flock(descriptor: int, operation: int) -> object:
+        if operation & phase2b_lib.fcntl.LOCK_EX:
+            access_mode = (
+                phase2b_lib.fcntl.fcntl(descriptor, phase2b_lib.fcntl.F_GETFL)
+                & os.O_ACCMODE
+            )
+            exclusive_access_modes.append(access_mode)
+            if access_mode == os.O_RDONLY:
+                raise OSError(errno.EBADF, "GPFS rejects read-only LOCK_EX")
+        return real_flock(descriptor, operation)
+
+    with mock.patch.object(
+        phase2b_lib.fcntl, "flock", side_effect=gpfs_flock
+    ):
+        with phase2b_lib.execution_lock(gpfs):
+            pass
+    assert exclusive_access_modes == [os.O_RDWR]
+
+    # A read-only successor lock is historical evidence, not writable
+    # authority.  It must be rejected before flock and remain byte/mode exact.
+    read_only = make_execution(repo_root, scratch, "lock-v2-read-only-exclusive")
+    read_only_path = read_only.directory / ".control.lock"
+    read_only_path.chmod(0o400)
+
+    def record_read_only(value: dict[str, Any]) -> None:
+        value["artifacts"]["control_lock"]["mode"] = 0o400
+
+    _rewrite_execution_manifest(read_only, record_read_only)
+    loaded_read_only = load_execution_companion(
+        read_only.directory, allow_test_mode=True, require_readiness=False
+    )
+    read_only_content = read_only_path.read_bytes()
+    flock_calls: list[int] = []
+
+    def record_flock(descriptor: int, operation: int) -> object:
+        flock_calls.append(operation)
+        return real_flock(descriptor, operation)
+
+    try:
+        with (
+            mock.patch.object(
+                phase2b_lib.os, "open", wraps=phase2b_lib.os.open
+            ) as open_call,
+            mock.patch.object(
+                phase2b_lib.fcntl, "flock", side_effect=record_flock
+            ),
+        ):
+            with phase2b_lib.execution_lock(loaded_read_only):
+                pass
+    except ValueError as exc:
+        assert "recorded mode 0600" in str(exc), str(exc)
+    else:
+        raise AssertionError("0400 portable lock obtained an exclusive lease")
+    assert open_call.call_count == 0
+    assert flock_calls == []
+    assert read_only_path.stat().st_mode & 0o777 == 0o400
+    assert read_only_path.read_bytes() == read_only_content
 
     mode = make_execution(repo_root, scratch, "lock-v2-mode")
     (mode.directory / ".control.lock").chmod(0o640)
