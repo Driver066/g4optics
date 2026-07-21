@@ -203,7 +203,7 @@ Output / execution options:
                                       realistic-neutron-v1 or steel-module-scan-v1
   --tile-thickness-mm VALUE          preset-controlled tile thickness
   --sipm-layout LAYOUT               steel-module-scan-v1: back-center,
-                                      edge-center, or back-four
+                                      edge-center, edge-two, or back-four
   --absorber-transverse-mm VALUE     neutron presets: 200, 300, or 500
   --seed1 N                          first explicit Geant4 random seed
   --seed2 N                          second explicit Geant4 random seed
@@ -990,14 +990,14 @@ else
         ;;
     esac
     case "${SIPM_STUDY_LAYOUT}" in
-      back-center|edge-center|back-four)
+      back-center|edge-center|edge-two|back-four)
         ;;
       "")
-        echo "--study-preset steel-module-scan-v1 requires --sipm-layout back-center, edge-center, or back-four." >&2
+        echo "--study-preset steel-module-scan-v1 requires --sipm-layout back-center, edge-center, edge-two, or back-four." >&2
         exit 1
         ;;
       *)
-        echo "Invalid --sipm-layout: ${SIPM_STUDY_LAYOUT}. Use back-center, edge-center, or back-four." >&2
+        echo "Invalid --sipm-layout: ${SIPM_STUDY_LAYOUT}. Use back-center, edge-center, edge-two, or back-four." >&2
         exit 1
         ;;
     esac
@@ -1038,6 +1038,11 @@ else
         ;;
       edge-center)
         DETECTOR_SIPM_LAYOUT="single"
+        SIPM_FACE_OVERRIDE="+X"
+        SIPM_LOCAL_POSITION_OVERRIDE="0 0 0 mm"
+        ;;
+      edge-two)
+        DETECTOR_SIPM_LAYOUT="edge-two"
         SIPM_FACE_OVERRIDE="+X"
         SIPM_LOCAL_POSITION_OVERRIDE="0 0 0 mm"
         ;;
@@ -3172,10 +3177,12 @@ write_run_config() {
     fi
     printf ',\n'
     printf '    "detector_layout": "%s",\n' "$(json_string "${DETECTOR_SIPM_LAYOUT}")"
-    printf '    "sensor_count": %s,\n' "$(if [[ "${DETECTOR_SIPM_LAYOUT}" == "back-four" ]]; then echo 4; else echo 1; fi)"
+    printf '    "sensor_count": %s,\n' "$(if [[ "${DETECTOR_SIPM_LAYOUT}" == "back-four" ]]; then echo 4; elif [[ "${DETECTOR_SIPM_LAYOUT}" == "edge-two" ]]; then echo 2; else echo 1; fi)"
     printf '    "copy_number_order": '
     if [[ "${DETECTOR_SIPM_LAYOUT}" == "back-four" ]]; then
       printf '[0, 1, 2, 3]'
+    elif [[ "${DETECTOR_SIPM_LAYOUT}" == "edge-two" ]]; then
+      printf '[0, 1]'
     else
       printf '[0]'
     fi
@@ -3183,6 +3190,8 @@ write_run_config() {
     printf '    "fixed_local_positions_mm": '
     if [[ "${SIPM_STUDY_LAYOUT}" == "back-four" ]]; then
       printf '[[-25, -25, 0], [-25, 25, 0], [25, -25, 0], [25, 25, 0]]'
+    elif [[ "${SIPM_STUDY_LAYOUT}" == "edge-two" ]]; then
+      printf '[[-25, 0, 0], [25, 0, 0]]'
     else
       printf '[[0, 0, 0]]'
     fi

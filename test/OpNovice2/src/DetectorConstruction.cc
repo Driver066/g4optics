@@ -298,7 +298,7 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
                                 true);
   }
 
-  // The SiPM or fixed four-SiPM steel-module layout.
+  // The single- or multi-SiPM steel-module layout.
   ValidateSiPMLayout();
   G4double sipmHx = 0.0;
   G4double sipmHy = 0.0;
@@ -1227,6 +1227,13 @@ void DetectorConstruction::ComputeSiPMPlacementFor(
 
 std::vector<G4ThreeVector> DetectorConstruction::GetSiPMLocalPositions() const
 {
+  if (fSiPMLayout == "edge-two") {
+    const G4double offset = 25. * mm;
+    return {
+      G4ThreeVector(-offset, 0., 0.),
+      G4ThreeVector(offset, 0., 0.)
+    };
+  }
   if (fSiPMLayout == "back-four") {
     const G4double offset = 25. * mm;
     return {
@@ -1244,10 +1251,47 @@ void DetectorConstruction::ValidateSiPMLayout() const
   if (fSiPMLayout == "single") {
     return;
   }
+  if (fSiPMLayout == "edge-two") {
+    if (fSiPMFace != "+X" && fSiPMFace != "right") {
+      G4ExceptionDescription msg;
+      msg << "The edge-two SiPM layout requires face +X; current face is "
+          << fSiPMFace << ".";
+      G4Exception("DetectorConstruction::ValidateSiPMLayout",
+                  "OpNovice2_SiPM_012",
+                  FatalException,
+                  msg);
+    }
+    if (fBottomCavityEnabled || fDimpleEnabled || fGreaseEnabled) {
+      G4ExceptionDescription msg;
+      msg << "The edge-two SiPM layout supports only the undimpled zero-gap "
+          << "coupling proxy; bottom cavity, dimple, and explicit grease must be disabled.";
+      G4Exception("DetectorConstruction::ValidateSiPMLayout",
+                  "OpNovice2_SiPM_013",
+                  FatalException,
+                  msg);
+    }
+
+    const G4double offset = 25. * mm;
+    const G4double safety = 1.e-6 * mm;
+    if (offset + 0.5 * fSiPMActiveU >= fTank_y - safety ||
+        0.5 * fSiPMActiveV >= fTank_z - safety) {
+      G4ExceptionDescription msg;
+      msg << "The edge-two SiPM footprints do not fit on the +X tile face. "
+          << "tile full side size=" << 2. * fTank_y / mm << " x "
+          << 2. * fTank_z / mm << " mm, SiPM active size="
+          << fSiPMActiveU / mm << " x " << fSiPMActiveV / mm
+          << " mm, center offset=25 mm.";
+      G4Exception("DetectorConstruction::ValidateSiPMLayout",
+                  "OpNovice2_SiPM_014",
+                  FatalException,
+                  msg);
+    }
+    return;
+  }
   if (fSiPMLayout != "back-four") {
     G4ExceptionDescription msg;
     msg << "Unknown SiPM layout: " << fSiPMLayout
-        << ". Use single or back-four.";
+        << ". Use single, edge-two, or back-four.";
     G4Exception("DetectorConstruction::ValidateSiPMLayout",
                 "OpNovice2_SiPM_007",
                 FatalException,
@@ -1293,9 +1337,10 @@ void DetectorConstruction::ValidateSiPMLayout() const
 
 void DetectorConstruction::SetSiPMLayout(const G4String& layout)
 {
-  if (layout != "single" && layout != "back-four") {
+  if (layout != "single" && layout != "edge-two" && layout != "back-four") {
     G4ExceptionDescription msg;
-    msg << "Invalid SiPM layout: " << layout << ". Use single or back-four.";
+    msg << "Invalid SiPM layout: " << layout
+        << ". Use single, edge-two, or back-four.";
     G4Exception("DetectorConstruction::SetSiPMLayout",
                 "OpNovice2_SiPM_011",
                 FatalException,

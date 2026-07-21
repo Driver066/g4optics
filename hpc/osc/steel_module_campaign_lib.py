@@ -37,6 +37,7 @@ EVENT_SCHEMA_VERSION = "opnovice2-scan-event-v3"
 RESULT_SCHEMA_VERSION = "steel-module-task-result-v1"
 STUDY_PRESET = "steel-module-scan-v1"
 SIPM_LAYOUTS = ("back-center", "edge-center", "back-four")
+SUPPORTED_SIPM_LAYOUTS = (*SIPM_LAYOUTS, "edge-two")
 TILE_THICKNESSES_MM = (4, 8, 12, 16, 20, 24)
 ABSORBER_SIZES_MM = (200, 300, 500)
 FINALIZED_REQUIRED_FILES = (
@@ -186,7 +187,7 @@ def parse_campaign_tasks(path: Path) -> tuple[CampaignTask, ...]:
         raise ValueError("logical_task_id values must be non-empty and unique")
     if any(task.tile_thickness_mm not in TILE_THICKNESSES_MM for task in tasks):
         raise ValueError("task contains an unsupported tile thickness")
-    if any(task.sipm_layout not in SIPM_LAYOUTS for task in tasks):
+    if any(task.sipm_layout not in SUPPORTED_SIPM_LAYOUTS for task in tasks):
         raise ValueError("task contains an unsupported SiPM layout")
     if any(task.absorber_transverse_mm not in ABSORBER_SIZES_MM for task in tasks):
         raise ValueError("task contains an unsupported absorber transverse size")
@@ -360,6 +361,7 @@ __all__ = [
     "RESULT_SCHEMA_VERSION",
     "RUN_CONFIG_SCHEMA_VERSION",
     "SIPM_LAYOUTS",
+    "SUPPORTED_SIPM_LAYOUTS",
     "STUDY_PRESET",
     "TILE_THICKNESSES_MM",
     "CampaignBundle",

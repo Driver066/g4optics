@@ -200,7 +200,8 @@ DetectorMessenger::DetectorMessenger(DetectorConstruction* Det) : G4UImessenger(
 
   fSiPMLayoutCmd = new G4UIcmdWithAString("/opnovice2/sipm/layout", this);
   fSiPMLayoutCmd->SetGuidance(
-    "Set SiPM layout: single or back-four (four -Z sensors at x,y=+/-25 mm).");
+    "Set SiPM layout: single, edge-two (two +X sensors at local u=+/-25 mm), "
+    "or back-four (four -Z sensors at x,y=+/-25 mm).");
   fSiPMLayoutCmd->AvailableForStates(G4State_PreInit);
   fSiPMLayoutCmd->SetToBeBroadcasted(false);
 

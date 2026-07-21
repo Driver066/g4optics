@@ -29,6 +29,12 @@ LAYOUTS = {
         "sensor_centers_local_mm": [[0, 0, 0]],
         "copy_numbers": [0],
     },
+    "edge-two": {
+        "detector_layout": "edge-two",
+        "face": "+X",
+        "sensor_centers_local_mm": [[-25, 0, 0], [25, 0, 0]],
+        "copy_numbers": [0, 1],
+    },
     "back-four": {
         "detector_layout": "back-four",
         "face": "-Z",
@@ -55,7 +61,7 @@ def parse_args() -> argparse.Namespace:
         dest="sipm_layouts",
         help=(
             "Layout to prepare; repeat for multiple layouts. "
-            "Omitting this option prepares all three accepted layouts."
+            "Omitting this option prepares all four accepted layouts."
         ),
     )
     parser.add_argument(

@@ -200,8 +200,9 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     G4double fGreaseActiveV = 0.0;
 
     // General SiPM placement.
-    // fSiPMLayout is "single" for the legacy one-SiPM geometry or
-    // "back-four" for the steel-module scan's four fixed -Z placements.
+    // fSiPMLayout is "single" for the legacy one-SiPM geometry,
+    // "edge-two" for two fixed +X placements, or "back-four" for the
+    // steel-module scan's four fixed -Z placements.
     G4String fSiPMLayout = "single";
 
     // fSiPMFace controls which tile face the SiPM is attached to.

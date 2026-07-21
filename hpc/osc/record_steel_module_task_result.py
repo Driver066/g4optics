@@ -43,6 +43,12 @@ LAYOUT_CONTRACTS = {
         "sensor_count": 1,
         "positions": [[0, 0, 0]],
     },
+    "edge-two": {
+        "detector_layout": "edge-two",
+        "face": "+X",
+        "sensor_count": 2,
+        "positions": [[-25, 0, 0], [25, 0, 0]],
+    },
     "back-four": {
         "detector_layout": "back-four",
         "face": "-Z",

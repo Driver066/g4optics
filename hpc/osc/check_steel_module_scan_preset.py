@@ -19,12 +19,21 @@ LAYOUTS = {
         "face": "-Z",
         "sensor_count": 1,
         "positions": [[0, 0, 0]],
+        "copy_numbers": [0],
     },
     "edge-center": {
         "detector_layout": "single",
         "face": "+X",
         "sensor_count": 1,
         "positions": [[0, 0, 0]],
+        "copy_numbers": [0],
+    },
+    "edge-two": {
+        "detector_layout": "edge-two",
+        "face": "+X",
+        "sensor_count": 2,
+        "positions": [[-25, 0, 0], [25, 0, 0]],
+        "copy_numbers": [0, 1],
     },
     "back-four": {
         "detector_layout": "back-four",
@@ -36,6 +45,7 @@ LAYOUTS = {
             [25, -25, 0],
             [25, 25, 0],
         ],
+        "copy_numbers": [0, 1, 2, 3],
     },
 }
 
@@ -162,6 +172,7 @@ def audit_success(case_root: Path, *, thickness: int, layout: str) -> None:
     assert sipm["detector_layout"] == expected["detector_layout"]
     assert sipm["face"] == expected["face"]
     assert sipm["sensor_count"] == expected["sensor_count"]
+    assert sipm["copy_number_order"] == expected["copy_numbers"]
     assert sipm["fixed_local_positions_mm"] == expected["positions"]
     assert sipm["size"] == "2.4 2.4 0.5 mm"
 
@@ -234,6 +245,7 @@ def audit_visualizations(repo_root: Path, scratch: Path) -> None:
         assert metadata["study_preset"] == "steel-module-scan-v1"
         assert metadata["study_layout"] == layout
         assert metadata["sensor_centers_local_mm"] == expected["positions"]
+        assert metadata["copy_numbers"] == expected["copy_numbers"]
         assert metadata["beam_on"] == 0
 
 
@@ -328,7 +340,7 @@ def main() -> int:
 
     print(
         "steel-module-scan-v1 preset contract: "
-        "PASS (18 configurations, 3 visualizations)"
+        "PASS (24 configurations, 4 visualizations)"
     )
     return 0
 

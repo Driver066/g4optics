@@ -226,7 +226,7 @@ The general scan runner exposes:
 ```text
 --study-preset steel-module-scan-v1
 --tile-thickness-mm {4,8,12,16,20,24}
---sipm-layout {back-center,edge-center,back-four}
+--sipm-layout {back-center,edge-center,edge-two,back-four}
 ```
 
 Under the preset, lock the particle, kinetic energy, beam profile/direction,
@@ -237,7 +237,7 @@ derivation. Reject manual overrides of those values.
 Allow only:
 
 - the six accepted tile thicknesses;
-- the three accepted SiPM layouts;
+- the three original SiPM layouts plus the accepted `edge-two` extension;
 - `200/300/500 mm` absorber transverse sizes for convergence work;
 - one explicit centered scan point per invocation;
 - event count, explicit seed pair, seed-block identity, and campaign metadata.
@@ -922,7 +922,7 @@ first Slurm submission.
 
 ## Interactive geometry review
 
-The scan-specific visualizer prepares all three accepted layouts by default:
+The scan-specific visualizer prepares all four accepted layouts by default:
 
 ```bash
 cd test/OpNovice2
@@ -932,7 +932,7 @@ python3 visualize_steel_module_scan_geometry.py --tile-thickness-mm 16
 ```
 
 Each layout receives its own exact macro, run config, visualization metadata,
-and README. The GUI sessions open in `back-center`, `edge-center`,
+and README. The GUI sessions open in `back-center`, `edge-center`, `edge-two`,
 `back-four` order; close one session to open the next. The camera first
 renders a close SiPM detail and finishes on a wider steel overview. This is a
 human sanity check only and leaves `/run/beamOn 0`.
@@ -945,8 +945,9 @@ Use one or more repeated `--sipm-layout` options to prepare a subset, or
 - `1 GeV` kinetic energy is authoritative for this preset.
 - The source is centered, point-like, normal incidence, and pencil-like.
 - The tile is `100 x 100 mm`; only the six accepted thicknesses are valid.
-- The layout axis contains exactly `back-center`, `edge-center`, and
-  `back-four` with the recorded face/position/copy-number convention.
+- The original layout axis contains `back-center`, `edge-center`, and
+  `back-four`; the accepted single-layer extension adds `edge-two` with its
+  recorded face/position/copy-number convention.
 - The steel is 40 mm SAE 304 with zero tile air gap and retained paint/wrap.
 - The optical baseline is polished-front-painted EJ-510 plus the undimpled
   zero-gap EJ-550 coupling proxy.

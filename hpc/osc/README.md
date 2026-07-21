@@ -67,7 +67,7 @@ python3 visualize_realistic_neutron_geometry.py --tile-thickness-mm 16
 ```
 
 For the independent `steel-module-scan-v1` study, use its separate
-visualizer. Omitting `--sipm-layout` prepares and opens all three accepted
+visualizer. Omitting `--sipm-layout` prepares and opens all four accepted
 layouts in sequence:
 
 ```bash
