@@ -1,8 +1,8 @@
 # Steel Module Direct BC-S1 Execution and Analysis Record
 
-Status: direct BC-S1 and BC-S2 execution/review completed; BC-S2 cumulative
-tail disposition `no-material-worsening`; progression decision `continue`;
-direct BC-S3 campaign generation authorized but not scheduler submission
+Status: direct BC-S1, BC-S2, and BC-S3 execution/finalization completed; BC-S2
+cumulative tail disposition `no-material-worsening`; progression decision
+`continue`; cumulative BC-S1+BC-S2+BC-S3 analysis and human review pending
 
 Study preset: `steel-module-scan-v1`
 
@@ -440,7 +440,59 @@ allocated 160 production seeds, and emits a normal campaign with no preflight
 or scheduler action. Submission remains a separate explicit step after
 check-only reports exactly 80 tasks and 20,000 events.
 
-## 13. Claim boundary
+## 13. Actual BC-S3 execution and cumulative-analysis contract
+
+The separately authorized BC-S3 increment completed through the ordinary array
+route without a preflight:
+
+| Identity | Recorded value |
+| --- | --- |
+| BC-S3 infrastructure commit | `d0da7b48ab64221d462587249542600249c37a00` |
+| Campaign | `sm-v1-production-bc-s3-direct-addb00f16a9c` |
+| OSC campaign directory | `$WORK/campaigns/steel-module-production-bc-s3-direct` |
+| Slurm array job | `50618229` |
+| Shape | `4/24 mm`, `back-center`, `500 mm` absorber, blocks `40-79` |
+| Tasks | `80` |
+| New events | `20,000` (`250` per task; `10,000` per endpoint) |
+| Finalization and integrated event audit | passed for all 80 tasks |
+| Invalid attempt results ignored | `0` |
+| Finalized checksum verification | exit `0` |
+
+BC-S1 through BC-S3 therefore contain the exact contiguous block range
+`0-79`: 80 blocks and 20,000 production events per endpoint, 160 tasks and
+40,000 endpoint events total. The three increments retain disjoint task IDs and
+320 unique production seeds. The sealed pilot remains a historical baseline
+and is not pooled into the production estimate.
+
+The cumulative analysis command is:
+
+```bash
+BCS1="$WORK/campaigns/steel-module-production-bc-s1-direct"
+BCS2="$WORK/campaigns/steel-module-production-bc-s2-direct"
+BCS3="$WORK/campaigns/steel-module-production-bc-s3-direct"
+
+python3 hpc/osc/analyze_steel_module_direct_bc_s3.py \
+  --bc-s1-campaign-dir "$BCS1" \
+  --bc-s2-campaign-dir "$BCS2" \
+  --bc-s3-campaign-dir "$BCS3"
+```
+
+It atomically writes `BCS3/finalized/direct-cumulative-analysis` and refuses an
+existing target. Before calculating statistics it validates all three campaign,
+finalization, event-audit, ROOT checksum, runtime/source, block, task and seed
+identities and binds the accepted BC-S2 cumulative analysis and progression
+record.
+
+The output includes cumulative production/collection/net decomposition, a
+pinned 10,000-resample event-bootstrap interval, exactly 160
+leave-one-250-event-block-out records, separate BC-S1/BC-S2/BC-S3/cumulative
+tail diagnostics, and all three pairwise independent-increment comparisons.
+Those increment comparisons are diagnostics rather than equivalence tests and
+do not control progression. The analysis also reports a simple BC-S4 precision
+projection, but it does not select a decision, submit Slurm work, or run Geant4.
+A human must review the BC-S3 and cumulative tails before any BC-S4 decision.
+
+## 14. Claim boundary
 
 The present evidence supports this scoped statement:
 
@@ -453,4 +505,6 @@ The present evidence supports this scoped statement:
 
 It does not yet support a 10%-precision final production claim, absorber-size
 independence, equivalence to the complete ePIC calorimeter, or automatic
-progression beyond the explicitly accepted BC-S3 increment.
+progression beyond the explicitly accepted BC-S3 increment. Although the BC-S3
+events are finalized and audited, they are not included in this claim until the
+cumulative analysis and human tail review are completed.

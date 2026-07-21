@@ -452,6 +452,32 @@ identity. It performs no scheduler action and refuses an existing target. Stop
 unless check-only reports exactly `80 total, 0 submitted, 0 complete` and
 20,000 events. BC-S4 remains unauthorized.
 
+The accepted BC-S3 campaign ran as ordinary Slurm array `50618229` and was
+finalized and event-audited as 80 tasks with no invalid attempt results. Its
+finalized checksum verification returned zero. Analyze the exact contiguous
+BC-S1 through BC-S3 production prefix with:
+
+```bash
+BCS1="$WORK/campaigns/steel-module-production-bc-s1-direct"
+BCS2="$WORK/campaigns/steel-module-production-bc-s2-direct"
+BCS3="$WORK/campaigns/steel-module-production-bc-s3-direct"
+
+python3 hpc/osc/analyze_steel_module_direct_bc_s3.py \
+  --bc-s1-campaign-dir "$BCS1" \
+  --bc-s2-campaign-dir "$BCS2" \
+  --bc-s3-campaign-dir "$BCS3"
+```
+
+The adapter writes `BCS3/finalized/direct-cumulative-analysis` atomically and
+refuses overwrite. It requires blocks `0-79`, 80 independent 250-event blocks
+and 20,000 events at each endpoint, 160 tasks, and 320 unique production seeds.
+It reports the cumulative production/collection/net decomposition, a pinned
+10,000-resample event-bootstrap interval, 160 leave-one-block-out evaluations,
+tail diagnostics for each increment and the cumulative sample, and the three
+pairwise independent-increment comparisons. Those comparisons are diagnostic,
+not equivalence tests. The adapter neither contacts Slurm nor runs Geant4, and
+it does not authorize BC-S4; review its summary and tails first.
+
 ### Historical managed control-plane record
 
 The sections below preserve the earlier managed/preflight implementation for

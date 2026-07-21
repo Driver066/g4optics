@@ -968,6 +968,10 @@ def main() -> int:
         cwd=repo_root,
     )
     run(
+        [sys.executable, "hpc/osc/check_steel_module_direct_bc_s3_analysis.py"],
+        cwd=repo_root,
+    )
+    run(
         [sys.executable, "hpc/osc/check_steel_module_analysis_v2.py"],
         cwd=repo_root,
     )
@@ -1025,8 +1029,8 @@ def main() -> int:
     print(
         "steel-module campaign infrastructure: PASS "
         "(18-task smoke, 120-task frozen pilot, 914-task production program, "
-        "managed BC-S1 Phase-2A/2B, direct BC-S1/BC-S2 analysis and reviewed "
-        "BC-S3 ordinary arrays, "
+        "managed BC-S1 Phase-2A/2B, direct BC-S1/BC-S2/BC-S3 cumulative "
+        "analysis and ordinary arrays, "
         "OSC-shaped incident fixture, "
         "closed R2/v3/v4 plus failed/rejected/pre-workspace-R3 evidence, "
         "incident-bound v5 successor, Phase-2C twin and production-ready v6, "
