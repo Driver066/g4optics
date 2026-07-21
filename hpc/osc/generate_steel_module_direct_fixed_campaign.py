@@ -73,6 +73,15 @@ EXPECTED_PREDECESSOR_JOB_ID = "50618568"
 EXPECTED_ANALYSIS_COMMIT = "9a74465aea6ee8bb482081694b28314918ee9cee"
 BASELINE_SIMULATION_COMMIT = "ddea5462c3a01f39a83af3b9cfa964053cbde626"
 DECISION_DOCUMENT = Path("docs/decisions/steel-module-direct-bc-s1-execution-v1.md")
+DECISION_POLICY_MARKERS = (
+    "tail_disposition no-material-worsening",
+    "progression_decision stop-success",
+    "next_bc_child none",
+    "one ordinary `1-592` Slurm array",
+    "totaling 148,000 events",
+    "concurrency limit is 1,000",
+    "There is no preflight and no planned subdivision",
+)
 ANALYSIS_SCHEMA_VERSION = "steel-module-direct-bc-s4-cumulative-analysis-v1"
 PRIMARY_SCHEMA_VERSION = f"{ANALYSIS_SCHEMA_VERSION}-primary-v1"
 ELIGIBILITY_SCHEMA_VERSION = f"{ANALYSIS_SCHEMA_VERSION}-numeric-eligibility-v1"
@@ -105,6 +114,19 @@ EXPECTED_BLOCKS: dict[tuple[str, int], tuple[int, ...]] = {
         for thickness in TILE_THICKNESSES
     },
 }
+
+
+def validate_decision_document_text(decision_text: str) -> None:
+    """Verify the accepted FIXED policy without depending on Markdown wrapping."""
+    normalized = " ".join(decision_text.split())
+    missing = [
+        marker for marker in DECISION_POLICY_MARKERS if marker not in normalized
+    ]
+    if missing:
+        raise ValueError(
+            "final decision document lacks the accepted FIXED policy: "
+            + ", ".join(repr(marker) for marker in missing)
+        )
 
 
 def parse_args() -> argparse.Namespace:
@@ -359,14 +381,7 @@ def load_bc_s4_stop_success(
     if not decision_path.is_file():
         raise ValueError(f"missing accepted final decision document: {decision_path}")
     decision_text = decision_path.read_text(encoding="utf-8")
-    for required in (
-        "tail_disposition     no-material-worsening",
-        "progression_decision stop-success",
-        "next_bc_child        none",
-        "one ordinary\n+`1-592` Slurm array",
-    ):
-        if required not in decision_text:
-            raise ValueError("final decision document lacks the accepted FIXED policy")
+    validate_decision_document_text(decision_text)
     authorization: dict[str, object] = {
         "schema_version": "steel-module-direct-fixed-authorization-v1",
         "predecessor_child": "BC-S4",

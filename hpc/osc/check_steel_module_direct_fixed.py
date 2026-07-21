@@ -24,6 +24,7 @@ from generate_steel_module_direct_fixed_campaign import (
     OSC_ARRAY_CONCURRENCY_LIMIT,
     validate_direct_fixed_bundle,
     validate_direct_fixed_tasks,
+    validate_decision_document_text,
     validate_stop_success_values,
     write_direct_fixed_campaign_atomic,
 )
@@ -224,6 +225,19 @@ def fixture_authorization() -> dict[str, object]:
 
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[2]
+    decision_text = (repo_root / generator.DECISION_DOCUMENT).read_text(
+        encoding="utf-8"
+    )
+    validate_decision_document_text(decision_text)
+    try:
+        validate_decision_document_text(
+            decision_text.replace("`1-592` Slurm array", "`1-591` Slurm array")
+        )
+    except ValueError as exc:
+        assert "accepted FIXED policy" in str(exc)
+    else:
+        raise AssertionError("tampered FIXED array policy was accepted")
+
     tasks = fixture_tasks()
     assert len(tasks) == 592
     validate_direct_fixed_tasks(tasks, geant4_version="11.4.2")
