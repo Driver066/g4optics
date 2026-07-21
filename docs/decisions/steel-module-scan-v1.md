@@ -887,6 +887,42 @@ single-layer campaign. A small direct benchmark may determine task sizing,
 after which the six configurations run through the ordinary campaign route;
 no managed preflight or staged progression machinery is required.
 
+### SMS-026 — Four-layout single-layer analysis semantics
+
+Analyze the completed single-layer `edge-two` follow-up together with the
+checksum-valid original direct-production campaigns through a new read-only
+four-layout entry point. Do not overwrite or reinterpret the accepted
+18-configuration final analysis. The combined descriptive sample contains
+the same six thicknesses for `back-center`, `edge-center`, `edge-two`, and
+`back-four`.
+
+The directly observed layout curves use the aggregate number of photons
+entering every installed SiPM proxy. Because the installed sensor counts are
+`1`, `1`, `2`, and `4`, respectively, report three parallel views for every
+layout and thickness:
+
+```text
+aggregate response
+response per installed sensor
+response per installed active area in mm2
+```
+
+Apply the normalized diagnostics to both multi-sensor layouts, not only to
+`edge-two`. Since every active proxy is `2.4 x 2.4 mm`, per-sensor and
+per-active-area comparisons differ only by the constant `5.76 mm2` per
+sensor. They are secondary layout-cost diagnostics; they do not replace the
+aggregate response or model PDE, electronics, packaging, or channel cost.
+
+For `edge-two` and `back-four`, also retain each installed copy's individual
+ratio-of-sums collection efficiency with a correlated event-bootstrap
+interval. Generate the numerical evidence and figures through separate
+entry points. Both must verify their checksum-bound inputs, refuse overwrite,
+write provenance and checksums, and create no scheduler action or Geant4
+event. A four-layout equal-stratum production reconciliation and
+production-standardized response may be reported as explicitly secondary
+diagnostics; they do not reopen the accepted original primary contrasts or
+automatically choose a detector layout.
+
 ## Current engineering state
 
 The runner contract, three detector-layout identities, and independent

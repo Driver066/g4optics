@@ -694,6 +694,46 @@ check-only reports exactly `240 total, 0 submitted, 0 complete`. A later
 explicit submission uses the same ordinary wrapper, `PAS2524`, and the shared
 `$WORK/frozen-campaign-sources` directory.
 
+After all 240 array elements complete, finalize normally and build the
+read-only four-layout evidence from the five original direct campaigns plus
+the new edge-two campaign:
+
+```bash
+FIXED="$WORK/campaigns/steel-module-production-fixed-direct"
+BCS1="$WORK/campaigns/steel-module-production-bc-s1-direct"
+BCS2="$WORK/campaigns/steel-module-production-bc-s2-direct"
+BCS3="$WORK/campaigns/steel-module-production-bc-s3-direct"
+BCS4="$WORK/campaigns/steel-module-production-bc-s4-direct"
+EDGE_TWO="$WORK/campaigns/steel-module-production-edge-two-direct"
+
+python3 hpc/osc/finalize_steel_module_campaign.py \
+  --campaign-dir "$EDGE_TWO"
+
+python3 hpc/osc/analyze_steel_module_four_layout.py \
+  --fixed-campaign-dir "$FIXED" \
+  --bc-s1-campaign-dir "$BCS1" \
+  --bc-s2-campaign-dir "$BCS2" \
+  --bc-s3-campaign-dir "$BCS3" \
+  --bc-s4-campaign-dir "$BCS4" \
+  --edge-two-campaign-dir "$EDGE_TWO" \
+  --project-root "$REPO"
+```
+
+The default core output is
+`$EDGE_TWO/finalized/four-layout-analysis`. It reports the four aggregate
+curves plus per-sensor and per-active-area diagnostics for both `edge-two`
+and `back-four`, as well as individual installed sensor-copy collection
+efficiencies. Rendering remains an independent optional step:
+
+```bash
+python3 hpc/osc/plot_steel_module_four_layout.py \
+  --analysis-dir "$EDGE_TWO/finalized/four-layout-analysis"
+```
+
+The sibling `four-layout-analysis-figures` contains seven PNG/PDF figure
+pairs, figure provenance, and its own checksum manifest. Neither command
+contacts Slurm or runs Geant4.
+
 ### Historical managed control-plane record
 
 The sections below preserve the earlier managed/preflight implementation for
