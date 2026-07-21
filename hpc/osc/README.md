@@ -478,6 +478,44 @@ pairwise independent-increment comparisons. Those comparisons are diagnostic,
 not equivalence tests. The adapter neither contacts Slurm nor runs Geant4, and
 it does not authorize BC-S4; review its summary and tails first.
 
+The completed human review recorded `no-material-worsening` and selected
+`continue`: observed net `24/4 = 1.44020 [1.29124, 1.60717]`, relative
+half-width `10.97%`, maximum LOO shift `1.90%`, and continued narrowing. This
+makes only the separate direct BC-S4 increment eligible.
+
+### Direct BC-S4 campaign generation
+
+BC-S4 is the final frozen back-center increment. It uses blocks `80-160`: 81
+new 250-event blocks at each endpoint, or 162 tasks and 40,500 events. After
+completion, each endpoint will contain 161 production blocks and 40,250 events.
+From a clean OSC checkout:
+
+```bash
+PROGRAM="$WORK/campaigns/steel-module-production-program-cbc03814"
+BCS3="$WORK/campaigns/steel-module-production-bc-s3-direct"
+BCS4="$WORK/campaigns/steel-module-production-bc-s4-direct"
+
+python3 hpc/osc/generate_steel_module_direct_bc_s4_campaign.py \
+  --program-dir "$PROGRAM" \
+  --bc-s3-campaign-dir "$BCS3" \
+  --out-dir "$BCS4"
+
+python3 hpc/osc/submit_steel_module_campaign.py \
+  --campaign-dir "$BCS4" \
+  --project-root "$REPO" \
+  --g4-data-root "$DATA_ROOT" \
+  --check-only
+```
+
+Generation binds the checksum-valid BC-S3 cumulative analysis, its exact
+unrounded primary values, the accepted `no-material-worsening / continue`
+review, the frozen BC-S4 task/seed allocation, and unchanged runtime identity.
+It performs no scheduler action and refuses an existing target. Stop unless
+check-only reports exactly `162 total, 0 submitted, 0 complete` and 40,500
+events. Formal submission remains a separate ordinary command with no
+preflight. BC-S4 is the ceiling: after it is finalized, the last cumulative
+review cannot select another `continue` stage.
+
 ### Historical managed control-plane record
 
 The sections below preserve the earlier managed/preflight implementation for

@@ -1,8 +1,9 @@
 # Steel Module Direct BC-S1 Execution and Analysis Record
 
-Status: direct BC-S1, BC-S2, and BC-S3 execution/finalization completed; BC-S2
+Status: direct BC-S1, BC-S2, and BC-S3 execution/review completed; BC-S3
 cumulative tail disposition `no-material-worsening`; progression decision
-`continue`; cumulative BC-S1+BC-S2+BC-S3 analysis and human review pending
+`continue`; direct BC-S4 campaign generation authorized but not scheduler
+submission
 
 Study preset: `steel-module-scan-v1`
 
@@ -492,19 +493,76 @@ do not control progression. The analysis also reports a simple BC-S4 precision
 projection, but it does not select a decision, submit Slurm work, or run Geant4.
 A human must review the BC-S3 and cumulative tails before any BC-S4 decision.
 
-## 14. Claim boundary
+## 14. Completed BC-S3 cumulative review and BC-S4 authorization
+
+The cumulative BC-S1+BC-S2+BC-S3 adapter ran from analysis commit
+`5bd9c258f1161db553c35816986f675c57512db9`. It reconciled all 160 finalized
+tasks and 40,000 events, verified the three campaign/finalization identities,
+and produced checksum-valid evidence (`CHECKSUM_EXIT=0`).
+
+The cumulative primary result is:
+
+| Review quantity | Result |
+| --- | ---: |
+| Generated optical production `24/4` | `5.75031` |
+| Scintillation production `24/4` | `5.75031` |
+| Optical collection `24/4` | `0.250457` |
+| Observed net SiPM response `24/4` | `1.44020` |
+| Bootstrap 95% interval | `[1.29124, 1.60717]` |
+| Relative half-width | `10.97%` |
+| Accepted precision target | `10%` |
+| Maximum leave-one-block-out shift | `1.90%` |
+| Maximum-shift source | `4 mm`, block `34` |
+| Interval narrower than cumulative BC-S2 | `true` |
+| Numeric choices | `continue, pause-review` |
+
+The three independent-increment ratio-of-ratios intervals all included unity:
+BC-S2/BC-S1 was `0.830678 [0.596464, 1.15608]`, BC-S3/BC-S2 was
+`1.02851 [0.791309, 1.32873]`, and BC-S3/BC-S1 was
+`0.854363 [0.638344, 1.14289]`. These comparisons did not detect a difference,
+but they are not equivalence tests and do not control progression.
+
+The BC-S3 tail was judged not to have materially worsened. At 4 mm, its zero
+fraction (`81.67%`), top-1% share (`45.85%`), top-5% share (`80.66%`) and
+maximum (`26,177`) remained comparable to the earlier increments. At 24 mm,
+the BC-S3 zero fraction (`75.75%`), top-1% share (`28.12%`), top-5% share
+(`63.93%`) and maximum (`19,979`) were stable or lower than BC-S2. The maximum
+cumulative block sensitivity fell from `3.94%` to only `1.90%`; block 34 no
+longer materially controls the result despite remaining the largest omission.
+
+The accepted human and progression record on 2026-07-21 is:
+
+```text
+tail_disposition     no-material-worsening
+progression_decision continue
+next_child           BC-S4
+automatic_submission false
+```
+
+`stop-success` is not numerically eligible because the precommitted relative
+half-width target is `10%` and the observed value remains `10.97%`. BC-S4 is
+the final frozen back-center increment: blocks `80-160` for each endpoint, 81
+new 250-event blocks per endpoint, 162 tasks and 40,500 new events. Completion
+would give 161 blocks and 40,250 production events per endpoint. Simple
+`1/sqrt(N)` scaling projects a relative half-width of about `7.7%`; this is a
+review aid, not a guaranteed result. At the BC-S4 ceiling, `continue` is never
+allowed: the final review may select only `stop-success` or `pause-review`
+according to the precommitted precision, LOO and tail rules.
+
+This decision authorizes only generation of a separate ordinary direct BC-S4
+campaign. It does not submit Slurm work, run Geant4, or authorize `FIXED`.
+
+## 15. Claim boundary
 
 The present evidence supports this scoped statement:
 
 > For a centered 1 GeV kinetic-energy neutron pencil beam, the fixed
 > 500 x 500 x 40 mm SAE-304 slab proxy, the retained painted/wrapped boundary,
-> the EJ-550 coupling proxy, and a back-center SiPM, the cumulative 20,000-event
-> BC-S1+BC-S2 production sample gives a 24/4 mean detected optical-response ratio
-> of 1.475 with a 95% event-bootstrap interval of [1.246, 1.746]. In this fixed
+> the EJ-550 coupling proxy, and a back-center SiPM, the cumulative 40,000-event
+> BC-S1+BC-S2+BC-S3 production sample gives a 24/4 mean detected optical-response
+> ratio of 1.440 with a 95% event-bootstrap interval of [1.291, 1.607]. In this fixed
 > model, the neutron-induced production gain exceeds the optical-collection loss.
 
 It does not yet support a 10%-precision final production claim, absorber-size
 independence, equivalence to the complete ePIC calorimeter, or automatic
-progression beyond the explicitly accepted BC-S3 increment. Although the BC-S3
-events are finalized and audited, they are not included in this claim until the
-cumulative analysis and human tail review are completed.
+progression beyond the explicitly accepted BC-S4 increment.
