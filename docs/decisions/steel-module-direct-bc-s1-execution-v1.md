@@ -1,11 +1,12 @@
 # Steel Module Direct BC-S1 Execution and Analysis Record
 
-Status: direct BC-S1 execution completed and finalized; preliminary v1 analysis
-completed; checksum-bound LOO/tail adapter implemented for OSC review
+Status: direct BC-S1 execution, finalization, and dedicated review completed;
+human tail disposition `no-material-worsening`; progression decision `continue`;
+direct BC-S2 campaign generation authorized but not scheduler submission
 
 Study preset: `steel-module-scan-v1`
 
-Record date: 2026-07-20
+Record date: 2026-07-20 through 2026-07-21
 
 ## 1. Purpose of this record
 
@@ -234,10 +235,23 @@ This is proportional evidence hardening, not a return to the abandoned control
 plane: there is no preflight, checkpoint, readiness lock, intent, scheduler
 contact, or new simulation.
 
-## 9. Remaining progression decision
+## 9. Completed progression review
 
-No next child is submitted automatically. Human review uses three independent
-questions:
+The dedicated direct analysis ran successfully against the checksum-valid
+finalized campaign. Its primary result is:
+
+| Review quantity | Result |
+| --- | ---: |
+| Observed net SiPM response `24/4` | `1.64567` |
+| Bootstrap 95% interval | `[1.27719, 2.12547]` |
+| Relative half-width | `25.77%` |
+| Accepted precision target | `10%` |
+| Maximum leave-one-block-out shift | `5.03%` |
+| Maximum-shift source | `4 mm`, block `6` |
+| Interval narrower than sealed pilot | `true` |
+| Numeric choices | `continue, pause-review` |
+
+Human review used three independent questions:
 
 1. Is the production interval narrower than the sealed pilot interval?
 2. Is the maximum leave-one-250-event-block-out ratio shift no greater than the
@@ -245,16 +259,56 @@ questions:
 3. Did the new 4 mm or 24 mm SiPM distribution show a material worsening in
    zero rate or top-1%/top-5% tail concentration relative to the pilot?
 
-If the interval remains above `10%`, narrows versus the pilot, maximum LOO is at
-most `20%`, and human tail review finds no material worsening, BC-S2 is eligible
-for a separate explicit decision. BC-S2 would add 24 new 250-event blocks per
-endpoint: 48 tasks and 12,000 new events, bringing each endpoint to 10,000 new
-production events cumulatively.
+The observed tail comparison was:
 
-Otherwise the correct outcome is `pause-review`. The direct analyzer reports
-numeric eligibility only; it does not record a human decision or submit BC-S2.
+| Sample | Tile | Zero fraction | Top 1% share | Top 5% share | Maximum |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Sealed pilot | 4 mm | `79.60%` | `58.67%` | `84.59%` | `26,045` |
+| BC-S1 production | 4 mm | `81.75%` | `45.71%` | `79.33%` | `20,704` |
+| Sealed pilot | 24 mm | `76.50%` | `29.61%` | `65.06%` | `9,294` |
+| BC-S1 production | 24 mm | `74.65%` | `31.86%` | `64.52%` | `44,395` |
 
-## 10. Claim boundary
+For 4 mm, the zero fraction increased by `2.15` percentage points, while both
+tail-concentration shares and the maximum decreased. For 24 mm, the zero
+fraction improved, the top-5% share was essentially unchanged, and the top-1%
+share increased by only `2.25` percentage points. The larger 24 mm maximum was
+observed in a production sample four times the pilot size; it is therefore not
+a sample-size-normalized worsening metric by itself. The maximum block-omission
+effect remained only `5.03%`, so no single 250-event block controls the primary
+ratio.
+
+The accepted human and progression record on 2026-07-21 is therefore:
+
+```text
+tail_disposition    no-material-worsening
+progression_decision continue
+next_child           BC-S2
+automatic_submission false
+```
+
+This decision makes only the separately generated direct BC-S2 increment
+eligible. It does not submit Slurm work and does not authorize `FIXED`, `BC-S3`,
+or `BC-S4`.
+
+## 10. Direct BC-S2 campaign contract
+
+BC-S2 adds blocks `16-39` independently for each endpoint:
+
+- `4 mm back-center`: 24 new 250-event blocks;
+- `24 mm back-center`: 24 new 250-event blocks;
+- total: 48 tasks and 12,000 new events;
+- cumulative after BC-S1 plus BC-S2: 40 blocks and 10,000 production events per
+  endpoint, or 20,000 endpoint events total.
+
+The direct BC-S2 generator must read the accepted frozen production program,
+the completed direct BC-S1 campaign, and its checksum-valid `direct-analysis`.
+It reuses the already allocated blocks `16-39` and their 96 production seeds,
+records the complete predecessor evidence hashes and this human decision, and
+writes a normal campaign with no preflight or scheduler action. Submission
+remains a separate explicit step after campaign check-only reports exactly 48
+tasks and 12,000 events.
+
+## 11. Claim boundary
 
 The present evidence supports this scoped statement:
 
@@ -267,4 +321,4 @@ The present evidence supports this scoped statement:
 
 It does not yet support a 10%-precision final production claim, absorber-size
 independence, equivalence to the complete ePIC calorimeter, or automatic
-progression beyond BC-S1.
+progression beyond the explicitly accepted BC-S2 increment.

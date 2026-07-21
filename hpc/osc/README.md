@@ -333,8 +333,9 @@ python3 hpc/osc/submit_steel_module_campaign.py \
 ```
 
 The wrapper still creates the standard immutable attempt record and frozen Git
-source used by the successful pilot. All other production shapes remain
-fail-closed. Once all 32 tasks finish, use the ordinary steel-module finalizer:
+source used by the successful pilot. Production shapes other than the exact
+reviewed direct children remain fail-closed. Once all 32 tasks finish, use the
+ordinary steel-module finalizer:
 
 ```bash
 python3 hpc/osc/finalize_steel_module_campaign.py \
@@ -361,8 +362,42 @@ checkpoint, intent, readiness object, or automatic progression decision. The
 complete execution and interpretation record is
 `docs/decisions/steel-module-direct-bc-s1-execution-v1.md`.
 
-Do not submit `FIXED`, `BC-S2`, `BC-S3`, or `BC-S4` until this BC-S1 result is
-finalized and reviewed.
+The completed BC-S1 review found `no-material-worsening` and selected
+`continue`: observed net `24/4 = 1.64567 [1.27719, 2.12547]`, relative
+half-width `25.77%`, maximum LOO shift `5.03%`, and narrowing versus the sealed
+pilot. This explicitly makes the separate direct BC-S2 increment eligible; it
+does not submit it and does not authorize `FIXED`, `BC-S3`, or `BC-S4`.
+
+### Direct BC-S2 campaign generation
+
+BC-S2 uses the already frozen production-program blocks `16-39`: 24 new
+250-event blocks at each of 4 and 24 mm, or 48 tasks and 12,000 events. From a
+clean OSC checkout after pulling the implementation commit:
+
+```bash
+PROGRAM="$WORK/campaigns/steel-module-production-program-cbc03814"
+BCS1="$WORK/campaigns/steel-module-production-bc-s1-direct"
+BCS2="$WORK/campaigns/steel-module-production-bc-s2-direct"
+
+python3 hpc/osc/generate_steel_module_direct_bc_s2_campaign.py \
+  --program-dir "$PROGRAM" \
+  --bc-s1-campaign-dir "$BCS1" \
+  --out-dir "$BCS2"
+
+python3 hpc/osc/submit_steel_module_campaign.py \
+  --campaign-dir "$BCS2" \
+  --project-root "$REPO" \
+  --g4-data-root "$DATA_ROOT" \
+  --check-only
+```
+
+Generation verifies the frozen production program, accepted BC-S1
+finalization and direct-analysis checksums, numeric `continue` eligibility,
+the recorded `no-material-worsening` human decision, runtime identity, exact
+block range, and all 96 new seeds. It contacts no scheduler and refuses an
+existing output directory. Stop unless check-only reports exactly `48 total,
+0 submitted, 0 complete` and 12,000 events. The later ordinary submission is a
+separate explicit action; there is no preflight.
 
 ### Historical managed control-plane record
 

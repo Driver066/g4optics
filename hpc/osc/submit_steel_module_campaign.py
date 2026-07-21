@@ -12,6 +12,9 @@ import submit_realistic_neutron_campaign as implementation
 from generate_steel_module_direct_bc_s1_campaign import (
     validate_direct_bc_s1_bundle,
 )
+from generate_steel_module_direct_bc_s2_campaign import (
+    validate_direct_bc_s2_bundle,
+)
 from record_steel_module_task_result import (
     integer_field,
     read_single_csv_row,
@@ -67,7 +70,7 @@ def requested_campaign_dir(argv: list[str]) -> Path | None:
 
 
 def reject_managed_production_route(argv: list[str]) -> None:
-    """Admit only the exact direct BC-S1 shape on the ordinary submit path."""
+    """Admit only an exact reviewed direct-production child shape."""
 
     campaign_dir = requested_campaign_dir(argv)
     if campaign_dir is None:
@@ -91,7 +94,16 @@ def reject_managed_production_route(argv: list[str]) -> None:
         raise ValueError("steel-module campaign.json must contain an object")
     if "direct_production" in manifest:
         bundle = load_campaign(campaign_dir, verify_external_artifacts=False)
-        validate_direct_bc_s1_bundle(bundle)
+        marker = manifest.get("direct_production")
+        if not isinstance(marker, dict):
+            raise ValueError("direct production marker must be an object")
+        child_id = marker.get("child_id")
+        if child_id == "BC-S1":
+            validate_direct_bc_s1_bundle(bundle)
+        elif child_id == "BC-S2":
+            validate_direct_bc_s2_bundle(bundle)
+        else:
+            raise ValueError(f"unsupported direct production child: {child_id!r}")
         return
     tasks_path = campaign_dir / "tasks.tsv"
     task_stages: set[str] = set()
@@ -122,8 +134,8 @@ def reject_managed_production_route(argv: list[str]) -> None:
         or any(value.startswith("production-") for value in logical_task_ids)
     ):
         raise ValueError(
-            "steel-module production campaigns other than the exact direct BC-S1 "
-            "shape remain blocked; the generic submitter is fail-closed"
+            "steel-module production campaigns other than the exact reviewed "
+            "direct-child shapes remain blocked; the generic submitter is fail-closed"
         )
     if task_stages and task_stages != {manifest_stage}:
         raise ValueError("campaign stage and task stages disagree")
