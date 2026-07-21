@@ -636,6 +636,64 @@ samples. It reports configuration, pathway, tail, per-sensor, pooled,
 standardized, thickness-ratio, layout-ratio, and four-primary-contrast tables.
 Neither entry point contacts Slurm or runs Geant4.
 
+### Direct edge-two follow-up campaign
+
+The accepted single-layer follow-up adds two SiPMs on the same `+X` side and
+repeats all six tile thicknesses. It uses `40` independent `250`-event blocks
+per thickness: `240` tasks and `60,000` events in one ordinary `1-240` array,
+with no preflight. Because the original frozen executable predates the
+`edge-two` geometry, first build and freeze a new executable from the clean
+campaign-tooling checkout:
+
+```bash
+HEAD8="$(git rev-parse --short=8 HEAD)"
+BUILD_DIR="build-osc-${HEAD8}"
+ARTIFACT_DIR="$WORK/builds/candidate-${HEAD8}"
+CANDIDATE="$ARTIFACT_DIR/OpNovice2"
+
+test ! -e "$ARTIFACT_DIR"
+mkdir "$ARTIFACT_DIR"
+
+G4_APPTAINER_IMAGE="$REPO/geant4.sif" \
+G4_DATA_ROOT="$DATA_ROOT" \
+G4_BUILD_DIR="$BUILD_DIR" \
+G4_BUILD_JOBS=4 \
+G4_FORCE_REBUILD=1 \
+  hpc/osc/run_scan_apptainer.sh
+
+install -m 0555 \
+  "$REPO/test/OpNovice2/$BUILD_DIR/OpNovice2" \
+  "$CANDIDATE"
+sha256sum "$CANDIDATE"
+```
+
+Then construct and validate the direct campaign without contacting Slurm:
+
+```bash
+PROGRAM="$WORK/campaigns/steel-module-production-program-cbc03814"
+EDGE_TWO="$WORK/campaigns/steel-module-production-edge-two-direct"
+DATA_MANIFEST="$WORK/environment/71e5979a/g4-data-manifest.sha256"
+
+python3 hpc/osc/generate_steel_module_direct_edge_two_campaign.py \
+  --program-dir "$PROGRAM" \
+  --out-dir "$EDGE_TWO" \
+  --image "$REPO/geant4.sif" \
+  --g4-data-manifest "$DATA_MANIFEST" \
+  --build-artifact "$CANDIDATE"
+
+python3 hpc/osc/submit_steel_module_campaign.py \
+  --campaign-dir "$EDGE_TWO" \
+  --project-root "$REPO" \
+  --g4-data-root "$DATA_ROOT" \
+  --check-only
+```
+
+The generator derives `480` new seeds and verifies that they do not overlap
+the sealed pilot or any of the original `914` production tasks. Stop unless
+check-only reports exactly `240 total, 0 submitted, 0 complete`. A later
+explicit submission uses the same ordinary wrapper, `PAS2524`, and the shared
+`$WORK/frozen-campaign-sources` directory.
+
 ### Historical managed control-plane record
 
 The sections below preserve the earlier managed/preflight implementation for

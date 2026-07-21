@@ -823,6 +823,20 @@ be conflated with the separate ten-layer longitudinal-stack study. The latter
 uses one selected, identical SiPM layout on every layer rather than mixing the
 four layouts or automatically selecting `edge-two`.
 
+The accepted one-shot execution shape follows the completed `edge-center`
+allocation: `40` independent `250`-event blocks for each of the six thicknesses.
+This is six configurations, `240` tasks, and `60,000` new events. Run it as one
+ordinary `1-240` Slurm array with no preflight and no adaptive boundary. Its
+new deterministic seed registry must be disjoint from both the sealed pilot
+seeds and all `914` tasks in the completed original production program.
+
+Interactive review of the `4 mm` and `24 mm` geometries passed on 2026-07-21.
+Both same-face side sensors were visible at the accepted positions, the two
+thicknesses were visually distinct, and the exported PDFs were retained with
+their generated macros and run-config provenance in the ignored local campaign
+archive. This review authorizes campaign construction but does not itself
+submit Slurm work.
+
 ### SMS-025 — Ten-layer edge-two longitudinal thickness study
 
 The professor's ten-layer request is a second, independent follow-up study.

@@ -21,6 +21,9 @@ from generate_steel_module_direct_bc_s3_campaign import (
 from generate_steel_module_direct_bc_s4_campaign import (
     validate_direct_bc_s4_bundle,
 )
+from generate_steel_module_direct_edge_two_campaign import (
+    validate_direct_edge_two_bundle,
+)
 from generate_steel_module_direct_fixed_campaign import (
     validate_direct_fixed_bundle,
 )
@@ -117,6 +120,8 @@ def reject_managed_production_route(argv: list[str]) -> None:
             validate_direct_bc_s4_bundle(bundle)
         elif child_id == "FIXED":
             validate_direct_fixed_bundle(bundle)
+        elif child_id == "EDGE-TWO":
+            validate_direct_edge_two_bundle(bundle)
         else:
             raise ValueError(f"unsupported direct production child: {child_id!r}")
         return
