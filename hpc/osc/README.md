@@ -547,6 +547,62 @@ BC-S4 hard ceiling, `continue` is suppressed: numeric review can expose only
 `stop-success / pause-review` when the precision and LOO success rules pass,
 or only `pause-review` otherwise.
 
+The accepted final analysis used all 322 tasks and 80,500 events. It found
+generated/scintillation production `24/4 = 5.67082`, optical collection
+`24/4 = 0.245724`, and observed net SiPM response `24/4 = 1.39346` with a
+95% event-bootstrap interval `[1.29104, 1.50771]`. Relative half-width was
+`7.77%` and maximum leave-one-block-out shift was `0.89%`, satisfying both
+precommitted 10% success rules. The BC-S4 and cumulative tail review recorded
+`no-material-worsening`; the final progression decision is `stop-success`,
+with no further BC child. This closes only the adaptive back-center endpoint
+chain and authorizes, but does not submit, the separately frozen `FIXED`
+allocation.
+
+### Direct FIXED campaign generation and submission
+
+The remaining production allocation is non-adaptive and runs as one ordinary
+592-task Slurm array. It contains four intermediate back-center thicknesses,
+all six edge-center thicknesses, and all six back-four thicknesses, for 148,000
+new events. The confirmed OSC array concurrency limit is 1,000. From a clean
+OSC checkout with the analysis environment active:
+
+```bash
+PROGRAM="$WORK/campaigns/steel-module-production-program-cbc03814"
+BCS4="$WORK/campaigns/steel-module-production-bc-s4-direct"
+FIXED="$WORK/campaigns/steel-module-production-fixed-direct"
+FROZEN="$WORK/frozen-campaign-sources"
+
+python3 hpc/osc/generate_steel_module_direct_fixed_campaign.py \
+  --program-dir "$PROGRAM" \
+  --bc-s4-campaign-dir "$BCS4" \
+  --out-dir "$FIXED"
+
+python3 hpc/osc/submit_steel_module_campaign.py \
+  --campaign-dir "$FIXED" \
+  --project-root "$REPO" \
+  --g4-data-root "$DATA_ROOT" \
+  --check-only
+```
+
+Generation requires the checksum-valid final BC-S4 cumulative analysis and
+the accepted `no-material-worsening / stop-success` decision, then reproduces
+the exact frozen FIXED task and seed mapping. Stop unless check-only reports
+exactly `592 total, 0 submitted, 0 complete`. After human review, submit the
+single array with the complete required runtime arguments:
+
+```bash
+python3 hpc/osc/submit_steel_module_campaign.py \
+  --campaign-dir "$FIXED" \
+  --project-root "$REPO" \
+  --account PAS2524 \
+  --g4-data-root "$DATA_ROOT" \
+  --frozen-root "$FROZEN"
+```
+
+No preflight or planned subdivision is used. If isolated elements fail, use
+the ordinary retry-failed route for those elements rather than regenerating or
+splitting the campaign.
+
 ### Historical managed control-plane record
 
 The sections below preserve the earlier managed/preflight implementation for

@@ -1,10 +1,11 @@
 # Steel Module Scan v1 — Decision Record and Implementation Contract
 
-Status: analysis-v2 reviewed; fixed-reference absorber, 10% staged production,
-production-program topology, BC-S1-first gate, and human progression-review
-contract accepted; execution infrastructure pending
+Status: analysis-v2 and final BC-S4 cumulative evidence reviewed;
+fixed-reference absorber and production topology accepted; back-center endpoint
+chain completed with `no-material-worsening / stop-success`; `FIXED` remains
+authorized but unsubmitted
 Study preset: `steel-module-scan-v1`
-Last updated: 2026-07-17
+Last updated: 2026-07-21
 
 ## Purpose and relationship to the earlier neutron study
 
@@ -674,6 +675,56 @@ color with text/marker shape, and may only offer a copyable recorder command.
 It cannot write a decision, unlock a child, or invoke Slurm. The report is a
 derived review aid; sealed finalized/audit/analysis artifacts remain the
 accepted statistical evidence.
+
+### SMS-020 — Final BC-S4 review closes the adaptive back-center chain
+
+The checksum-valid direct production prefix now contains all four BC children:
+322 tasks and 80,500 events, with 40,250 events in each of the 4 mm and 24 mm
+back-center endpoint configurations. The final observed net response ratio is
+`24/4 = 1.39346 [1.29104, 1.50771]`. Its relative half-width is `7.77%`, and
+the maximum leave-one-250-event-block-out shift is `0.89%` from 4 mm block 34.
+Both precommitted 10% success conditions pass.
+
+The BC-S4 tail was reviewed against all three prior independent increments.
+Zero fractions and top-1%/top-5% response shares remain in the established
+heavy-tail regime; the new 24 mm maximum of `46,704` does not materially alter
+the cumulative tail concentration or block sensitivity. The accepted human
+record is therefore:
+
+```text
+tail_disposition     no-material-worsening
+progression_decision stop-success
+next_bc_child        none
+```
+
+No further back-center endpoint extension is allowed or needed. This decision
+directly authorizes only the previously frozen `FIXED` child; submission stays
+a separate explicit action. The back-center result is not a substitute for the
+four intermediate back-center thicknesses or either complete alternative-layout
+curve contained in `FIXED`.
+
+### SMS-021 — Submit the complete FIXED allocation as one ordinary array
+
+The remaining production work is exactly the frozen `FIXED` child: four
+intermediate back-center configurations at 16 blocks each, all six edge-center
+configurations at 40 blocks each, and all six back-four configurations at 48
+blocks each. This is 16 configurations, 592 independent 250-event tasks, and
+148,000 events. No result inside this child changes whether another FIXED task
+is required, so there is no scientific adaptive boundary within it.
+
+The accepted execution policy is one ordinary `1-592` Slurm array with no
+preflight and no layout/thickness partition. The user's OSC array concurrency
+limit is 1,000, so the complete shape is below the accepted limit. A failed
+array element may be retried through the ordinary checksum-bound retry path;
+the possibility of isolated task failure is not a reason to pre-split the
+campaign.
+
+Generation and check-only validation remain separate from submission. The
+direct campaign must reproduce the exact frozen FIXED task and seed mapping,
+bind the checksum-valid BC-S4 `stop-success / no-material-worsening` evidence,
+retain the fixed 500 mm absorber and unchanged runtime identity, and report
+exactly `592 total, 0 submitted, 0 complete` before the explicit submit command
+is made. Completion yields the full 914-task, 228,500-event production sample.
 
 ## Current engineering state
 
