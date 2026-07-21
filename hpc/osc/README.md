@@ -516,6 +516,37 @@ events. Formal submission remains a separate ordinary command with no
 preflight. BC-S4 is the ceiling: after it is finalized, the last cumulative
 review cannot select another `continue` stage.
 
+The accepted BC-S4 campaign ran as ordinary Slurm array `50618568`. All 162
+tasks completed with exit code `0:0`; the ordinary finalizer selected and
+event-audited all 162 tasks, ignored zero invalid attempt results, and its
+`finalized/SHA256SUMS` verification returned zero. Analyze the exact final
+BC-S1 through BC-S4 prefix with:
+
+```bash
+BCS1="$WORK/campaigns/steel-module-production-bc-s1-direct"
+BCS2="$WORK/campaigns/steel-module-production-bc-s2-direct"
+BCS3="$WORK/campaigns/steel-module-production-bc-s3-direct"
+BCS4="$WORK/campaigns/steel-module-production-bc-s4-direct"
+
+python3 hpc/osc/analyze_steel_module_direct_bc_s4.py \
+  --bc-s1-campaign-dir "$BCS1" \
+  --bc-s2-campaign-dir "$BCS2" \
+  --bc-s3-campaign-dir "$BCS3" \
+  --bc-s4-campaign-dir "$BCS4"
+```
+
+The adapter writes `BCS4/finalized/direct-cumulative-analysis` atomically and
+refuses overwrite. It requires the exact contiguous block range `0-160`, 161
+independent 250-event blocks and 40,250 events at each endpoint, 322 tasks,
+and 644 unique production seeds. It reports the final
+production/collection/net decomposition, pinned 10,000-resample event
+bootstrap interval, 322 leave-one-block-out evaluations, per-increment and
+cumulative tail diagnostics, and all six pairwise increment comparisons.
+Those comparisons remain diagnostic rather than equivalence tests. At the
+BC-S4 hard ceiling, `continue` is suppressed: numeric review can expose only
+`stop-success / pause-review` when the precision and LOO success rules pass,
+or only `pause-review` otherwise.
+
 ### Historical managed control-plane record
 
 The sections below preserve the earlier managed/preflight implementation for

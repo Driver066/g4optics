@@ -1,9 +1,8 @@
 # Steel Module Direct BC-S1 Execution and Analysis Record
 
-Status: direct BC-S1, BC-S2, and BC-S3 execution/review completed; BC-S3
-cumulative tail disposition `no-material-worsening`; progression decision
-`continue`; direct BC-S4 campaign generation authorized but not scheduler
-submission
+Status: direct BC-S1, BC-S2, and BC-S3 execution/review completed; BC-S4
+ordinary array execution, finalization, event audit, and checksum verification
+completed; final cumulative analysis and human tail review pending
 
 Study preset: `steel-module-scan-v1`
 
@@ -552,7 +551,52 @@ according to the precommitted precision, LOO and tail rules.
 This decision authorizes only generation of a separate ordinary direct BC-S4
 campaign. It does not submit Slurm work, run Geant4, or authorize `FIXED`.
 
-## 15. Claim boundary
+## 15. Completed BC-S4 execution and final-analysis contract
+
+The separately authorized BC-S4 increment ran through the ordinary campaign
+route without a preflight:
+
+| Execution quantity | Recorded value |
+| --- | --- |
+| Campaign | `sm-v1-production-bc-s4-direct-46bf4fa3229b` |
+| Infrastructure commit | `31d2e2ea95c8d7ae4aa6a5300e0c41a26bed723b` |
+| Slurm array | `50618568` |
+| Blocks per endpoint | `80-160` (81 blocks) |
+| Tasks / events | `162 / 40,500` |
+| Scheduler result | all array tasks `COMPLETED / 0:0` |
+| Finalizer result | 162 selected and event-audited; 0 invalid results ignored |
+| Finalized checksum | `FINALIZED_CHECKSUM_EXIT=0` |
+
+Together, the four direct children now contain the exact contiguous production
+block range `0-160`: 161 independent 250-event blocks and 40,250 events at
+each of the 4 mm and 24 mm endpoints, or 322 tasks and 80,500 events total.
+
+The final cumulative adapter is invoked with:
+
+```bash
+BCS1="$WORK/campaigns/steel-module-production-bc-s1-direct"
+BCS2="$WORK/campaigns/steel-module-production-bc-s2-direct"
+BCS3="$WORK/campaigns/steel-module-production-bc-s3-direct"
+BCS4="$WORK/campaigns/steel-module-production-bc-s4-direct"
+
+python3 hpc/osc/analyze_steel_module_direct_bc_s4.py \
+  --bc-s1-campaign-dir "$BCS1" \
+  --bc-s2-campaign-dir "$BCS2" \
+  --bc-s3-campaign-dir "$BCS3" \
+  --bc-s4-campaign-dir "$BCS4"
+```
+
+It must reconcile the checksum-valid S1-S3 predecessor result, all four
+campaign/finalization identities, 644 unique production seeds, and the exact
+block registry. The fixed statistics remain a 10,000-resample event bootstrap
+and 322 leave-one-block-out evaluations. BC-S4 is the precommitted hard
+ceiling, so the machine-readable numeric choices can never contain
+`continue`: they are `stop-success, pause-review` only when both the 10%
+relative-half-width and 10% maximum-LOO success rules pass, and otherwise only
+`pause-review`. A human must still review the BC-S4 and cumulative tails before
+recording the final interpretation.
+
+## 16. Claim boundary
 
 The present evidence supports this scoped statement:
 
