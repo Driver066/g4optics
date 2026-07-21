@@ -1,8 +1,8 @@
 # Steel Module Scan v1 — Decision Record and Implementation Contract
 
-Status: all five direct production campaigns completed and finalized;
-back-center endpoint chain closed with `no-material-worsening / stop-success`;
-final 914-task combined analysis pending
+Status: completed and accepted with `no-material-worsening / stop-success`;
+all five direct production campaigns and the final 914-task combined analysis
+are checksum-valid; the later two-side-SiPM request is a separate extension
 Study preset: `steel-module-scan-v1`
 Last updated: 2026-07-21
 
@@ -756,6 +756,122 @@ standardized-response, and primary-contrast figures. The analysis and plotter
 are read-only with respect to campaigns and never contact Slurm or Geant4.
 Actual numerical conclusions and the final claim boundary are recorded only
 after the OSC analysis and figure checksums pass.
+
+### SMS-023 — Final combined review records stop-success
+
+The checksum-valid final analysis combined all five direct campaigns without
+adding pilot events or generating new Geant4 work. The accepted sample is
+exactly 914 tasks, 228,500 events, and all 18 originally specified
+layout/thickness configurations. The analysis used 10,000 independent-event
+bootstrap resamples with seed `20260715` and equal one-third layout-stratum
+weights for pooled production.
+
+The four precommitted `24 mm / 4 mm` primary contrasts are:
+
+| Primary contrast | Ratio | Bootstrap 95% interval | Relative half-width |
+| --- | ---: | ---: | ---: |
+| Pooled scintillation production | `5.45937` | `[5.21503, 5.71827]` | `4.61%` |
+| Back-center observed net | `1.39346` | `[1.28821, 1.50850]` | `7.90%` |
+| Edge-center observed net | `2.39266` | `[2.17374, 2.63593]` | `9.66%` |
+| Back-four aggregate observed net | `3.55943` | `[3.26221, 3.89536]` | `8.89%` |
+
+All four intervals exclude unity and all four relative half-widths satisfy the
+accepted 10% target. The production gain therefore outweighs the optical
+collection loss for every originally specified layout over the precommitted
+endpoint comparison. Independent archive review also found no checksum,
+event-count, seed-identity, sensor-sum, or point-estimate discrepancy, and the
+maximum leave-one-250-event-block-out shifts remained small.
+
+The final human decision is:
+
+```text
+tail_disposition     no-material-worsening
+progression_decision stop-success
+additional_events    none for the original three-layout endpoint question
+```
+
+This closes `steel-module-scan-v1`; it does not claim transverse absorber
+convergence, detector PDE/electronics response, full calorimeter resolution,
+or universality beyond the fixed 1 GeV centered-neutron model. The professor
+reviewed the result and requested a later fourth arrangement, described in
+`SteelModuleScan.md` as “2 SiPM on the side.” That request is a new layout
+extension rather than a reason to reopen this accepted stop decision.
+
+### SMS-024 — Accepted two-SiPM side-layout extension
+
+Interpret the later “2 SiPM on the side” request as two sensors on the same
+existing `+X` side face. In face-local coordinates for `+X`, where `u = y` and
+`v = z`, their centers are:
+
+```text
+sensor 0: (u, v) = (-25, 0) mm
+sensor 1: (u, v) = (+25, 0) mm
+```
+
+The layout identity is `edge-two`. It reuses the accepted `2.4 x 2.4 x 0.5 mm`
+SiPM proxy, undimpled zero-gap coupling model, and all source, tile, steel, and
+optical-surface settings from the completed study. Copies 0 and 1 carry the
+two sensor counts; copies 2 and 3 remain zero, and the aggregate count must
+equal the sum of the two active copies. This convention fits all six accepted
+tile thicknesses and is directly comparable with the original centered `+X`
+single-SiPM layout.
+
+`edge-two` remains a **single-layer** extension. Repeat the same six tile
+thicknesses and plot its production, collection, and net-response curve beside
+the original `back-center`, `edge-center`, and `back-four` curves. It must not
+be conflated with the separate ten-layer longitudinal-stack study. The latter
+uses one selected, identical SiPM layout on every layer rather than mixing the
+four layouts or automatically selecting `edge-two`.
+
+### SMS-025 — Ten-layer edge-two longitudinal thickness study
+
+The professor's ten-layer request is a second, independent follow-up study.
+The earlier statement that a downstream-face SiPM necessarily prevents a
+zero-gap stack was too strong: a longitudinal sequence may explicitly include
+the sensor thickness, for example `[steel][tile][SiPM][steel]`. The accepted
+ten-layer layout nevertheless uses `edge-two`, whose two sensors sit outside
+the longitudinal material sequence on the `+X` side of every tile.
+
+Create a separate `steel-module-stack-v1` preset. Its scientific matrix is:
+
+```text
+6 uniform tile thicknesses x 1 SiPM layout = 6 stack configurations
+tile thickness = 4, 8, 12, 16, 20, or 24 mm
+layout         = edge-two on every tile
+per stack      = 10 steel slabs + 10 tiles + 20 SiPM proxies
+```
+
+Within one configuration, all ten tiles have the same selected thickness.
+Number layers `0...9` from upstream to downstream, retain the centered 1 GeV
+kinetic-energy neutron pencil beam, and repeat the `40 mm` SAE-304 steel plus
+tile sampling unit along `-Z`. There is no longitudinal air gap at the
+steel-to-tile or tile-to-next-steel boundaries. Both side sensors on every
+tile retain the SMS-024 local centers `(-25, 0)` and `(+25, 0) mm`.
+
+The primary output is the longitudinal, sensor-resolved optical response. For
+each layer `i` and local sensor `j`, retain at least:
+
+```text
+generated optical photons in tile i
+scintillation photons in tile i
+photons entering SiPM (i, j)
+collection(i, j) = sum[photons entering SiPM (i, j)]
+                   / sum[generated optical photons in tile i]
+net(i, j)        = sum[photons entering SiPM (i, j)] / incident neutrons
+```
+
+Also report the two-sensor aggregate for each layer and the full-stack total.
+Use ratio-of-sums collection estimates; when the generated-light denominator
+is zero, retain an explicit invalid flag rather than substituting zero. Stable
+identity is `global_sensor_copy = 2 * layer + local_sensor`, giving copies
+`0...19`. Preserve layer-resolved steel/tile energy deposition and charged
+entry information so that shower development can be distinguished from
+optical collection.
+
+The ten-layer runtime and deep-layer zero fractions are not inferred from the
+single-layer campaign. A small direct benchmark may determine task sizing,
+after which the six configurations run through the ordinary campaign route;
+no managed preflight or staged progression machinery is required.
 
 ## Current engineering state
 
