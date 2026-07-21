@@ -1,9 +1,8 @@
 # Steel Module Scan v1 — Decision Record and Implementation Contract
 
-Status: analysis-v2 and final BC-S4 cumulative evidence reviewed;
-fixed-reference absorber and production topology accepted; back-center endpoint
-chain completed with `no-material-worsening / stop-success`; `FIXED` remains
-authorized but unsubmitted
+Status: all five direct production campaigns completed and finalized;
+back-center endpoint chain closed with `no-material-worsening / stop-success`;
+final 914-task combined analysis pending
 Study preset: `steel-module-scan-v1`
 Last updated: 2026-07-21
 
@@ -719,12 +718,44 @@ array element may be retried through the ordinary checksum-bound retry path;
 the possibility of isolated task failure is not a reason to pre-split the
 campaign.
 
-Generation and check-only validation remain separate from submission. The
-direct campaign must reproduce the exact frozen FIXED task and seed mapping,
-bind the checksum-valid BC-S4 `stop-success / no-material-worsening` evidence,
-retain the fixed 500 mm absorber and unchanged runtime identity, and report
-exactly `592 total, 0 submitted, 0 complete` before the explicit submit command
-is made. Completion yields the full 914-task, 228,500-event production sample.
+### SMS-022 — Completed FIXED execution and final combined-analysis contract
+
+The direct FIXED campaign completed through the accepted ordinary route:
+
+| Execution quantity | Recorded value |
+| --- | --- |
+| Campaign | `sm-v1-production-fixed-direct-6d97109e0401` |
+| Slurm array | `50619224` |
+| Tasks / events | `592 / 148,000` |
+| Configurations | `16` |
+| Scheduler result | `592 COMPLETED / 0:0` |
+| Finalizer result | 592 selected and event-audited; 0 invalid results ignored |
+| Finalized checksum | `FINALIZED_CHECKSUM_EXIT=0` |
+
+Together with the four finalized back-center endpoint children, the complete
+production evidence is now exactly 914 tasks, 228,500 events, and all 18
+nominal layout/thickness configurations. No production scan remains pending.
+
+The final analyzer must read the five checksum-valid finalized campaigns
+without copying pilot events or creating new Geant4 work. It reconstructs the
+exact program-wide task, block, seed, ROOT, environment, and Slurm identities;
+rejects gaps, overlap, or duplicate seeds; and writes a new non-overwriting
+`direct-final-analysis` directory under the FIXED finalization.
+
+Final outputs contain all configuration curves required by SMS-013, the four
+precommitted SMS-016 primary `24/4` contrasts, causal-pathway and heavy-tail
+diagnostics, per-sensor response, within-layout thickness ratios, same-thickness
+layout ratios, and model-based standardized response clearly separated from
+direct observed net response. Because endpoint statistics differ by layout,
+pooled generated/scintillation production uses exactly equal `1/3` layout
+weights at every thickness. Event-count weighting is prohibited.
+
+An independent headless plotter reads only the checksum-valid core output and
+exports PNG/PDF production, collection, net-response, normalized-response,
+standardized-response, and primary-contrast figures. The analysis and plotter
+are read-only with respect to campaigns and never contact Slurm or Geant4.
+Actual numerical conclusions and the final claim boundary are recorded only
+after the OSC analysis and figure checksums pass.
 
 ## Current engineering state
 

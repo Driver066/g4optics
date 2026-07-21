@@ -670,3 +670,33 @@ primary contrast. It does not establish absorber-size independence,
 equivalence to the complete ePIC calorimeter, the intermediate-thickness curve,
 either other readout-layout curve, photoelectron/electronics response, or
 detector-model systematics.
+
+## 17. Completed FIXED execution and final-analysis handoff
+
+The separately authorized FIXED allocation subsequently ran as one ordinary
+array, without a preflight or planned subdivision:
+
+| Execution quantity | Recorded value |
+| --- | --- |
+| Campaign | `sm-v1-production-fixed-direct-6d97109e0401` |
+| Slurm array | `50619224` |
+| Tasks / events | `592 / 148,000` |
+| Scheduler result | `592 COMPLETED / 0:0` |
+| Finalizer result | 592 selected and event-audited; 0 invalid results ignored |
+| Finalized checksum | `FINALIZED_CHECKSUM_EXIT=0` |
+
+This completes data acquisition for the six thicknesses and three layouts.
+The five direct campaigns together contain exactly 914 independent 250-event
+blocks and 228,500 production events. The final read-only analyzer combines
+the FIXED configurations with the cumulative BC-S1 through BC-S4 endpoints,
+while retaining their independent campaign, task, seed, ROOT, and finalization
+identities.
+
+The final production curve contract follows SMS-013 and SMS-016. It keeps
+scintillation production, optical collection, and direct observed net response
+separate; preserves per-sensor and heavy-tail diagnostics; reports the four
+precommitted primary 24/4 contrasts; and gives each layout stratum exactly
+one-third weight in pooled production. The unequal 40,250/10,000/12,000 event
+endpoint samples must never be concatenated into an event-weighted pooled
+production mean. Static figures are derived only after core checksums pass.
+Neither the analyzer nor plotter submits work or creates Geant4 events.

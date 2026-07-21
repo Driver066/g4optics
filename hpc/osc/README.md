@@ -603,6 +603,39 @@ No preflight or planned subdivision is used. If isolated elements fail, use
 the ordinary retry-failed route for those elements rather than regenerating or
 splitting the campaign.
 
+The accepted FIXED array subsequently completed as job `50619224`: all 592
+array elements reported `COMPLETED / 0:0`, the ordinary finalizer selected and
+event-audited all 592 tasks, ignored zero invalid results, and the finalized
+checksum check returned zero. Combine it with the four finalized endpoint
+campaigns using the read-only final analyzer:
+
+```bash
+BCS1="$WORK/campaigns/steel-module-production-bc-s1-direct"
+BCS2="$WORK/campaigns/steel-module-production-bc-s2-direct"
+BCS3="$WORK/campaigns/steel-module-production-bc-s3-direct"
+BCS4="$WORK/campaigns/steel-module-production-bc-s4-direct"
+
+python3 hpc/osc/analyze_steel_module_direct_final.py \
+  --fixed-campaign-dir "$FIXED" \
+  --bc-s1-campaign-dir "$BCS1" \
+  --bc-s2-campaign-dir "$BCS2" \
+  --bc-s3-campaign-dir "$BCS3" \
+  --bc-s4-campaign-dir "$BCS4"
+
+FINAL_ANALYSIS="$FIXED/finalized/direct-final-analysis"
+python3 hpc/osc/plot_steel_module_direct_final.py \
+  --analysis-dir "$FINAL_ANALYSIS"
+```
+
+The core output is `direct-final-analysis`; the optional Matplotlib output is
+the sibling `direct-final-analysis-figures`. The analyzer verifies all five
+campaign/finalization/ROOT identities and the exact 914-task, 228,500-event,
+18-configuration matrix. In accordance with SMS-016, pooled production gives
+each layout stratum weight `1/3`; it never event-weights the unequal endpoint
+samples. It reports configuration, pathway, tail, per-sensor, pooled,
+standardized, thickness-ratio, layout-ratio, and four-primary-contrast tables.
+Neither entry point contacts Slurm or runs Geant4.
+
 ### Historical managed control-plane record
 
 The sections below preserve the earlier managed/preflight implementation for
