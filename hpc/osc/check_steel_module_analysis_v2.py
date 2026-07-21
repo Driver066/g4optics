@@ -805,6 +805,19 @@ def assert_plot_outputs(repo_root: Path, analysis_output: Path) -> None:
 
 
 def main() -> int:
+    missing_dependencies = [
+        name for name in ("numpy", "uproot") if importlib.util.find_spec(name) is None
+    ]
+    if missing_dependencies:
+        print(
+            "Cannot check steel-module analysis-v2: activate the analysis "
+            "environment with NumPy and uproot (missing: "
+            + ", ".join(missing_dependencies)
+            + ")",
+            file=sys.stderr,
+        )
+        return 2
+
     repo_root = Path(__file__).resolve().parents[2]
     analyzer_path = repo_root / "hpc/osc/analyze_steel_module_campaign_v2.py"
     if not analyzer_path.is_file():
@@ -923,7 +936,9 @@ def main() -> int:
         original_root = audited_root.read_bytes()
         audited_root.write_bytes(original_root + b"tampered\n")
         root_rejected = run(base_command, cwd=repo_root, expect_success=False)
-        assert "audited ROOT checksum mismatch" in root_rejected.stdout
+        assert "audited ROOT checksum mismatch" in root_rejected.stdout, (
+            root_rejected.stdout
+        )
         assert_no_partial_output(finalized)
         audited_root.write_bytes(original_root)
 

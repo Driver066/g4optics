@@ -286,9 +286,69 @@ fresh seeds, an immutable manifest, finalization/audit, cumulative analysis,
 and an explicit continue decision; `40,250` is a hard ceiling. The complete
 sizing formula, rounding arithmetic, stage totals, and stopping rules are in
 `docs/decisions/steel-module-analysis-v2-review-v1.md` and SMS-016 of
-`docs/decisions/steel-module-scan-v1.md`. Do not submit production until the
-staged generator and cumulative evidence workflow are implemented and
-validated.
+`docs/decisions/steel-module-scan-v1.md`.
+
+### Current direct BC-S1 production runbook
+
+The first production increment now uses the same ordinary campaign and Slurm
+array path that completed the 120-task convergence pilot. It deliberately has
+no held preflight, execution successor, readiness lock, intent journal, or
+separate control-plane authority. The only admitted production shape is exact:
+`4/24 mm back-center`, 16 independent 250-event blocks per endpoint, 32 tasks,
+8,000 events, and the 64 seeds already frozen in the accepted BC-S1 child.
+
+From a clean OSC checkout with the usual environment activated:
+
+```bash
+MANAGED="$WORK/campaigns/steel-module-production-bc-s1"
+DIRECT="$WORK/campaigns/steel-module-production-bc-s1-direct"
+FROZEN="$WORK/frozen-campaign-sources"
+
+python3 hpc/osc/generate_steel_module_direct_bc_s1_campaign.py \
+  --managed-child-dir "$MANAGED" \
+  --out-dir "$DIRECT"
+
+python3 hpc/osc/submit_steel_module_campaign.py \
+  --campaign-dir "$DIRECT" \
+  --project-root "$REPO" \
+  --g4-data-root "$DATA_ROOT" \
+  --check-only
+```
+
+The generator validates the historical BC-S1 binding and runtime artifacts,
+copies its exact tasks and seeds into a standard `campaign.json`, and refuses
+to overwrite an existing target. Check-only must report exactly `32 total, 0
+submitted, 0 complete`. It does not contact Slurm.
+
+After that output is reviewed, submit the array directly through the familiar
+wrapper (there is no separate preflight command):
+
+```bash
+python3 hpc/osc/submit_steel_module_campaign.py \
+  --campaign-dir "$DIRECT" \
+  --project-root "$REPO" \
+  --account PAS2524 \
+  --g4-data-root "$DATA_ROOT" \
+  --frozen-root "$FROZEN"
+```
+
+The wrapper still creates the standard immutable attempt record and frozen Git
+source used by the successful pilot. All other production shapes remain
+fail-closed. Once all 32 tasks finish, use the ordinary steel-module finalizer:
+
+```bash
+python3 hpc/osc/finalize_steel_module_campaign.py \
+  --campaign-dir "$DIRECT"
+```
+
+Do not submit `FIXED`, `BC-S2`, `BC-S3`, or `BC-S4` until this BC-S1 result is
+finalized and reviewed.
+
+### Historical managed control-plane record
+
+The sections below preserve the earlier managed/preflight implementation for
+provenance and incident interpretation. They are not the current BC-S1
+submission runbook.
 
 The accepted execution topology is one non-submittable 914-task parent
 production program plus five upfront-frozen incremental child campaigns:

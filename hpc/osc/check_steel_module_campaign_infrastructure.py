@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import csv
+import importlib.util
 import json
 import math
 import os
@@ -466,6 +467,19 @@ def finalize_fixture(
 
 
 def main() -> int:
+    missing_dependencies = [
+        name for name in ("numpy", "uproot") if importlib.util.find_spec(name) is None
+    ]
+    if missing_dependencies:
+        print(
+            "Cannot check steel-module campaign infrastructure: activate the "
+            "analysis environment with NumPy and uproot (missing: "
+            + ", ".join(missing_dependencies)
+            + ")",
+            file=sys.stderr,
+        )
+        return 2
+
     repo_root = Path(__file__).resolve().parents[2]
     ten_percent = analyzer.projection_requirement(
         point=2.0,
@@ -934,6 +948,10 @@ def main() -> int:
         cwd=repo_root,
     )
     run(
+        [sys.executable, "hpc/osc/check_steel_module_direct_bc_s1.py"],
+        cwd=repo_root,
+    )
+    run(
         [sys.executable, "hpc/osc/check_steel_module_analysis_v2.py"],
         cwd=repo_root,
     )
@@ -991,7 +1009,8 @@ def main() -> int:
     print(
         "steel-module campaign infrastructure: PASS "
         "(18-task smoke, 120-task frozen pilot, 914-task production program, "
-        "managed BC-S1 Phase-2A/2B, OSC-shaped incident fixture, "
+        "managed BC-S1 Phase-2A/2B, direct BC-S1 ordinary array, "
+        "OSC-shaped incident fixture, "
         "closed R2/v3/v4 plus failed/rejected/pre-workspace-R3 evidence, "
         "incident-bound v5 successor, Phase-2C twin and production-ready v6, "
         "GPFS-compatible portable-lock gate, "
