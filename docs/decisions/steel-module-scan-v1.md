@@ -923,6 +923,10 @@ production-standardized response may be reported as explicitly secondary
 diagnostics; they do not reopen the accepted original primary contrasts or
 automatically choose a detector layout.
 
+The completed single-layer campaign, combined analysis identities, local
+archive audit, accepted interpretation, and ten-layer resume boundary are
+frozen in `docs/decisions/steel-module-four-layout-result-v1.md`.
+
 ## Current engineering state
 
 The runner contract, three detector-layout identities, and independent
