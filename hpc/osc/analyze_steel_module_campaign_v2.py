@@ -521,7 +521,7 @@ def safe_divide(numerator: float, denominator: float) -> tuple[float, bool]:
 
 
 def sensor_count(layout: str) -> int:
-    return 4 if layout == "back-four" else 1
+    return v1.sensor_count(layout)
 
 
 def key_identity(key: ConfigurationKey) -> dict[str, object]:
@@ -596,12 +596,7 @@ def load_events(
                 f"event count mismatch for {logical_id}: "
                 f"{len(events)} != {expected_events}"
             )
-        if row["sipm_layout"] != "back-four" and any(
-            event.sensor1 or event.sensor2 or event.sensor3 for event in events
-        ):
-            raise ValueError(
-                f"single-SiPM layout has inactive sensor counts: {logical_id}"
-            )
+        v1.validate_active_sensor_columns(row["sipm_layout"], events, logical_id)
         key = v1.configuration_key(row)
         block = int(row["seed_block"])
         if block in blocks[key]:

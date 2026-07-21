@@ -216,10 +216,10 @@ def run_git(repo_root: Path, *args: str) -> str:
 
 
 def sensor_count(layout: str) -> int:
-    try:
-        return SENSOR_COUNTS[layout]
-    except KeyError as exc:
-        raise ValueError(f"unsupported SiPM layout: {layout}") from exc
+    count = v1.sensor_count(layout)
+    if SENSOR_COUNTS.get(layout) != count:
+        raise ValueError(f"four-layout sensor-count contract drifted for {layout}")
+    return count
 
 
 def expected_blocks(layout: str, thickness: int) -> set[int]:

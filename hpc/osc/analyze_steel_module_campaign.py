@@ -46,6 +46,12 @@ SENSOR_METRICS = tuple(f"sensor_{index}" for index in range(4))
 ALL_BOOTSTRAP_METRICS = (*COMPARISON_METRICS, *SENSOR_METRICS)
 PRECISION_TARGETS = (0.05, 0.10)
 PROJECTION_SAFETY_FACTOR = 1.25
+LAYOUT_SENSOR_COUNTS = {
+    "back-center": 1,
+    "edge-center": 1,
+    "edge-two": 2,
+    "back-four": 4,
+}
 
 ConfigurationKey = tuple[str, int, str, int, int, int]
 
@@ -182,6 +188,23 @@ class Event:
     @property
     def sensors(self) -> tuple[int, int, int, int]:
         return (self.sensor0, self.sensor1, self.sensor2, self.sensor3)
+
+
+def sensor_count(layout: str) -> int:
+    try:
+        return LAYOUT_SENSOR_COUNTS[layout]
+    except KeyError as exc:
+        raise ValueError(f"unsupported SiPM layout: {layout}") from exc
+
+
+def validate_active_sensor_columns(
+    layout: str, events: Sequence[Event], logical_id: str
+) -> None:
+    active_sensors = sensor_count(layout)
+    if any(any(event.sensors[active_sensors:]) for event in events):
+        raise ValueError(
+            f"{layout} layout has counts in inactive sensor columns: {logical_id}"
+        )
 
 
 @dataclass(frozen=True)
@@ -338,12 +361,7 @@ def load_events(
             raise ValueError(
                 f"event count mismatch for {logical_id}: {len(events)} != {expected_events}"
             )
-        if row["sipm_layout"] != "back-four" and any(
-            event.sensor1 or event.sensor2 or event.sensor3 for event in events
-        ):
-            raise ValueError(
-                f"single-SiPM layout has counts in inactive sensor columns: {logical_id}"
-            )
+        validate_active_sensor_columns(row["sipm_layout"], events, logical_id)
         key = configuration_key(row)
         groups[key].extend(events)
         block_counts[key] += 1

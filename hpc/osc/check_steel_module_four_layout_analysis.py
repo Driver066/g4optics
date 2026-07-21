@@ -37,6 +37,74 @@ def event(*, generated: int, sensors: tuple[int, int, int, int]) -> v1.Event:
     )
 
 
+def loader_sensor_admission_check(root: Path) -> None:
+    campaign = root / "loader-campaign"
+    fixtures = root / "loader-fixtures"
+    root_relative = "roots/edge-two.root"
+    root_path = campaign / root_relative
+    root_path.parent.mkdir(parents=True)
+    fixtures.mkdir()
+    root_path.write_bytes(b"edge-two-loader-fixture")
+
+    logical_id = "production-ledge-two-t04-a500-b000"
+    task = {
+        "logical_task_id": logical_id,
+        "root": root_relative,
+        "stage": "production",
+        "tile_thickness_mm": "4",
+        "sipm_layout": "edge-two",
+        "absorber_transverse_mm": "500",
+        "x_mm": "0",
+        "y_mm": "0",
+        "events": "1",
+        "seed_block": "0",
+    }
+    audited = {
+        logical_id: v1.AuditedRoot(
+            path=root_relative,
+            sha256=v1.sha256_file(root_path),
+            tile_thickness_mm=4,
+            sipm_layout="edge-two",
+            absorber_transverse_mm=500,
+        )
+    }
+
+    def write_event(sensors: tuple[int, int, int, int]) -> None:
+        values: dict[str, int] = {
+            "generated_optical_photons": 10,
+            "scintillation_photons": 10,
+            "sipm_detected_photons": sum(sensors),
+            "primary_neutron_elastic_count": 1,
+            "primary_neutron_inelastic_count": 0,
+            "primary_neutron_capture_count": 0,
+        }
+        values.update(dict(zip(v1.SIPM_SENSOR_FIELDS, sensors)))
+        four.write_csv(fixtures / f"{logical_id}.csv", v1.EVENT_FIELDS, [values])
+
+    write_event((2, 3, 0, 0))
+    loaded = v2.load_events(campaign, [task], fixtures, audited)
+    key = ("production", 4, "edge-two", 500, 0, 0)
+    assert loaded.groups[key][0].sensors == (2, 3, 0, 0)
+    assert v2.sensor_count("edge-two") == 2
+
+    write_event((2, 3, 1, 0))
+    try:
+        v2.load_events(campaign, [task], fixtures, audited)
+    except ValueError as exc:
+        assert "edge-two layout has counts in inactive sensor columns" in str(exc)
+    else:
+        raise AssertionError("edge-two sensor 2 was accepted as active")
+
+    try:
+        v1.validate_active_sensor_columns(
+            "edge-center", [event(generated=10, sensors=(2, 1, 0, 0))], logical_id
+        )
+    except ValueError as exc:
+        assert "edge-center layout has counts in inactive sensor columns" in str(exc)
+    else:
+        raise AssertionError("edge-center sensor 1 was accepted as active")
+
+
 def formal_shape() -> v2.LoadedEvents:
     original = original_check.formal_shape()
     groups = {key: list(events) for key, events in original.groups.items()}
@@ -186,6 +254,8 @@ def run_plotter(repo_root: Path, analysis: Path, figures: Path) -> None:
 
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[2]
+    with tempfile.TemporaryDirectory(prefix="steel-module-loader-admission-") as raw:
+        loader_sensor_admission_check(Path(raw))
     formal = formal_shape()
     four.validate_four_layout_shape(
         formal, total_tasks=four.TOTAL_TASKS, seed_count=2 * four.TOTAL_TASKS
