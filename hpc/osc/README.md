@@ -341,6 +341,26 @@ python3 hpc/osc/finalize_steel_module_campaign.py \
   --campaign-dir "$DIRECT"
 ```
 
+Run the generic campaign analysis for the production/collection/net
+decomposition, then the thin direct adapter for the predeclared 32-block LOO,
+heavy-tail, and pilot-to-production precision review:
+
+```bash
+python3 hpc/osc/analyze_steel_module_campaign.py \
+  --campaign-dir "$DIRECT" \
+  --production-block-events 250
+
+python3 hpc/osc/analyze_steel_module_direct_bc_s1.py \
+  --campaign-dir "$DIRECT" \
+  --pilot-campaign-dir "$CAMPAIGN"
+```
+
+The second command writes `finalized/direct-analysis` atomically and refuses
+overwrite. It performs no scheduler call and creates no Geant4 events,
+checkpoint, intent, readiness object, or automatic progression decision. The
+complete execution and interpretation record is
+`docs/decisions/steel-module-direct-bc-s1-execution-v1.md`.
+
 Do not submit `FIXED`, `BC-S2`, `BC-S3`, or `BC-S4` until this BC-S1 result is
 finalized and reviewed.
 
