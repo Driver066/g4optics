@@ -399,6 +399,25 @@ existing output directory. Stop unless check-only reports exactly `48 total,
 0 submitted, 0 complete` and 12,000 events. The later ordinary submission is a
 separate explicit action; there is no preflight.
 
+After the ordinary BC-S2 array and finalizer complete, analyze BC-S1 and BC-S2
+together with the cumulative direct adapter:
+
+```bash
+python3 hpc/osc/analyze_steel_module_direct_bc_s2.py \
+  --bc-s1-campaign-dir "$BCS1" \
+  --bc-s2-campaign-dir "$BCS2"
+```
+
+The adapter writes `BCS2/finalized/direct-cumulative-analysis` atomically. It
+requires exactly blocks `0-39`, 40 independent 250-event blocks and 10,000
+events at each endpoint, 80 tasks and 160 unique production seeds across the
+two campaigns. It reports cumulative generated/scintillation production,
+collection, observed net response, a 10,000-resample event-bootstrap interval,
+80 leave-one-block-out evaluations, and tail diagnostics for BC-S1, BC-S2 and
+their cumulative sample. The independent BC-S1-versus-BC-S2 comparison is a
+diagnostic, not an equivalence test. No scheduler action, Geant4 event,
+progression decision, or later child submission is created.
+
 ### Historical managed control-plane record
 
 The sections below preserve the earlier managed/preflight implementation for

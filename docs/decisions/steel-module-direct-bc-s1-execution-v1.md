@@ -1,8 +1,8 @@
 # Steel Module Direct BC-S1 Execution and Analysis Record
 
-Status: direct BC-S1 execution, finalization, and dedicated review completed;
-human tail disposition `no-material-worsening`; progression decision `continue`;
-direct BC-S2 campaign generation authorized but not scheduler submission
+Status: direct BC-S1 review completed with `no-material-worsening` and
+`continue`; direct BC-S2 execution and finalization completed; cumulative
+BC-S1+BC-S2 analysis pending execution
 
 Study preset: `steel-module-scan-v1`
 
@@ -308,7 +308,63 @@ writes a normal campaign with no preflight or scheduler action. Submission
 remains a separate explicit step after campaign check-only reports exactly 48
 tasks and 12,000 events.
 
-## 11. Claim boundary
+## 11. Actual BC-S2 execution and cumulative-analysis contract
+
+The accepted direct BC-S2 increment was generated, checked, submitted through
+the ordinary array route, and finalized successfully:
+
+| Identity | Recorded value |
+| --- | --- |
+| BC-S2 implementation commit | `8add11ffcb13edef63ca085ee91cfc1849b43820` |
+| Campaign | `sm-v1-production-bc-s2-direct-636265fe741b` |
+| OSC campaign directory | `$WORK/campaigns/steel-module-production-bc-s2-direct` |
+| Slurm array job | `50617964` |
+| Shape | `4/24 mm`, `back-center`, `500 mm` absorber, blocks `16-39` |
+| Tasks | `48` |
+| New events | `12,000` (`250` per task; `6,000` per endpoint) |
+| Completion | `48/48 COMPLETED`, exit `0:0` |
+| 4 mm task elapsed range | `1:10-2:18` |
+| 24 mm task elapsed range | `4:53-10:53` |
+| Finalization and integrated event audit | passed |
+| Invalid attempt results ignored | `0` |
+| Finalized checksum verification | exit `0` |
+
+Together, BC-S1 and BC-S2 now provide blocks `0-39`, 40 blocks and 10,000
+production events per endpoint, 80 tasks and 20,000 endpoint events total. The
+sealed pilot remains a historical precision/tail baseline and is not pooled
+into this production estimate.
+
+The cumulative analysis command is:
+
+```bash
+BCS1="$WORK/campaigns/steel-module-production-bc-s1-direct"
+BCS2="$WORK/campaigns/steel-module-production-bc-s2-direct"
+
+python3 hpc/osc/analyze_steel_module_direct_bc_s2.py \
+  --bc-s1-campaign-dir "$BCS1" \
+  --bc-s2-campaign-dir "$BCS2"
+```
+
+It writes `BCS2/finalized/direct-cumulative-analysis` without overwrite and
+records:
+
+- cumulative endpoint estimates and generated/scintillation production,
+  collection, and observed-net `24/4` decomposition;
+- a pinned 10,000-resample event bootstrap and 95% percentile interval;
+- exactly 80 leave-one-250-event-block-out records over both endpoints;
+- zero fractions, quantiles, top-1%/top-5% concentration and maximum-event
+  provenance separately for BC-S1, BC-S2 and the cumulative sample;
+- independent-increment BC-S2-versus-BC-S1 consistency diagnostics, explicitly
+  labeled as not being an equivalence test and not controlling progression;
+- the precision trajectory, numeric review choices, input/analyzer provenance,
+  a human-readable summary and complete checksums.
+
+This adapter reads only the two finalized ordinary campaigns. It does not
+contact Slurm, run Geant4, record the human tail decision, or authorize BC-S3.
+After it runs, the cumulative tail and block-stability evidence still requires
+human review before any next campaign is generated.
+
+## 12. Claim boundary
 
 The present evidence supports this scoped statement:
 
