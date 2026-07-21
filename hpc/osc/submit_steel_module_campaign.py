@@ -15,6 +15,9 @@ from generate_steel_module_direct_bc_s1_campaign import (
 from generate_steel_module_direct_bc_s2_campaign import (
     validate_direct_bc_s2_bundle,
 )
+from generate_steel_module_direct_bc_s3_campaign import (
+    validate_direct_bc_s3_bundle,
+)
 from record_steel_module_task_result import (
     integer_field,
     read_single_csv_row,
@@ -102,6 +105,8 @@ def reject_managed_production_route(argv: list[str]) -> None:
             validate_direct_bc_s1_bundle(bundle)
         elif child_id == "BC-S2":
             validate_direct_bc_s2_bundle(bundle)
+        elif child_id == "BC-S3":
+            validate_direct_bc_s3_bundle(bundle)
         else:
             raise ValueError(f"unsupported direct production child: {child_id!r}")
         return

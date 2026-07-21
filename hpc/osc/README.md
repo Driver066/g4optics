@@ -418,6 +418,40 @@ their cumulative sample. The independent BC-S1-versus-BC-S2 comparison is a
 diagnostic, not an equivalence test. No scheduler action, Geant4 event,
 progression decision, or later child submission is created.
 
+The completed cumulative review recorded `no-material-worsening` and selected
+`continue`: observed net `24/4 = 1.47459 [1.24635, 1.74560]`, relative
+half-width `16.93%`, maximum LOO shift `3.94%`, and continued narrowing. This
+makes only the separate direct BC-S3 increment eligible.
+
+### Direct BC-S3 campaign generation
+
+BC-S3 uses frozen production-program blocks `40-79`: 40 new 250-event blocks
+at each endpoint, or 80 tasks and 20,000 events. From a clean OSC checkout:
+
+```bash
+PROGRAM="$WORK/campaigns/steel-module-production-program-cbc03814"
+BCS2="$WORK/campaigns/steel-module-production-bc-s2-direct"
+BCS3="$WORK/campaigns/steel-module-production-bc-s3-direct"
+
+python3 hpc/osc/generate_steel_module_direct_bc_s3_campaign.py \
+  --program-dir "$PROGRAM" \
+  --bc-s2-campaign-dir "$BCS2" \
+  --out-dir "$BCS3"
+
+python3 hpc/osc/submit_steel_module_campaign.py \
+  --campaign-dir "$BCS3" \
+  --project-root "$REPO" \
+  --g4-data-root "$DATA_ROOT" \
+  --check-only
+```
+
+Generation verifies the frozen BC-S3 task/seed allocation, accepted BC-S2
+finalization and cumulative-analysis checksums, the exact reviewed numeric
+result, the `no-material-worsening / continue` decision, and unchanged runtime
+identity. It performs no scheduler action and refuses an existing target. Stop
+unless check-only reports exactly `80 total, 0 submitted, 0 complete` and
+20,000 events. BC-S4 remains unauthorized.
+
 ### Historical managed control-plane record
 
 The sections below preserve the earlier managed/preflight implementation for
