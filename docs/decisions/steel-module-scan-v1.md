@@ -887,6 +887,14 @@ single-layer campaign. A small direct benchmark may determine task sizing,
 after which the six configurations run through the ordinary campaign route;
 no managed preflight or staged progression machinery is required.
 
+The complete geometry, causal photon-attribution, ROOT evidence, bootstrap
+sizing, workload-cap, and direct execution contract is frozen in
+`docs/decisions/steel-module-stack-v1.md`. In particular, the primary
+per-layer numerator is restricted to photons created in the same tile as the
+destination sensor; all-origin counts and cross-layer transfer remain
+secondary diagnostics. The controlling 10% precision target applies to the
+two full-stack aggregate metrics, not independently to all twenty sensors.
+
 ### SMS-026 — Four-layout single-layer analysis semantics
 
 Analyze the completed single-layer `edge-two` follow-up together with the

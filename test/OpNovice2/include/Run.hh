@@ -42,10 +42,44 @@
 
 class G4ParticleDefinition;
 
+struct StackLayerEventRecord
+{
+  G4int generatedOptical = 0;
+  G4int cerenkov = 0;
+  G4int scintillation = 0;
+  std::array<G4int, 2> sensorAllOrigin = {0, 0};
+  std::array<G4int, 2> sensorLocalOrigin = {0, 0};
+  G4double steelEnergyDeposit = 0.;
+  G4int neutronElasticCount = 0;
+  G4int neutronInelasticCount = 0;
+  G4int neutronCaptureCount = 0;
+  G4int chargedEntryCount = 0;
+  G4double chargedEntryKineticEnergy = 0.;
+  G4int electronEntryCount = 0;
+  G4double electronEntryKineticEnergy = 0.;
+  G4int protonEntryCount = 0;
+  G4double protonEntryKineticEnergy = 0.;
+  G4int otherChargedEntryCount = 0;
+  G4double otherChargedEntryKineticEnergy = 0.;
+  G4bool primaryNeutronTileEntryValid = false;
+  G4ThreeVector primaryNeutronTileEntryPosition;
+  G4double tileEnergyDeposit = 0.;
+  G4double electronTileEnergyDeposit = 0.;
+  G4double protonTileEnergyDeposit = 0.;
+  G4double otherChargedTileEnergyDeposit = 0.;
+  G4double neutralTileEnergyDeposit = 0.;
+};
+
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 class Run : public G4Run
 {
   public:
+    static constexpr G4int kStackLayerCount = 10;
+    static constexpr G4int kStackSensorsPerLayer = 2;
+    static constexpr G4int kStackSensorCount =
+      kStackLayerCount * kStackSensorsPerLayer;
+    static constexpr G4int kUnknownOriginIndex = kStackLayerCount;
+
     Run();
     ~Run() override = default;
 
@@ -61,18 +95,29 @@ class Run : public G4Run
     void AddWLS2EmissionEnergy(G4double en) { fWLS2EmissionEnergy += en; }
 
     // number of particles
-    void AddCerenkov()
+    void AddCerenkov(G4int layer = -1)
     {
       fCerenkovCount += 1;
       fEventCerenkovCount += 1;
       fEventGeneratedOpticalCount += 1;
+      if (layer >= 0 && layer < kStackLayerCount) {
+        auto& record = fEventStackLayers[static_cast<std::size_t>(layer)];
+        record.cerenkov += 1;
+        record.generatedOptical += 1;
+      }
     }
-    void AddScintillation(const G4ThreeVector& creationPosition)
+    void AddScintillation(const G4ThreeVector& creationPosition,
+                          G4int layer = -1)
     {
       fScintCount += 1;
       fEventScintCount += 1;
       fEventGeneratedOpticalCount += 1;
       fEventScintPositionSum += creationPosition;
+      if (layer >= 0 && layer < kStackLayerCount) {
+        auto& record = fEventStackLayers[static_cast<std::size_t>(layer)];
+        record.scintillation += 1;
+        record.generatedOptical += 1;
+      }
     }
     void AddRayleigh() { fRayleighCount += 1; }
     void AddWLSAbsorption() { fWLSAbsorptionCount += 1; }
@@ -156,19 +201,25 @@ class Run : public G4Run
     void AddDecayBetaEnergy(G4double energy);
     void AddShootPosition(const G4ThreeVector& pos);
     void SetPrimaryHitPosition(const G4ThreeVector& pos);
-    void SetPrimaryNeutronTileEntry(const G4ThreeVector& pos);
+    void SetPrimaryNeutronTileEntry(const G4ThreeVector& pos, G4int layer = -1);
     void AddScintillationCentroid(const G4ThreeVector& pos);
-    void AddSteelEnergyDeposit(G4double energy);
-    void AddPrimaryNeutronElasticInteraction();
-    void AddPrimaryNeutronInelasticInteraction();
-    void AddPrimaryNeutronCaptureInteraction();
+    void AddSteelEnergyDeposit(G4double energy, G4int layer = -1);
+    void AddPrimaryNeutronElasticInteraction(G4int layer = -1);
+    void AddPrimaryNeutronInelasticInteraction(G4int layer = -1);
+    void AddPrimaryNeutronCaptureInteraction(G4int layer = -1);
     G4bool RecordChargedTileEntry(G4int trackID,
                                   G4int pdgEncoding,
                                   G4double charge,
-                                  G4double kineticEnergy);
+                                  G4double kineticEnergy,
+                                  G4int layer = -1);
     void AddTileEnergyDeposit(G4int pdgEncoding,
                               G4double charge,
-                              G4double energy);
+                              G4double energy,
+                              G4int layer = -1);
+
+    const StackLayerEventRecord& GetEventStackLayer(G4int layer) const;
+    G4int GetEventStackTransfer(G4int originLayer, G4int sensorCopy) const;
+    G4int GetEventUnknownOriginDetections() const;
 
     G4long GetGeneratedOpticalCount() const
     {
@@ -319,16 +370,7 @@ class Run : public G4Run
     G4double GetDecayBetaEnergyMax() const { return fDecayBetaEnergyMax; }
 
     // SiPM Detection
-    void AddSiPMDetection(G4int sensorIndex = 0)
-    {
-      fSiPMDetectionCount += 1;
-      fEventSiPMDetectionCount += 1;
-      if (sensorIndex >= 0 && sensorIndex < 4) {
-        const auto index = static_cast<std::size_t>(sensorIndex);
-        fSiPMDetectionCounts[index] += 1;
-        fEventSiPMDetectionCounts[index] += 1;
-      }
-    }
+    void AddSiPMDetection(G4int sensorIndex = 0, G4int originLayer = -1);
 
   private:
     // primary particle
@@ -386,7 +428,9 @@ class Run : public G4Run
     G4int fEventPrimaryNeutronElasticCount = 0;
     G4int fEventPrimaryNeutronInelasticCount = 0;
     G4int fEventPrimaryNeutronCaptureCount = 0;
-    std::unordered_set<G4int> fEventChargedTileEntryTrackIDs;
+    std::unordered_set<G4long> fEventChargedTileEntryTrackIDs;
+    std::array<std::unordered_set<G4int>, kStackLayerCount>
+      fEventStackChargedTileEntryTrackIDs;
     G4int fEventChargedTileEntryCount = 0;
     G4double fEventChargedTileEntryKineticEnergy = 0.;
     G4int fEventElectronTileEntryCount = 0;
@@ -402,6 +446,9 @@ class Run : public G4Run
     G4double fEventProtonTileEnergyDeposit = 0.;
     G4double fEventOtherChargedTileEnergyDeposit = 0.;
     G4double fEventNeutralTileEnergyDeposit = 0.;
+    std::array<StackLayerEventRecord, kStackLayerCount> fEventStackLayers;
+    std::array<std::array<G4int, kStackSensorCount>, kStackLayerCount + 1>
+      fEventStackTransfers = {};
     G4bool fEventStatisticsCommitted = false;
 
     struct EventMoments

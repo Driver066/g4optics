@@ -84,7 +84,7 @@ if [[ -n "${RN_CAMPAIGN_HOST_DIR:-}" ]]; then
   done
   campaign_host_dir="$(cd "${RN_CAMPAIGN_HOST_DIR}" && pwd -P)"
   case "${RN_TASK_RESULT_RECORDER}" in
-    record_realistic_neutron_task_result.py|record_steel_module_task_result.py)
+    record_realistic_neutron_task_result.py|record_steel_module_task_result.py|record_steel_module_stack_task_result.py)
       ;;
     *)
       echo "Unsupported formal task-result recorder: ${RN_TASK_RESULT_RECORDER}" >&2

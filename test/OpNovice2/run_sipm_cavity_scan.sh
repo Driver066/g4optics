@@ -200,7 +200,8 @@ Grid / beam options:
 
 Output / execution options:
   --study-preset PRESET              locked scientific preset;
-                                      realistic-neutron-v1 or steel-module-scan-v1
+                                      realistic-neutron-v1, steel-module-scan-v1,
+                                      or steel-module-stack-v1
   --tile-thickness-mm VALUE          preset-controlled tile thickness
   --sipm-layout LAYOUT               steel-module-scan-v1: back-center,
                                       edge-center, edge-two, or back-four
@@ -907,10 +908,10 @@ if [[ -z "${STUDY_PRESET}" ]]; then
   fi
 else
   case "${STUDY_PRESET}" in
-    realistic-neutron-v1|steel-module-scan-v1)
+    realistic-neutron-v1|steel-module-scan-v1|steel-module-stack-v1)
       ;;
     *)
-      echo "Unknown --study-preset: ${STUDY_PRESET}. Use realistic-neutron-v1 or steel-module-scan-v1." >&2
+      echo "Unknown --study-preset: ${STUDY_PRESET}. Use realistic-neutron-v1, steel-module-scan-v1, or steel-module-stack-v1." >&2
       exit 1
       ;;
   esac
@@ -976,7 +977,7 @@ else
         exit 1
         ;;
     esac
-  else
+  elif [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ]]; then
     case "${TILE_THICKNESS_MM}" in
       4|8|12|16|20|24)
         ;;
@@ -1001,6 +1002,28 @@ else
         exit 1
         ;;
     esac
+  else
+    case "${TILE_THICKNESS_MM}" in
+      4|8|12|16|20|24)
+        ;;
+      "")
+        echo "--study-preset steel-module-stack-v1 requires --tile-thickness-mm 4, 8, 12, 16, 20, or 24." >&2
+        exit 1
+        ;;
+      *)
+        echo "Invalid --tile-thickness-mm: ${TILE_THICKNESS_MM}. Use 4, 8, 12, 16, 20, or 24." >&2
+        exit 1
+        ;;
+    esac
+    if [[ -n "${SIPM_STUDY_LAYOUT}" ]]; then
+      echo "--study-preset steel-module-stack-v1 locks the layout to edge-two; do not pass --sipm-layout." >&2
+      exit 1
+    fi
+    if [[ -n "${ABSORBER_TRANSVERSE_MM}" ]]; then
+      echo "--study-preset steel-module-stack-v1 locks the steel transverse size to 500 mm; do not pass --absorber-transverse-mm." >&2
+      exit 1
+    fi
+    SIPM_STUDY_LAYOUT="edge-two"
   fi
 
   if [[ -z "${ABSORBER_TRANSVERSE_MM}" ]]; then
@@ -1027,7 +1050,7 @@ else
     DETECTOR_SIPM_LAYOUT="single"
     TANK_SIZE_OVERRIDE="50 50 ${TILE_THICKNESS_MM} mm"
     CUSTOM_BEAM_DIVERGENCE_MRAD="55"
-  else
+  elif [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ]]; then
     TANK_SIZE_OVERRIDE="100 100 ${TILE_THICKNESS_MM} mm"
     CUSTOM_BEAM_DIVERGENCE_MRAD=""
     case "${SIPM_STUDY_LAYOUT}" in
@@ -1052,6 +1075,12 @@ else
         SIPM_LOCAL_POSITION_OVERRIDE="0 0 0 mm"
         ;;
     esac
+  else
+    DETECTOR_SIPM_LAYOUT="edge-two"
+    SIPM_FACE_OVERRIDE="+X"
+    SIPM_LOCAL_POSITION_OVERRIDE="0 0 0 mm"
+    TANK_SIZE_OVERRIDE="100 100 ${TILE_THICKNESS_MM} mm"
+    CUSTOM_BEAM_DIVERGENCE_MRAD=""
   fi
 fi
 
@@ -1059,12 +1088,17 @@ IS_NEUTRON_STUDY_PRESET="false"
 RUN_CONFIG_SCHEMA_VERSION="opnovice2-run-config-v3"
 EVENT_SCHEMA_VERSION="opnovice2-scan-event-v2"
 if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ||
-      "${STUDY_PRESET}" == "steel-module-scan-v1" ]]; then
+      "${STUDY_PRESET}" == "steel-module-scan-v1" ||
+      "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
   IS_NEUTRON_STUDY_PRESET="true"
 fi
 if [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ]]; then
   RUN_CONFIG_SCHEMA_VERSION="opnovice2-run-config-v4"
   EVENT_SCHEMA_VERSION="opnovice2-scan-event-v3"
+fi
+if [[ "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
+  RUN_CONFIG_SCHEMA_VERSION="opnovice2-run-config-v5"
+  EVENT_SCHEMA_VERSION="opnovice2-stack-event-v1"
 fi
 
 if [[ -n "${RANDOM_SEED_1}" || -n "${RANDOM_SEED_2}" ]]; then
@@ -1096,7 +1130,8 @@ for campaign_value in \
 done
 if [[ "${campaign_metadata_count}" -ne 0 ]]; then
   if [[ "${STUDY_PRESET}" != "realistic-neutron-v1" &&
-        "${STUDY_PRESET}" != "steel-module-scan-v1" ]]; then
+        "${STUDY_PRESET}" != "steel-module-scan-v1" &&
+        "${STUDY_PRESET}" != "steel-module-stack-v1" ]]; then
     echo "Campaign provenance options require a supported neutron --study-preset." >&2
     exit 1
   fi
@@ -1245,16 +1280,17 @@ esac
 
 if [[ -n "${SOURCE_MODEL_OVERRIDE}" ]]; then
   case "${SOURCE_MODEL_OVERRIDE}" in
-    fixed-electron|sr90-spectrum|sr90-empirical|sr90-decay|realistic-neutron-v1|steel-module-scan-v1)
+    fixed-electron|sr90-spectrum|sr90-empirical|sr90-decay|realistic-neutron-v1|steel-module-scan-v1|steel-module-stack-v1)
       ;;
     *)
-      echo "Invalid --source-model: ${SOURCE_MODEL_OVERRIDE}. Use fixed-electron, sr90-spectrum, sr90-empirical, sr90-decay, realistic-neutron-v1, or steel-module-scan-v1." >&2
+      echo "Invalid --source-model: ${SOURCE_MODEL_OVERRIDE}. Use fixed-electron, sr90-spectrum, sr90-empirical, sr90-decay, realistic-neutron-v1, steel-module-scan-v1, or steel-module-stack-v1." >&2
       exit 1
       ;;
   esac
 fi
 if [[ ( "${SOURCE_MODEL_OVERRIDE}" == "realistic-neutron-v1" ||
-        "${SOURCE_MODEL_OVERRIDE}" == "steel-module-scan-v1" ) &&
+        "${SOURCE_MODEL_OVERRIDE}" == "steel-module-scan-v1" ||
+        "${SOURCE_MODEL_OVERRIDE}" == "steel-module-stack-v1" ) &&
       "${STUDY_PRESET}" != "${SOURCE_MODEL_OVERRIDE}" ]]; then
   echo "The ${SOURCE_MODEL_OVERRIDE} source model is available only through its matching --study-preset." >&2
   exit 1
@@ -2041,7 +2077,13 @@ infer_custom_beam_z() {
   fi
 
   thickness_grid="$(length_to_unit "${thickness_value}" "${thickness_unit}" "${GRID_UNIT}")"
-  if [[ "${IS_NEUTRON_STUDY_PRESET}" == "true" ]]; then
+  if [[ "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
+    offset_grid="$(length_to_unit "${ABSORBER_THICKNESS_MM}" "mm" "${GRID_UNIT}")"
+    awk -v t="${thickness_grid}" -v steel="${offset_grid}" \
+      -v clearance="$(length_to_unit "${SOURCE_CLEARANCE_MM}" "mm" "${GRID_UNIT}")" \
+      'BEGIN { printf "%.10g", 0.5 * 10 * (steel + t) + clearance }'
+    return
+  elif [[ "${IS_NEUTRON_STUDY_PRESET}" == "true" ]]; then
     offset_grid="$(length_to_unit "${ABSORBER_THICKNESS_MM}" "mm" "${GRID_UNIT}")"
     offset_grid="$(awk -v steel="${offset_grid}" -v clearance="$(length_to_unit "${SOURCE_CLEARANCE_MM}" "mm" "${GRID_UNIT}")" 'BEGIN { printf "%.10g", steel + clearance }')"
   else
@@ -2191,11 +2233,12 @@ if [[ "${IS_NEUTRON_STUDY_PRESET}" == "true" ]]; then
   x_max_mm="$(length_to_unit "${X_MAX_VALUE}" "${GRID_UNIT}" "mm")"
   y_min_mm="$(length_to_unit "${Y_MIN_VALUE}" "${GRID_UNIT}" "mm")"
   y_max_mm="$(length_to_unit "${Y_MAX_VALUE}" "${GRID_UNIT}" "mm")"
-  if [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ]] &&
+  if [[ ( "${STUDY_PRESET}" == "steel-module-scan-v1" ||
+          "${STUDY_PRESET}" == "steel-module-stack-v1" ) ]] &&
       ! awk -v xmin="${x_min_mm}" -v xmax="${x_max_mm}" \
         -v ymin="${y_min_mm}" -v ymax="${y_max_mm}" \
         'BEGIN { exit(xmin == 0 && xmax == 0 && ymin == 0 && ymax == 0 ? 0 : 1) }'; then
-    echo "--study-preset steel-module-scan-v1 currently locks the source to tile center x=0, y=0." >&2
+    echo "--study-preset ${STUDY_PRESET} locks the source to tile center x=0, y=0." >&2
     exit 1
   fi
   max_abs_coordinate_mm="$(awk \
@@ -2219,9 +2262,15 @@ if [[ "${IS_NEUTRON_STUDY_PRESET}" == "true" ]]; then
   fi
 
   source_z_mm="$(length_to_unit "${Z0}" "${GRID_UNIT}" "mm")"
-  absorber_upstream_z_mm="$(awk \
-    -v tile="${TILE_THICKNESS_MM}" -v steel="${ABSORBER_THICKNESS_MM}" \
-    'BEGIN { printf "%.10g", 0.5 * tile + steel }')"
+  if [[ "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
+    absorber_upstream_z_mm="$(awk \
+      -v tile="${TILE_THICKNESS_MM}" -v steel="${ABSORBER_THICKNESS_MM}" \
+      'BEGIN { printf "%.10g", 0.5 * 10 * (tile + steel) }')"
+  else
+    absorber_upstream_z_mm="$(awk \
+      -v tile="${TILE_THICKNESS_MM}" -v steel="${ABSORBER_THICKNESS_MM}" \
+      'BEGIN { printf "%.10g", 0.5 * tile + steel }')"
+  fi
   if ! awk -v source="${source_z_mm}" -v upstream="${absorber_upstream_z_mm}" \
       'BEGIN { exit(source > upstream && source < 500 ? 0 : 1) }'; then
     echo "Resolved neutron source z=${source_z_mm} mm must be strictly upstream of the steel at z=${absorber_upstream_z_mm} mm and inside the world." >&2
@@ -2280,7 +2329,7 @@ fi
 if [[ -n "${SOURCE_MODEL_OVERRIDE}" ]]; then
   source_model="${SOURCE_MODEL_OVERRIDE}"
   case "${source_model}" in
-    fixed-electron|sr90-spectrum|sr90-decay|realistic-neutron-v1|steel-module-scan-v1)
+    fixed-electron|sr90-spectrum|sr90-decay|realistic-neutron-v1|steel-module-scan-v1|steel-module-stack-v1)
       electron_energy_mode="fixed"
       ;;
     sr90-empirical)
@@ -2362,7 +2411,8 @@ if [[ "${source_model}" == "sr90-decay" ]]; then
   primary_energy="${SR90_DECAY_PRIMARY_ION} ion at rest"
 fi
 if [[ "${source_model}" == "realistic-neutron-v1" ||
-      "${source_model}" == "steel-module-scan-v1" ]]; then
+      "${source_model}" == "steel-module-scan-v1" ||
+      "${source_model}" == "steel-module-stack-v1" ]]; then
   if [[ "${SOURCE_MODE}" != "gps" ]]; then
     echo "--study-preset ${STUDY_PRESET} requires the GPS source." >&2
     exit 1
@@ -2578,7 +2628,8 @@ grease_transmission_csv=""
 grease_transmission_source=""
 grease_transmission_reference_thickness_mm=""
 grease_abs_length_derivation=""
-if [[ "${STUDY_PRESET}" == "steel-module-scan-v1" &&
+if [[ ( "${STUDY_PRESET}" == "steel-module-scan-v1" ||
+        "${STUDY_PRESET}" == "steel-module-stack-v1" ) &&
       "${OPTICAL_COUPLING}" == "none" ]]; then
   grease_geometry_model="undimpled-zero-gap-ej550-proxy"
   grease_geometry_caveat="No explicit grease solid; this intentionally reproduces the previous lab-optimization coupling proxy because the physical EJ-550 layer thickness is not fixed."
@@ -2967,7 +3018,8 @@ write_run_config() {
     printf '    "authoritative_source_quantity": '
     if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
       printf '"momentum"'
-    elif [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ]]; then
+    elif [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ||
+            "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
       printf '"kinetic_energy"'
     else
       printf 'null'
@@ -2981,14 +3033,16 @@ write_run_config() {
     fi
     printf ',\n'
     printf '    "authoritative_kinetic_energy_mev": '
-    if [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ]]; then
+    if [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ||
+          "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
       printf '%s' "${STEEL_MODULE_NEUTRON_KINETIC_ENERGY_MEV}"
     else
       printf 'null'
     fi
     printf ',\n'
     printf '    "derived_momentum_gev_c": '
-    if [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ]]; then
+    if [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ||
+          "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
       printf '%s' "${STEEL_MODULE_NEUTRON_MOMENTUM_GEV_C}"
     else
       printf 'null'
@@ -2997,7 +3051,8 @@ write_run_config() {
     printf '    "derived_total_energy_gev": '
     if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
       printf '%s' "${NEUTRON_TOTAL_ENERGY_GEV}"
-    elif [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ]]; then
+    elif [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ||
+            "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
       printf '%s' "${STEEL_MODULE_NEUTRON_TOTAL_ENERGY_GEV}"
     else
       printf 'null'
@@ -3006,7 +3061,8 @@ write_run_config() {
     printf '    "gps_kinetic_energy_mev": '
     if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
       printf '%s' "${NEUTRON_KINETIC_ENERGY_MEV}"
-    elif [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ]]; then
+    elif [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ||
+            "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
       printf '%s' "${STEEL_MODULE_NEUTRON_KINETIC_ENERGY_MEV}"
     else
       printf 'null'
@@ -3177,9 +3233,11 @@ write_run_config() {
     fi
     printf ',\n'
     printf '    "detector_layout": "%s",\n' "$(json_string "${DETECTOR_SIPM_LAYOUT}")"
-    printf '    "sensor_count": %s,\n' "$(if [[ "${DETECTOR_SIPM_LAYOUT}" == "back-four" ]]; then echo 4; elif [[ "${DETECTOR_SIPM_LAYOUT}" == "edge-two" ]]; then echo 2; else echo 1; fi)"
+    printf '    "sensor_count": %s,\n' "$(if [[ "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then echo 20; elif [[ "${DETECTOR_SIPM_LAYOUT}" == "back-four" ]]; then echo 4; elif [[ "${DETECTOR_SIPM_LAYOUT}" == "edge-two" ]]; then echo 2; else echo 1; fi)"
     printf '    "copy_number_order": '
-    if [[ "${DETECTOR_SIPM_LAYOUT}" == "back-four" ]]; then
+    if [[ "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
+      printf '[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]'
+    elif [[ "${DETECTOR_SIPM_LAYOUT}" == "back-four" ]]; then
       printf '[0, 1, 2, 3]'
     elif [[ "${DETECTOR_SIPM_LAYOUT}" == "edge-two" ]]; then
       printf '[0, 1]'
@@ -3211,6 +3269,41 @@ write_run_config() {
       printf '    "near_field_step": "%s %s"\n' "$(format_num "${GRID_STEP}")" "$(json_string "${GRID_UNIT}")"
     else
       printf '    "near_field_step": null\n'
+    fi
+    printf '  },\n'
+    printf '  "stack": {\n'
+    printf '    "enabled": %s,\n' "$(if [[ "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then echo true; else echo false; fi)"
+    if [[ "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
+      stack_length_mm="$(awk -v t="${TILE_THICKNESS_MM}" -v steel="${ABSORBER_THICKNESS_MM}" 'BEGIN { printf "%.10g", 10 * (steel + t) }')"
+      printf '    "schema_version": "steel-module-stack-v1",\n'
+      printf '    "layers": 10,\n'
+      printf '    "module_order": ["steel", "tile"],\n'
+      printf '    "layer_zero": "upstream",\n'
+      printf '    "axis": "-Z",\n'
+      printf '    "stack_length_mm": %s,\n' "${stack_length_mm}"
+      printf '    "source_z_mm": %s,\n' "$(format_num "${source_z_mm}")"
+      printf '    "steel_center_formula": "L/2-i*(40+t)-20 mm",\n'
+      printf '    "tile_center_formula": "L/2-i*(40+t)-40-t/2 mm",\n'
+      printf '    "layers_tree": "stack_layers",\n'
+      printf '    "transfers_tree": "stack_transfers",\n'
+      printf '    "optical_origin_rule": "first_tile_layer_with_WLS_inheritance",\n'
+      printf '    "primary_collection_definition": "same_origin_layer_to_same_destination_layer_ratio_of_sums",\n'
+      printf '    "unknown_origin_allowed_for_accepted_evidence": false\n'
+    else
+      printf '    "schema_version": null,\n'
+      printf '    "layers": 1,\n'
+      printf '    "module_order": null,\n'
+      printf '    "layer_zero": null,\n'
+      printf '    "axis": null,\n'
+      printf '    "stack_length_mm": null,\n'
+      printf '    "source_z_mm": null,\n'
+      printf '    "steel_center_formula": null,\n'
+      printf '    "tile_center_formula": null,\n'
+      printf '    "layers_tree": null,\n'
+      printf '    "transfers_tree": null,\n'
+      printf '    "optical_origin_rule": null,\n'
+      printf '    "primary_collection_definition": null,\n'
+      printf '    "unknown_origin_allowed_for_accepted_evidence": null\n'
     fi
     printf '  },\n'
     printf '  "optical_coupling": {\n'
@@ -3782,9 +3875,11 @@ tail -n +2 "${POINTS_CSV}" | while IFS=, read -r tag x y z unit macro root log; 
   )
 
   if [[ "${source_model}" == "realistic-neutron-v1" ||
-        "${source_model}" == "steel-module-scan-v1" ]]; then
+        "${source_model}" == "steel-module-scan-v1" ||
+        "${source_model}" == "steel-module-stack-v1" ]]; then
     neutron_energy_mev="${NEUTRON_KINETIC_ENERGY_MEV}"
-    if [[ "${source_model}" == "steel-module-scan-v1" ]]; then
+    if [[ "${source_model}" == "steel-module-scan-v1" ||
+          "${source_model}" == "steel-module-stack-v1" ]]; then
       neutron_energy_mev="${STEEL_MODULE_NEUTRON_KINETIC_ENERGY_MEV}"
     fi
     macro_args+=(
@@ -3845,6 +3940,14 @@ tail -n +2 "${POINTS_CSV}" | while IFS=, read -r tag x y z unit macro root log; 
       --set "/opnovice2/absorber/size=${ABSORBER_TRANSVERSE_MM} ${ABSORBER_TRANSVERSE_MM} ${ABSORBER_THICKNESS_MM} mm"
       --require "/opnovice2/absorber/enabled"
       --require "/opnovice2/absorber/size"
+    )
+  fi
+  if [[ "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
+    macro_args+=(
+      --set "/opnovice2/stack/enabled=true"
+      --set "/opnovice2/stack/layers=10"
+      --require "/opnovice2/stack/enabled"
+      --require "/opnovice2/stack/layers"
     )
   fi
   if [[ "${DIMPLE_ENABLED}" == "1" ]]; then

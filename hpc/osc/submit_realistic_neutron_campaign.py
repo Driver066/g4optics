@@ -200,9 +200,12 @@ def prepare_frozen_source(
     bundle_root = base / f"{bundle.campaign_id}-{bundle.git_commit[:12]}"
     source = bundle_root / "source"
     identity_path = bundle_root / "source-identity.json"
+    preset = bundle.manifest.get("study_preset")
     schema_prefix = (
-        "steel-module"
-        if bundle.manifest.get("study_preset") == "steel-module-scan-v1"
+        "steel-module-stack"
+        if preset == "steel-module-stack-v1"
+        else "steel-module"
+        if preset == "steel-module-scan-v1"
         else "realistic-neutron"
     )
     base_identity = {
@@ -523,9 +526,12 @@ def write_attempt_files(
         rows.append({"array_index": array_index, **asdict(task)})
     fields = ["array_index", *CampaignTask.__dataclass_fields__]
     write_tsv(task_map, fields, rows)
+    preset = bundle.manifest.get("study_preset")
     schema_prefix = (
-        "steel-module"
-        if bundle.manifest.get("study_preset") == "steel-module-scan-v1"
+        "steel-module-stack"
+        if preset == "steel-module-stack-v1"
+        else "steel-module"
+        if preset == "steel-module-scan-v1"
         else "realistic-neutron"
     )
     scan_args.write_text(
@@ -564,6 +570,32 @@ def validate_export_values(values: dict[str, str]) -> None:
     for key, value in values.items():
         if not value or any(char in value for char in (",", "\n", "\r")):
             raise ValueError(f"unsafe Slurm export value for {key}: {value!r}")
+
+
+def campaign_scheduler_args(bundle: CampaignBundle) -> list[str]:
+    if bundle.manifest.get("study_preset") != "steel-module-stack-v1":
+        return []
+    scheduler = bundle.manifest.get("scheduler_contract")
+    if not isinstance(scheduler, dict):
+        raise ValueError("stack campaign lacks scheduler contract")
+    expected = {
+        "nodes": 1,
+        "ntasks": 1,
+        "cpus_per_task": 1,
+        "time_seconds": 3600,
+    }
+    if any(scheduler.get(key) != value for key, value in expected.items()):
+        raise ValueError("stack scheduler contract mismatch")
+    memory_gib = scheduler.get("memory_gib")
+    if not isinstance(memory_gib, int) or memory_gib < 2:
+        raise ValueError("stack scheduler memory is invalid")
+    return [
+        "--time=01:00:00",
+        "--nodes=1",
+        "--ntasks=1",
+        "--cpus-per-task=1",
+        f"--mem={memory_gib}G",
+    ]
 
 
 def append_attempt_row(campaign_dir: Path, row: dict[str, object]) -> None:
@@ -609,9 +641,12 @@ def submit_attempt(
     attempt_id, attempt_dir, task_map, scan_args = write_attempt_files(
         bundle, tasks, mode, frozen_source
     )
+    preset = bundle.manifest.get("study_preset")
     task_result_recorder = (
-        "record_steel_module_task_result.py"
-        if bundle.manifest.get("study_preset") == "steel-module-scan-v1"
+        "record_steel_module_stack_task_result.py"
+        if preset == "steel-module-stack-v1"
+        else "record_steel_module_task_result.py"
+        if preset == "steel-module-scan-v1"
         else "record_realistic_neutron_task_result.py"
     )
     exports = {
@@ -642,6 +677,7 @@ def submit_attempt(
         "--parsable",
         "-A",
         args.account,
+        *campaign_scheduler_args(bundle),
         "--array",
         array_spec,
         "--output",

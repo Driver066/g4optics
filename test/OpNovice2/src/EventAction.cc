@@ -1,5 +1,6 @@
 #include "EventAction.hh"
 
+#include "DetectorConstruction.hh"
 #include "Run.hh"
 
 #include "G4AnalysisManager.hh"
@@ -135,6 +136,65 @@ void EventAction::EndOfEventAction(const G4Event* event)
   analysisMan->FillNtupleIColumn(46, run->GetEventSiPMDetectionCount(2));
   analysisMan->FillNtupleIColumn(47, run->GetEventSiPMDetectionCount(3));
   analysisMan->AddNtupleRow();
+
+  const auto detector = static_cast<const DetectorConstruction*>(
+    G4RunManager::GetRunManager()->GetUserDetectorConstruction());
+  if (detector && detector->IsStackEnabled()) {
+    for (G4int layer = 0; layer < Run::kStackLayerCount; ++layer) {
+      const auto& record = run->GetEventStackLayer(layer);
+      const G4bool entryValid = record.primaryNeutronTileEntryValid;
+      const auto& entry = record.primaryNeutronTileEntryPosition;
+      analysisMan->FillNtupleIColumn(2, 0, event->GetEventID());
+      analysisMan->FillNtupleIColumn(2, 1, layer);
+      analysisMan->FillNtupleIColumn(2, 2, record.generatedOptical);
+      analysisMan->FillNtupleIColumn(2, 3, record.scintillation);
+      analysisMan->FillNtupleIColumn(2, 4, record.cerenkov);
+      analysisMan->FillNtupleIColumn(2, 5, record.sensorAllOrigin[0]);
+      analysisMan->FillNtupleIColumn(2, 6, record.sensorAllOrigin[1]);
+      analysisMan->FillNtupleIColumn(2, 7, record.sensorLocalOrigin[0]);
+      analysisMan->FillNtupleIColumn(2, 8, record.sensorLocalOrigin[1]);
+      analysisMan->FillNtupleDColumn(2, 9, record.steelEnergyDeposit / MeV);
+      analysisMan->FillNtupleIColumn(2, 10, record.neutronElasticCount);
+      analysisMan->FillNtupleIColumn(2, 11, record.neutronInelasticCount);
+      analysisMan->FillNtupleIColumn(2, 12, record.neutronCaptureCount);
+      analysisMan->FillNtupleIColumn(2, 13, record.chargedEntryCount);
+      analysisMan->FillNtupleDColumn(2, 14, record.chargedEntryKineticEnergy / MeV);
+      analysisMan->FillNtupleIColumn(2, 15, record.electronEntryCount);
+      analysisMan->FillNtupleDColumn(2, 16, record.electronEntryKineticEnergy / MeV);
+      analysisMan->FillNtupleIColumn(2, 17, record.protonEntryCount);
+      analysisMan->FillNtupleDColumn(2, 18, record.protonEntryKineticEnergy / MeV);
+      analysisMan->FillNtupleIColumn(2, 19, record.otherChargedEntryCount);
+      analysisMan->FillNtupleDColumn(2, 20, record.otherChargedEntryKineticEnergy / MeV);
+      analysisMan->FillNtupleIColumn(2, 21, entryValid ? 1 : 0);
+      analysisMan->FillNtupleDColumn(2, 22, entryValid ? entry.x() / mm : missingPosition);
+      analysisMan->FillNtupleDColumn(2, 23, entryValid ? entry.y() / mm : missingPosition);
+      analysisMan->FillNtupleDColumn(2, 24, entryValid ? entry.z() / mm : missingPosition);
+      analysisMan->FillNtupleDColumn(2, 25, record.tileEnergyDeposit / MeV);
+      analysisMan->FillNtupleDColumn(2, 26, record.electronTileEnergyDeposit / MeV);
+      analysisMan->FillNtupleDColumn(2, 27, record.protonTileEnergyDeposit / MeV);
+      analysisMan->FillNtupleDColumn(2, 28, record.otherChargedTileEnergyDeposit / MeV);
+      analysisMan->FillNtupleDColumn(2, 29, record.neutralTileEnergyDeposit / MeV);
+      analysisMan->AddNtupleRow(2);
+    }
+
+    for (G4int origin = -1; origin < Run::kStackLayerCount; ++origin) {
+      for (G4int globalCopy = 0; globalCopy < Run::kStackSensorCount; ++globalCopy) {
+        const G4int detected = run->GetEventStackTransfer(origin, globalCopy);
+        if (detected <= 0) {
+          continue;
+        }
+        const G4int destination = globalCopy / Run::kStackSensorsPerLayer;
+        const G4int localSensor = globalCopy % Run::kStackSensorsPerLayer;
+        analysisMan->FillNtupleIColumn(3, 0, event->GetEventID());
+        analysisMan->FillNtupleIColumn(3, 1, origin);
+        analysisMan->FillNtupleIColumn(3, 2, destination);
+        analysisMan->FillNtupleIColumn(3, 3, localSensor);
+        analysisMan->FillNtupleIColumn(3, 4, globalCopy);
+        analysisMan->FillNtupleIColumn(3, 5, detected);
+        analysisMan->AddNtupleRow(3);
+      }
+    }
+  }
 
   run->CommitEventStatistics();
 }

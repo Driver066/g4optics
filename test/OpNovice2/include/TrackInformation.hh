@@ -60,6 +60,9 @@ class TrackInformation : public G4VUserTrackInformation
     inline G4int GetReflectionNumber() const { return fReflectionNumber; }
     inline void IncrementReflectionNumber() { ++fReflectionNumber; }
 
+    inline G4int GetOpticalOriginLayer() const { return fOpticalOriginLayer; }
+    inline void SetOpticalOriginLayer(G4int layer) { fOpticalOriginLayer = layer; }
+
     void SetDecayBetaSource(const G4String& parentName, const G4String& creatorProcess);
     void ClearDecayBetaSource();
     inline G4bool GetIsDecayBeta() const { return fIsDecayBeta; }
@@ -70,6 +73,7 @@ class TrackInformation : public G4VUserTrackInformation
     G4bool fFirstTankX = false;
     G4bool fIsDecayBeta = false;
     G4int fReflectionNumber = 0;
+    G4int fOpticalOriginLayer = -1;
     G4String fDecayBetaParentName;
     G4String fDecayBetaCreatorProcess;
 };

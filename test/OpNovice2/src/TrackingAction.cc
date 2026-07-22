@@ -30,10 +30,12 @@
 
 #include "TrackingAction.hh"
 
+#include "DetectorConstruction.hh"
 #include "Run.hh"
 #include "TrackInformation.hh"
 
 #include "G4AnalysisManager.hh"
+#include "G4OpticalPhoton.hh"
 #include "G4ParticleDefinition.hh"
 #include "G4RunManager.hh"
 #include "G4SystemOfUnits.hh"
@@ -54,6 +56,22 @@ void TrackingAction::PreUserTrackingAction(const G4Track* aTrack)
   }
 
   trackInfo->SetIsFirstTankX(true);
+
+  // Optical secondaries inherit their parent's TrackInformation.  Bind a
+  // previously unknown origin to the tile in which the optical track starts;
+  // WLS/WLS2 descendants retain the already-bound original tile layer.
+  if (aTrack->GetDefinition() == G4OpticalPhoton::OpticalPhotonDefinition()
+      && trackInfo->GetOpticalOriginLayer() < 0)
+  {
+    const auto detector = static_cast<const DetectorConstruction*>(
+      G4RunManager::GetRunManager()->GetUserDetectorConstruction());
+    if (detector) {
+      const G4int layer = detector->GetTileLayer(aTrack->GetVolume());
+      if (layer >= 0) {
+        trackInfo->SetOpticalOriginLayer(layer);
+      }
+    }
+  }
 
   const auto creator = aTrack->GetCreatorProcess();
   const G4String creatorName = creator ? creator->GetProcessName() : "";

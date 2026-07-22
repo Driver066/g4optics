@@ -980,6 +980,10 @@ def main() -> int:
         cwd=repo_root,
     )
     run(
+        [sys.executable, "hpc/osc/check_steel_module_stack_infrastructure.py"],
+        cwd=repo_root,
+    )
+    run(
         [sys.executable, "hpc/osc/check_steel_module_direct_analysis.py"],
         cwd=repo_root,
     )
@@ -1056,7 +1060,8 @@ def main() -> int:
         "managed BC-S1 Phase-2A/2B, direct BC-S1 through BC-S4 cumulative "
         "analysis and ordinary arrays plus one-array FIXED production and "
         "final 18-configuration curves plus the 240-task edge-two follow-up "
-        "and four-layout aggregate/per-sensor/per-area analysis, "
+        "and four-layout aggregate/per-sensor/per-area analysis, plus the "
+        "ten-layer stack geometry/causal-audit/direct-campaign/analysis route, "
         "OSC-shaped incident fixture, "
         "closed R2/v3/v4 plus failed/rejected/pre-workspace-R3 evidence, "
         "incident-bound v5 successor, Phase-2C twin and production-ready v6, "

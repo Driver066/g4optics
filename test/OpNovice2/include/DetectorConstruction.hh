@@ -58,6 +58,18 @@ class DetectorConstruction : public G4VUserDetectorConstruction
 
     G4VPhysicalVolume* GetTank() const { return fTank; }
     G4double GetTankXSize() const { return fTank_x; }
+    G4bool IsStackEnabled() const { return fStackEnabled; }
+    G4int GetStackLayerCount() const { return fStackEnabled ? fStackLayers : 1; }
+    G4double GetStackLength() const
+    {
+      return GetStackLayerCount() * (2. * fAbsorber_z + 2. * fTank_z);
+    }
+    G4double GetStackSteelCenterZ(G4int layer) const;
+    G4double GetStackTileCenterZ(G4int layer) const;
+    G4int GetTileLayer(const G4VPhysicalVolume* volume) const;
+    G4int GetAbsorberLayer(const G4VPhysicalVolume* volume) const;
+    G4int GetSensorLayer(G4int copyNumber) const;
+    G4int GetSensorLocalIndex(G4int copyNumber) const;
 
     G4VPhysicalVolume* GetAbsorber() const { return fAbsorber; }
     G4LogicalVolume* GetAbsorberLogicalVolume() const { return fAbsorber_LV; }
@@ -128,6 +140,8 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     void SetTankSizePreset(const G4String& preset);
     void SetAbsorberEnabled(G4bool enabled);
     void SetAbsorberSize(const G4ThreeVector& fullSize);
+    void SetStackEnabled(G4bool enabled);
+    void SetStackLayers(G4int layers);
     void SetBottomCavityEnabled(G4bool enabled);
     void SetDimpleEnabled(G4bool enabled);
     void SetDimpleRadius(G4double radius);
@@ -148,6 +162,8 @@ class DetectorConstruction : public G4VUserDetectorConstruction
 
     G4VPhysicalVolume* fTank = nullptr;
     G4VPhysicalVolume* fAbsorber = nullptr;
+    std::vector<G4VPhysicalVolume*> fTanks;
+    std::vector<G4VPhysicalVolume*> fAbsorbers;
 
     G4double fTank_x = 5. * CLHEP::cm;
     G4double fTank_y = 5. * CLHEP::cm;
@@ -156,6 +172,8 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     G4double fAbsorber_x = 25. * CLHEP::cm;
     G4double fAbsorber_y = 25. * CLHEP::cm;
     G4double fAbsorber_z = 2. * CLHEP::cm;
+    G4bool fStackEnabled = false;
+    G4int fStackLayers = 10;
     G4bool fBottomCavityEnabled = false;
     G4bool fDimpleEnabled = false;
     G4double fDimpleRadius = 3. * CLHEP::mm;
@@ -253,6 +271,7 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     void ValidateDimpleConfiguration() const;
     void ValidateGreaseConfiguration() const;
     void ValidateAbsorberConfiguration() const;
+    void ValidateStackConfiguration() const;
     void ResetSurfaceMaterialPropertiesTable();
 };
 

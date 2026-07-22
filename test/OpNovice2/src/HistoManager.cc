@@ -196,6 +196,51 @@ void HistoManager::Book()
   analysisMan->CreateNtupleDColumn("global_time_ns");
   analysisMan->FinishNtuple();
 
+  // Stack-only event records.  These ntuples intentionally remain empty for
+  // the legacy single-layer presets, so the existing scan tree stays exactly
+  // backward compatible.
+  analysisMan->CreateNtuple("stack_layers", "Per-event longitudinal stack layer response");
+  analysisMan->CreateNtupleIColumn("event_id");
+  analysisMan->CreateNtupleIColumn("layer");
+  analysisMan->CreateNtupleIColumn("generated_optical_photons");
+  analysisMan->CreateNtupleIColumn("scintillation_photons");
+  analysisMan->CreateNtupleIColumn("cerenkov_photons");
+  analysisMan->CreateNtupleIColumn("sensor_0_all_origin_detected_photons");
+  analysisMan->CreateNtupleIColumn("sensor_1_all_origin_detected_photons");
+  analysisMan->CreateNtupleIColumn("sensor_0_local_origin_detected_photons");
+  analysisMan->CreateNtupleIColumn("sensor_1_local_origin_detected_photons");
+  analysisMan->CreateNtupleDColumn("steel_edep_mev");
+  analysisMan->CreateNtupleIColumn("primary_neutron_elastic_count");
+  analysisMan->CreateNtupleIColumn("primary_neutron_inelastic_count");
+  analysisMan->CreateNtupleIColumn("primary_neutron_capture_count");
+  analysisMan->CreateNtupleIColumn("charged_tile_entry_count");
+  analysisMan->CreateNtupleDColumn("charged_tile_entry_ke_mev");
+  analysisMan->CreateNtupleIColumn("electron_tile_entry_count");
+  analysisMan->CreateNtupleDColumn("electron_tile_entry_ke_mev");
+  analysisMan->CreateNtupleIColumn("proton_tile_entry_count");
+  analysisMan->CreateNtupleDColumn("proton_tile_entry_ke_mev");
+  analysisMan->CreateNtupleIColumn("other_charged_tile_entry_count");
+  analysisMan->CreateNtupleDColumn("other_charged_tile_entry_ke_mev");
+  analysisMan->CreateNtupleIColumn("primary_neutron_tile_entry_valid");
+  analysisMan->CreateNtupleDColumn("primary_neutron_tile_entry_x_mm");
+  analysisMan->CreateNtupleDColumn("primary_neutron_tile_entry_y_mm");
+  analysisMan->CreateNtupleDColumn("primary_neutron_tile_entry_z_mm");
+  analysisMan->CreateNtupleDColumn("tile_edep_mev");
+  analysisMan->CreateNtupleDColumn("electron_tile_edep_mev");
+  analysisMan->CreateNtupleDColumn("proton_tile_edep_mev");
+  analysisMan->CreateNtupleDColumn("other_charged_tile_edep_mev");
+  analysisMan->CreateNtupleDColumn("neutral_tile_edep_mev");
+  analysisMan->FinishNtuple();
+
+  analysisMan->CreateNtuple("stack_transfers", "Sparse optical origin-to-SiPM transfers");
+  analysisMan->CreateNtupleIColumn("event_id");
+  analysisMan->CreateNtupleIColumn("origin_layer");
+  analysisMan->CreateNtupleIColumn("destination_layer");
+  analysisMan->CreateNtupleIColumn("local_sensor");
+  analysisMan->CreateNtupleIColumn("global_copy");
+  analysisMan->CreateNtupleIColumn("detected_photons");
+  analysisMan->FinishNtuple();
+
   for (G4int i = 0; i < analysisMan->GetNofH1s(); ++i) {
     analysisMan->SetH1Activation(i, false);
   }

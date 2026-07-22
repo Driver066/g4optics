@@ -58,6 +58,13 @@ void Run::BeginEvent(G4int eventID)
   fEventScintCount = 0;
   fEventSiPMDetectionCount = 0;
   fEventSiPMDetectionCounts.fill(0);
+  fEventStackLayers.fill(StackLayerEventRecord{});
+  for (auto& origins : fEventStackTransfers) {
+    origins.fill(0);
+  }
+  for (auto& trackIDs : fEventStackChargedTileEntryTrackIDs) {
+    trackIDs.clear();
+  }
   fEventHitValid = false;
   fEventHitPosition = G4ThreeVector();
   fEventScintPositionSum = G4ThreeVector();
@@ -164,49 +171,87 @@ void Run::SetPrimaryHitPosition(const G4ThreeVector& pos)
 }
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
-void Run::SetPrimaryNeutronTileEntry(const G4ThreeVector& pos)
+void Run::SetPrimaryNeutronTileEntry(const G4ThreeVector& pos, G4int layer)
 {
-  if (fEventPrimaryNeutronTileEntryValid) {
-    return;
+  if (!fEventPrimaryNeutronTileEntryValid) {
+    fEventPrimaryNeutronTileEntryValid = true;
+    fEventPrimaryNeutronTileEntryPosition = pos;
   }
-  fEventPrimaryNeutronTileEntryValid = true;
-  fEventPrimaryNeutronTileEntryPosition = pos;
+  if (layer >= 0 && layer < kStackLayerCount) {
+    auto& record = fEventStackLayers[static_cast<std::size_t>(layer)];
+    if (!record.primaryNeutronTileEntryValid) {
+      record.primaryNeutronTileEntryValid = true;
+      record.primaryNeutronTileEntryPosition = pos;
+    }
+  }
 }
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
-void Run::AddSteelEnergyDeposit(G4double energy)
+void Run::AddSteelEnergyDeposit(G4double energy, G4int layer)
 {
   if (energy > 0.) {
     fEventSteelEnergyDeposit += energy;
+    if (layer >= 0 && layer < kStackLayerCount) {
+      fEventStackLayers[static_cast<std::size_t>(layer)].steelEnergyDeposit += energy;
+    }
   }
 }
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
-void Run::AddPrimaryNeutronElasticInteraction()
+void Run::AddPrimaryNeutronElasticInteraction(G4int layer)
 {
   fEventPrimaryNeutronElasticCount += 1;
+  if (layer >= 0 && layer < kStackLayerCount) {
+    fEventStackLayers[static_cast<std::size_t>(layer)].neutronElasticCount += 1;
+  }
 }
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
-void Run::AddPrimaryNeutronInelasticInteraction()
+void Run::AddPrimaryNeutronInelasticInteraction(G4int layer)
 {
   fEventPrimaryNeutronInelasticCount += 1;
+  if (layer >= 0 && layer < kStackLayerCount) {
+    fEventStackLayers[static_cast<std::size_t>(layer)].neutronInelasticCount += 1;
+  }
 }
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
-void Run::AddPrimaryNeutronCaptureInteraction()
+void Run::AddPrimaryNeutronCaptureInteraction(G4int layer)
 {
   fEventPrimaryNeutronCaptureCount += 1;
+  if (layer >= 0 && layer < kStackLayerCount) {
+    fEventStackLayers[static_cast<std::size_t>(layer)].neutronCaptureCount += 1;
+  }
 }
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 G4bool Run::RecordChargedTileEntry(G4int trackID,
                                    G4int pdgEncoding,
                                    G4double charge,
-                                   G4double kineticEnergy)
+                                   G4double kineticEnergy,
+                                   G4int layer)
 {
-  if (charge == 0. || !fEventChargedTileEntryTrackIDs.insert(trackID).second) {
+  if (charge == 0.) {
     return false;
+  }
+
+  const G4long globalKey = layer >= 0
+    ? (static_cast<G4long>(layer) << 32) | static_cast<unsigned int>(trackID)
+    : static_cast<G4long>(trackID);
+  if (!fEventChargedTileEntryTrackIDs.insert(globalKey).second) {
+    return false;
+  }
+
+  StackLayerEventRecord* layerRecord = nullptr;
+  if (layer >= 0 && layer < kStackLayerCount) {
+    auto& layerIDs =
+      fEventStackChargedTileEntryTrackIDs[static_cast<std::size_t>(layer)];
+    if (!layerIDs.insert(trackID).second) {
+      return false;
+    }
+    layerRecord = &fEventStackLayers[static_cast<std::size_t>(layer)];
+    layerRecord->chargedEntryCount += 1;
+    layerRecord->chargedEntryKineticEnergy += kineticEnergy;
   }
 
   fEventChargedTileEntryCount += 1;
@@ -216,14 +261,26 @@ G4bool Run::RecordChargedTileEntry(G4int trackID,
   if (absPdg == 11) {
     fEventElectronTileEntryCount += 1;
     fEventElectronTileEntryKineticEnergy += kineticEnergy;
+    if (layerRecord) {
+      layerRecord->electronEntryCount += 1;
+      layerRecord->electronEntryKineticEnergy += kineticEnergy;
+    }
   }
   else if (pdgEncoding == 2212) {
     fEventProtonTileEntryCount += 1;
     fEventProtonTileEntryKineticEnergy += kineticEnergy;
+    if (layerRecord) {
+      layerRecord->protonEntryCount += 1;
+      layerRecord->protonEntryKineticEnergy += kineticEnergy;
+    }
   }
   else {
     fEventOtherChargedTileEntryCount += 1;
     fEventOtherChargedTileEntryKineticEnergy += kineticEnergy;
+    if (layerRecord) {
+      layerRecord->otherChargedEntryCount += 1;
+      layerRecord->otherChargedEntryKineticEnergy += kineticEnergy;
+    }
   }
 
   return true;
@@ -232,26 +289,94 @@ G4bool Run::RecordChargedTileEntry(G4int trackID,
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 void Run::AddTileEnergyDeposit(G4int pdgEncoding,
                                G4double charge,
-                               G4double energy)
+                               G4double energy,
+                               G4int layer)
 {
   if (energy <= 0.) {
     return;
   }
 
   fEventTileEnergyDeposit += energy;
+  StackLayerEventRecord* layerRecord = nullptr;
+  if (layer >= 0 && layer < kStackLayerCount) {
+    layerRecord = &fEventStackLayers[static_cast<std::size_t>(layer)];
+    layerRecord->tileEnergyDeposit += energy;
+  }
   const G4int absPdg = std::abs(pdgEncoding);
   if (absPdg == 11) {
     fEventElectronTileEnergyDeposit += energy;
+    if (layerRecord) layerRecord->electronTileEnergyDeposit += energy;
   }
   else if (pdgEncoding == 2212) {
     fEventProtonTileEnergyDeposit += energy;
+    if (layerRecord) layerRecord->protonTileEnergyDeposit += energy;
   }
   else if (charge != 0.) {
     fEventOtherChargedTileEnergyDeposit += energy;
+    if (layerRecord) layerRecord->otherChargedTileEnergyDeposit += energy;
   }
   else {
     fEventNeutralTileEnergyDeposit += energy;
+    if (layerRecord) layerRecord->neutralTileEnergyDeposit += energy;
   }
+}
+
+void Run::AddSiPMDetection(G4int sensorIndex, G4int originLayer)
+{
+  fSiPMDetectionCount += 1;
+  fEventSiPMDetectionCount += 1;
+  if (sensorIndex >= 0 && sensorIndex < 4) {
+    const auto index = static_cast<std::size_t>(sensorIndex);
+    fSiPMDetectionCounts[index] += 1;
+    fEventSiPMDetectionCounts[index] += 1;
+  }
+  if (sensorIndex < 0 || sensorIndex >= kStackSensorCount) {
+    return;
+  }
+
+  const G4int destinationLayer = sensorIndex / kStackSensorsPerLayer;
+  const G4int localSensor = sensorIndex % kStackSensorsPerLayer;
+  auto& destination =
+    fEventStackLayers[static_cast<std::size_t>(destinationLayer)];
+  destination.sensorAllOrigin[static_cast<std::size_t>(localSensor)] += 1;
+  if (originLayer == destinationLayer) {
+    destination.sensorLocalOrigin[static_cast<std::size_t>(localSensor)] += 1;
+  }
+  const G4int originIndex = originLayer >= 0 && originLayer < kStackLayerCount
+    ? originLayer
+    : kUnknownOriginIndex;
+  fEventStackTransfers[static_cast<std::size_t>(originIndex)]
+                      [static_cast<std::size_t>(sensorIndex)] += 1;
+}
+
+const StackLayerEventRecord& Run::GetEventStackLayer(G4int layer) const
+{
+  static const StackLayerEventRecord empty;
+  return layer >= 0 && layer < kStackLayerCount
+    ? fEventStackLayers[static_cast<std::size_t>(layer)]
+    : empty;
+}
+
+G4int Run::GetEventStackTransfer(G4int originLayer, G4int sensorCopy) const
+{
+  const G4int originIndex = originLayer >= 0 && originLayer < kStackLayerCount
+    ? originLayer
+    : kUnknownOriginIndex;
+  if (sensorCopy < 0 || sensorCopy >= kStackSensorCount) {
+    return 0;
+  }
+  return fEventStackTransfers[static_cast<std::size_t>(originIndex)]
+                             [static_cast<std::size_t>(sensorCopy)];
+}
+
+G4int Run::GetEventUnknownOriginDetections() const
+{
+  G4int total = 0;
+  for (const auto value :
+       fEventStackTransfers[static_cast<std::size_t>(kUnknownOriginIndex)]) {
+    total += value;
+  }
+  return total;
 }
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......

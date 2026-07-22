@@ -734,6 +734,111 @@ The sibling `four-layout-analysis-figures` contains seven PNG/PDF figure
 pairs, figure provenance, and its own checksum manifest. Neither command
 contacts Slurm or runs Geant4.
 
+### Ten-layer stack follow-up
+
+`steel-module-stack-v1` is independent of the frozen single-layer evidence.
+It places ten contiguous `[40 mm steel][tile]` modules along `-Z`, with two
+edge SiPMs per layer and causal optical-origin bookkeeping.  It intentionally
+uses the same ordinary direct Slurm route as the successful single-layer
+production campaigns; there is no preflight or managed execution layer.
+
+Run the focused checker and prepare all six local visualization records first:
+
+```bash
+python3 hpc/osc/check_steel_module_stack_infrastructure.py
+
+cd test/OpNovice2
+python3 visualize_steel_module_stack_geometry.py --prepare-only
+# Omit --prepare-only to inspect interactively; review at least 4 and 24 mm.
+```
+
+Every formal stage is generated from a clean checkout and the same frozen OSC
+artifact triplet.  The geometry smoke is six one-event tasks:
+
+```bash
+python3 hpc/osc/generate_steel_module_stack_campaign.py \
+  --out-dir "$WORK/campaigns/steel-module-stack-geometry-smoke" \
+  --stage geometry-smoke --campaign-seed 20260722 \
+  --environment-mode osc-production --geant4-version 11.4.2 \
+  --image "$REPO/geant4.sif" --g4-data-manifest "$DATA_MANIFEST" \
+  --build-artifact "$STACK_EXECUTABLE"
+
+python3 hpc/osc/submit_steel_module_stack_campaign.py \
+  --campaign-dir "$WORK/campaigns/steel-module-stack-geometry-smoke" --check-only
+python3 hpc/osc/submit_steel_module_stack_campaign.py \
+  --campaign-dir "$WORK/campaigns/steel-module-stack-geometry-smoke" \
+  --project-root "$REPO" --account PAS2524 --g4-data-root "$DATA_ROOT" \
+  --frozen-root "$WORK/frozen-sources"
+
+python3 hpc/osc/finalize_steel_module_stack_campaign.py \
+  --campaign-dir "$WORK/campaigns/steel-module-stack-geometry-smoke"
+```
+
+Repeat with `--stage benchmark` for the fixed `4/24 mm x 25 event` benchmark.
+After finalization, capture `sacct` and freeze the selected block size and
+memory request:
+
+```bash
+python3 hpc/osc/summarize_steel_module_stack_benchmark.py \
+  --campaign-dir "$WORK/campaigns/steel-module-stack-benchmark"
+```
+
+The report selects the largest block in `250,100,50,25,10` satisfying the
+predeclared guarded 45-minute rule.  If it selects `B`, generate the fixed
+four-block-per-thickness pilot.  Repeat `--excluded-seeds` for every frozen
+pilot/FIXED/BC-S1...S4/edge-two registry or task index; this is how the formal
+campaign proves stack seeds do not reuse earlier production seeds.
+
+```bash
+python3 hpc/osc/generate_steel_module_stack_campaign.py \
+  --out-dir "$WORK/campaigns/steel-module-stack-pilot" \
+  --stage pilot --campaign-seed 20260723 --events "$B" \
+  --benchmark-report "$WORK/campaigns/steel-module-stack-benchmark/finalized/benchmark/benchmark_report.json" \
+  --excluded-seeds /path/to/frozen/task_index.tsv \
+  --environment-mode osc-production --geant4-version 11.4.2 \
+  --image "$REPO/geant4.sif" --g4-data-manifest "$DATA_MANIFEST" \
+  --build-artifact "$STACK_EXECUTABLE"
+```
+
+Submit and finalize with the same ordinary wrapper, then analyze:
+
+```bash
+python3 hpc/osc/analyze_steel_module_stack_campaign.py \
+  --pilot-campaign-dir "$WORK/campaigns/steel-module-stack-pilot"
+```
+
+Human review of `finalized/stack-analysis/production_sizing.json` is required.
+Only when `production_plan_permitted_for_human_review` is true may it generate
+the single additional production array:
+
+```bash
+python3 hpc/osc/generate_steel_module_stack_campaign.py \
+  --out-dir "$WORK/campaigns/steel-module-stack-production" \
+  --stage production --campaign-seed 20260724 \
+  --sizing-plan "$WORK/campaigns/steel-module-stack-pilot/finalized/stack-analysis/production_sizing.json" \
+  --excluded-seeds "$WORK/campaigns/steel-module-stack-pilot/tasks.tsv" \
+  --excluded-seeds "$WORK/campaigns/steel-module-stack-pilot/excluded_seed_registry.json" \
+  --environment-mode osc-production --geant4-version 11.4.2 \
+  --image "$REPO/geant4.sif" --g4-data-manifest "$DATA_MANIFEST" \
+  --build-artifact "$STACK_EXECUTABLE"
+```
+
+After the one production array is finalized, combine it with the pilot exactly
+once and render checksum-bound figures:
+
+```bash
+python3 hpc/osc/analyze_steel_module_stack_campaign.py \
+  --pilot-campaign-dir "$WORK/campaigns/steel-module-stack-pilot" \
+  --production-campaign-dir "$WORK/campaigns/steel-module-stack-production"
+python3 hpc/osc/plot_steel_module_stack_analysis.py \
+  --analysis-dir "$WORK/campaigns/steel-module-stack-production/finalized/stack-analysis"
+```
+
+The final analyzer reports achieved precision only.  It never generates a
+second production increment or selects a detector automatically.  The frozen
+scientific and statistical contract is in
+`docs/decisions/steel-module-stack-v1.md`.
+
 ### Historical managed control-plane record
 
 The sections below preserve the earlier managed/preflight implementation for

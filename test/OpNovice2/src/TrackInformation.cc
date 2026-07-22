@@ -55,6 +55,7 @@ TrackInformation::TrackInformation(const TrackInformation* aTrackInfo) : G4VUser
   fFirstTankX = aTrackInfo->fFirstTankX;
   fIsDecayBeta = aTrackInfo->fIsDecayBeta;
   fReflectionNumber = aTrackInfo->fReflectionNumber;
+  fOpticalOriginLayer = aTrackInfo->fOpticalOriginLayer;
   fDecayBetaParentName = aTrackInfo->fDecayBetaParentName;
   fDecayBetaCreatorProcess = aTrackInfo->fDecayBetaCreatorProcess;
 }
@@ -68,6 +69,7 @@ TrackInformation& TrackInformation::operator=(const TrackInformation& aTrackInfo
   fFirstTankX = aTrackInfo.fFirstTankX;
   fIsDecayBeta = aTrackInfo.fIsDecayBeta;
   fReflectionNumber = aTrackInfo.fReflectionNumber;
+  fOpticalOriginLayer = aTrackInfo.fOpticalOriginLayer;
   fDecayBetaParentName = aTrackInfo.fDecayBetaParentName;
   fDecayBetaCreatorProcess = aTrackInfo.fDecayBetaCreatorProcess;
 
@@ -79,6 +81,7 @@ void TrackInformation::SetSourceTrackInformation(const G4Track*)
 {
   fFirstTankX = true;
   fIsDecayBeta = false;
+  fOpticalOriginLayer = -1;
   fDecayBetaParentName = "";
   fDecayBetaCreatorProcess = "";
 }

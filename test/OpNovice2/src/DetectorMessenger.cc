@@ -157,6 +157,22 @@ DetectorMessenger::DetectorMessenger(DetectorConstruction* Det) : G4UImessenger(
   fAbsorberSizeCmd->AvailableForStates(G4State_PreInit);
   fAbsorberSizeCmd->SetToBeBroadcasted(false);
 
+  fStackEnabledCmd =
+    new G4UIcmdWithABool("/opnovice2/stack/enabled", this);
+  fStackEnabledCmd->SetGuidance(
+    "Enable the repeated steel/tile longitudinal stack geometry.");
+  fStackEnabledCmd->SetDefaultValue(false);
+  fStackEnabledCmd->AvailableForStates(G4State_PreInit);
+  fStackEnabledCmd->SetToBeBroadcasted(false);
+
+  fStackLayersCmd =
+    new G4UIcmdWithAnInteger("/opnovice2/stack/layers", this);
+  fStackLayersCmd->SetGuidance(
+    "Set the repeated longitudinal stack layer count; stack-v1 requires 10.");
+  fStackLayersCmd->SetParameterName("layers", false);
+  fStackLayersCmd->AvailableForStates(G4State_PreInit);
+  fStackLayersCmd->SetToBeBroadcasted(false);
+
   fDimpleEnabledCmd = new G4UIcmdWithABool("/opnovice2/dimple/enabled", this);
   fDimpleEnabledCmd->SetGuidance("Enable the Week 8.1 bottom-center hemispherical dimple.");
   fDimpleEnabledCmd->SetDefaultValue(false);
@@ -293,6 +309,8 @@ DetectorMessenger::~DetectorMessenger()
   delete fTankBottomCavityCmd;
   delete fAbsorberEnabledCmd;
   delete fAbsorberSizeCmd;
+  delete fStackEnabledCmd;
+  delete fStackLayersCmd;
   delete fDimpleEnabledCmd;
   delete fDimpleRadiusCmd;
   delete fDimpleModeCmd;
@@ -654,6 +672,12 @@ void DetectorMessenger::SetNewValue(G4UIcommand* command, G4String newValue)
   }
   else if (command == fAbsorberSizeCmd) {
     fDetector->SetAbsorberSize(fAbsorberSizeCmd->GetNew3VectorValue(newValue));
+  }
+  else if (command == fStackEnabledCmd) {
+    fDetector->SetStackEnabled(fStackEnabledCmd->GetNewBoolValue(newValue));
+  }
+  else if (command == fStackLayersCmd) {
+    fDetector->SetStackLayers(fStackLayersCmd->GetNewIntValue(newValue));
   }
   else if (command == fDimpleEnabledCmd) {
     fDetector->SetDimpleEnabled(fDimpleEnabledCmd->GetNewBoolValue(newValue));
