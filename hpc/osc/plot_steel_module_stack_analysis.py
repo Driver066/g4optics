@@ -170,14 +170,12 @@ def transfer_heatmaps(plt: object, analysis: Path, output: Path) -> list[str]:
     rows = read_csv(analysis / "transfer_matrix.csv")
     if len(rows) != 1200:
         raise ValueError("transfer heatmap requires 1,200 origin/destination/sensor rows")
-    fig, axes = plt.subplots(2, 3, figsize=(14, 8))
-    finite_values = [
-        number(row, "per_origin_generated_photon")
-        for row in rows
-        if np.isfinite(number(row, "per_origin_generated_photon"))
-    ]
-    maximum = max(finite_values) if finite_values and max(finite_values) > 0 else 1.0
-    for ax, thickness in zip(axes.flat, THICKNESSES):
+
+    # Build the two-SiPM matrices before choosing the shared color scale.  The
+    # previous implementation found the maximum from individual sensor rows
+    # and then plotted their sum, which saturated much of the diagonal.
+    matrices: dict[int, np.ndarray] = {}
+    for thickness in THICKNESSES:
         matrix = np.zeros((10, 10), dtype=float)
         for row in rows:
             if int(row["tile_thickness_mm"]) == thickness:
@@ -188,15 +186,50 @@ def transfer_heatmaps(plt: object, analysis: Path, output: Path) -> list[str]:
                     matrix[origin, destination] += value
                 else:
                     matrix[origin, destination] = np.nan
+        matrices[thickness] = matrix
+
+    finite_values = np.concatenate(
+        [matrix[np.isfinite(matrix)] for matrix in matrices.values()]
+    )
+    maximum = (
+        float(np.max(finite_values))
+        if finite_values.size and np.max(finite_values) > 0
+        else 1.0
+    )
+    off_diagonal_detected = sum(
+        int(row["detected_photons"])
+        for row in rows
+        if row["same_layer"].lower() != "true"
+    )
+
+    fig, axes = plt.subplots(2, 3, figsize=(14, 8))
+    image = None
+    for ax, thickness in zip(axes.flat, THICKNESSES):
+        matrix = matrices[thickness]
         image = ax.imshow(matrix, origin="upper", vmin=0, vmax=maximum, cmap="magma", aspect="equal")
         ax.set_title(f"{thickness} mm")
         ax.set_xlabel("Destination layer")
         ax.set_ylabel("Origin layer")
         ax.set_xticks(range(10))
         ax.set_yticks(range(10))
-    fig.colorbar(image, ax=axes.ravel().tolist(), label="Detected / generated at origin", shrink=0.78)
-    fig.suptitle("Cross-layer optical transfer (two destination SiPMs combined)")
-    fig.subplots_adjust(top=0.9, wspace=0.3, hspace=0.3)
+
+    if image is None:
+        raise ValueError("transfer heatmap did not create an image")
+    # Reserve a dedicated strip outside the six panels so the shared colorbar
+    # cannot cover the 12 mm and 24 mm matrices.
+    fig.subplots_adjust(left=0.06, right=0.87, bottom=0.08, top=0.84, wspace=0.3, hspace=0.34)
+    colorbar_ax = fig.add_axes((0.90, 0.17, 0.018, 0.60))
+    colorbar = fig.colorbar(image, cax=colorbar_ax)
+    colorbar.set_label("Detected photons / generated photon at origin")
+    fig.suptitle("Optical origin-to-destination response (two destination SiPMs combined)")
+    fig.text(
+        0.5,
+        0.895,
+        f"Off-diagonal cross-layer detected photons: {off_diagonal_detected:,}; diagonal cells are same-layer collection",
+        ha="center",
+        va="center",
+        fontsize=10,
+    )
     names = save(fig, output, "cross_layer_transfer_heatmap")
     plt.close(fig)
     return names
