@@ -266,6 +266,7 @@ def verify_controller_snapshot(batch):
     actual = {"steel_stack_v2/run.py": Path(__file__),
               "steel_stack_v2/acceptance.py": Path(sys.modules["acceptance"].__file__),
               "steel_stack_v2/model.py": Path(sys.modules["model"].__file__),
+              "steel_stack_v2/seed_registry.py": Path(sys.modules["seed_registry"].__file__),
               "local/g4env.py": Path(local.__file__)}
     for name, path in actual.items():
         if not (frozen / name).is_file() or sha(path) != sha(frozen / name):

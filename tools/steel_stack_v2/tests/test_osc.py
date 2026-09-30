@@ -207,6 +207,33 @@ class OfflineOSCTests(unittest.TestCase):
             self.assertEqual(args[args.index("--stack-photon-accounting") + 1], "on")
             self.assertNotIn("--source-mode", args)
 
+    def test_promoted_numerics_survive_validation_and_rendering(self):
+        plan = self.validate(optical_numerics="painted-corner-v2", corner_scale=16)
+        self.assertEqual(plan["optical_numerics"], {"profile":"painted-corner-v2","scale":16})
+        self.render(plan)
+        tasks = osc.read(self.output/"tasks.json")
+        for task in tasks:
+            self.assertEqual(task["config"]["optical_numerics"], plan["optical_numerics"])
+            args = task["scan_args"]
+            self.assertEqual(args[args.index("--optical-numerics")+1], "painted-corner-v2")
+            self.assertEqual(args[args.index("--optical-corner-scale")+1], "16")
+
+    def test_benchmark_is_distinct_from_scientific_samples(self):
+        science = self.validate()
+        bench = self.validate(purpose="benchmark", optical_numerics="painted-corner-v2", corner_scale=16)
+        self.assertTrue(all(t["stage"]=="benchmark" and t["purpose"]=="engineering-benchmark-not-scientific-evidence"
+                            for t in bench["tasks"]))
+        self.assertNotEqual(science["tasks"][0]["seed1"], bench["tasks"][0]["seed1"])
+        self.render(bench)
+        worker = (self.output/"array_task.py").read_text()
+        for field in ("launcher_elapsed_seconds", "child_max_rss_kib", "child_user_seconds"):
+            self.assertIn(field, worker)
+
+    def test_invalid_numerical_scale_is_rejected_before_render(self):
+        for profile, scale in (("legacy",16),("painted-corner-v2",0),("painted-corner-v2",128)):
+            with self.subTest(profile=profile, scale=scale), self.assertRaisesRegex(ValueError, "numerical profile"):
+                self.validate(optical_numerics=profile, corner_scale=scale)
+
     def test_render_never_overwrites_an_existing_plan(self):
         self.render()
         before = (self.output / "manifest.json").read_bytes()

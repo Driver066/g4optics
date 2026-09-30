@@ -145,6 +145,15 @@ ROOT 文件时间戳等序列化元数据不作字节比较。Serial 模式唯�
 
 ## 归档与 OSC 边界
 
+OSC 的清单生成可显式指定 `--optical-numerics painted-corner-v2
+--optical-corner-scale 16`；资源测试使用 `--purpose benchmark`，与科学样本的
+任务阶段和种子登记分开。worker 分别记录模拟启动器耗时、子进程 CPU 时间和
+峰值 RSS，运行结束仍须审计，不能把 exit 0 自动当成科学验收。
+
+`remote_build.py` 在独立 OSC 目录冻结干净 checkout、验证全部数据文件，
+复制并固定现有 SIF，从对应 x86_64 容器独立编译。它不运行事件或提交任务。
+普通 array 仍须显式给事件数、种子块、事件预算、账户、时限、内存和并发。
+
 每批记录实际源码字节、dirty 状态、构建、二进制、镜像、数据集、依赖、
 配置、种子、宏、日志、ROOT、实际物理状态、逐项审计及分析结果。
 运行使用冻结副本，`UPDATE_LATEST=0`，保留历史结果和默认二进制。

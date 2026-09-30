@@ -98,7 +98,7 @@ def registry(batch):
 
 def verify_controller(batch):
     frozen=batch/'candidate/source/tools/steel_stack_v2'
-    for name in ('corner_recovery.py','corner_audit.py','corner_cases.py','run.py','model.py','audit.py','acceptance.py'):
+    for name in ('corner_recovery.py','corner_audit.py','corner_cases.py','seed_registry.py','run.py','model.py','audit.py','acceptance.py'):
         require(sha(Path(__file__).parent/name)==sha(frozen/name),'Run the frozen campaign controller: '+name)
 
 def execute(batch,job_id=None):

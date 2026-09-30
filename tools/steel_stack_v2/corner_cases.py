@@ -2,7 +2,7 @@
 from __future__ import annotations
 import itertools
 import math
-from acceptance import seeds
+from seed_registry import seeds
 from model import make_configuration
 
 TOLERANCE_MM = 1.e-9

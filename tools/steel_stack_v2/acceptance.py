@@ -7,16 +7,12 @@ from pathlib import Path
 
 import numpy as np
 import uproot
+from seed_registry import seeds
 
 LAYOUTS = ("back-four", "back-two", "edge-two", "back-center")
 THICKNESSES = (4, 8, 12, 16, 20, 24)
 GAPS = (0.5, 1.0)
 STAGES = ("compatibility", "smoke", "noninterference", "repeat")
-
-
-def seeds(key: str) -> tuple[int, int]:
-    digest = hashlib.sha256(("steel-stack-v2-acceptance-20260929:" + key).encode()).digest()
-    return tuple(1 + int.from_bytes(digest[i:i + 8], "big") % 2147483398 for i in (0, 8))
 
 
 def config_id(layout, thickness, gap):

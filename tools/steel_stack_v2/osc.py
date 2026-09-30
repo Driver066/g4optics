@@ -20,7 +20,7 @@ import shutil
 import struct
 import tempfile
 
-from model import make_matrix, prepare_tasks, validate_tasks
+from model import make_matrix, make_configuration, prepare_tasks, validate_tasks
 
 SCHEMA = "steel-stack-v2-osc-render-v1"
 BUILD_SCHEMA = "steel-stack-v2-osc-build-v1"
@@ -117,7 +117,8 @@ def validate_source(manifest_path, source_root=None):
 
 def validate_inputs(source_manifest, build_receipt, *, matrix, gaps, events_per_task,
                     blocks, campaign_seed, total_event_budget, source_root=None,
-                    allow_mock=False):
+                    allow_mock=False, optical_numerics="legacy", corner_scale=0,
+                    purpose="science"):
     source_manifest = Path(source_manifest).resolve()
     build_receipt = Path(build_receipt).resolve()
     source, source_root = validate_source(source_manifest, source_root)
@@ -166,13 +167,19 @@ def validate_inputs(source_manifest, build_receipt, *, matrix, gaps, events_per_
     for key in ("executable", "sif", "data_root"):
         require(source_remote not in PurePosixPath(paths[key]).parents and paths[key] != paths["source_root"],
                 "Remote artifacts must be staged outside the frozen source tree")
-    tasks = prepare_tasks(make_matrix(matrix, gaps), events_per_task=events_per_task, blocks=blocks,
-                          campaign_seed=campaign_seed, total_event_budget=total_event_budget)
+    require(purpose in ("science", "benchmark"), "Purpose must be science or benchmark")
+    configs = [make_configuration(c["layout"], c["tile_thickness_mm"], c["gap_mm"],
+                                  optical_numerics, corner_scale) for c in make_matrix(matrix, gaps)]
+    tasks = prepare_tasks(configs, events_per_task=events_per_task, blocks=blocks,
+                          campaign_seed=campaign_seed, total_event_budget=total_event_budget, stage=purpose)
+    for task in tasks:
+        task["purpose"] = "engineering-benchmark-not-scientific-evidence" if purpose == "benchmark" else "science"
     summary = validate_tasks(tasks, total_event_budget=total_event_budget)
     return {
         "schema_version": SCHEMA, "state": "validated-not-submitted", "submitted": False,
         "remote_runtime_verified": False, "mock": build["mock"], "geant4_version": VERSION,
         "architecture": "x86_64", "run_manager": "Serial", "matrix": matrix,
+        "purpose": purpose, "optical_numerics": {"profile": optical_numerics, "scale": corner_scale},
         "gap_values_mm": sorted(float(g) for g in gaps), "events_per_task": events_per_task,
         "blocks": blocks, "campaign_seed": campaign_seed, "total_event_budget": total_event_budget,
         "summary": summary, "tasks": tasks, "source_files": source["source_files"],
@@ -205,7 +212,7 @@ def scan_args(task):
 # generated ordinary array; neither validate nor render imports/runs this code.
 WORKER = r'''#!/usr/bin/env python3
 """One manually scheduled array element; never submits or resubmits a job."""
-import hashlib, json, os, platform, re, shlex, struct, subprocess, sys, time
+import hashlib, json, os, platform, re, resource, shlex, struct, subprocess, sys, time
 from pathlib import Path
 
 def digest(path):
@@ -258,7 +265,9 @@ receipt = dict(schema_version='steel-stack-v2-osc-execution-v1', task_id=task['t
               manifest_sha256=sys.argv[2], events=task['events'], accepted=False,
               executable_sha256=m['executable_sha256'], source_manifest_sha256=m['source_manifest_sha256'],
               sif_sha256=m['sif_sha256'], dataset_receipt_sha256=m['dataset_receipt_sha256'],
-              status='running', scheduler_job=job, array_index=index)
+              status='running', scheduler_job=job, array_index=index,
+              purpose=task.get('purpose','science'), optical_numerics=task['config']['optical_numerics'],
+              hostname=platform.node())
 receipt_path = task_dir/'execution.json'
 
 def record():
@@ -284,9 +293,15 @@ command = ['apptainer','exec','--cleanenv',
            '--bind',str(Path(p['executable']).parent)+':/opt/frozen:ro',
            '--bind',str(task_dir)+':/outputs', p['sif'], 'bash','-c',shell,'stack-v2',*task['scan_args']]
 started = time.monotonic()
+usage_before = resource.getrusage(resource.RUSAGE_CHILDREN)
 try:
     with (task_dir/'launcher.log').open('x') as log:
         result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=False)
+    usage_after = resource.getrusage(resource.RUSAGE_CHILDREN)
+    receipt.update(launcher_elapsed_seconds=time.monotonic()-started,
+                   child_user_seconds=usage_after.ru_utime-usage_before.ru_utime,
+                   child_system_seconds=usage_after.ru_stime-usage_before.ru_stime,
+                   child_max_rss_kib=usage_after.ru_maxrss)
     receipt['exit_code'] = result.returncode
     check(result.returncode == 0, 'Simulation launcher failed')
     verify_inputs()
@@ -376,6 +391,9 @@ def main(argv=None):
     parser.add_argument("--campaign-seed", required=True, type=int)
     parser.add_argument("--total-event-budget", required=True, type=int)
     parser.add_argument("--allow-mock", action="store_true")
+    parser.add_argument("--optical-numerics", choices=("legacy", "painted-corner-v1", "painted-corner-v2"), default="legacy")
+    parser.add_argument("--optical-corner-scale", type=int, default=0)
+    parser.add_argument("--purpose", choices=("science", "benchmark"), default="science")
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--remote-bundle-root")
     parser.add_argument("--remote-output-root")
@@ -390,7 +408,8 @@ def main(argv=None):
                 parser.error("render requires explicit --"+name.replace("_", "-"))
     plan = validate_inputs(args.source_manifest, args.build_receipt, matrix=args.matrix, gaps=args.gap_mm,
                            events_per_task=args.events_per_task, blocks=args.blocks, campaign_seed=args.campaign_seed,
-                           total_event_budget=args.total_event_budget, source_root=args.source_root, allow_mock=args.allow_mock)
+                           total_event_budget=args.total_event_budget, source_root=args.source_root, allow_mock=args.allow_mock,
+                           optical_numerics=args.optical_numerics, corner_scale=args.optical_corner_scale, purpose=args.purpose)
     if args.command == "render":
         plan = render(plan, args.output_dir, remote_bundle_root=args.remote_bundle_root,
                       remote_output_root=args.remote_output_root, account=args.account, time_minutes=args.time_minutes,
