@@ -158,9 +158,10 @@ OSC 的清单生成可显式指定 `--optical-numerics painted-corner-v2
 配置、种子、宏、日志、ROOT、实际物理状态、逐项审计及分析结果。
 运行使用冻结副本，`UPDATE_LATEST=0`，保留历史结果和默认二进制。
 
-OSC 适配仅做校验、脚本生成与替身测试；工具不连接远端或自动调用 sbatch。
-未来必须在 OSC 对应架构构建并冻结程序，不能上传本地 ARM64 程序作为
-远端可执行文件。当前工程验收不代表 OSC 执行已验证。
+`osc.py` 只做校验、脚本生成与替身测试，不连接远端或自动调用 sbatch。
+OSC 须使用对应架构独立构建并冻结的程序，不能直接使用本地 ARM64 程序。
+2026-09-30 已完成远端 x86_64 数值资格验证及 400 事件资源 benchmark，
+见 `docs/decisions/steel-module-stack-v2-osc-benchmark.md`；科学扫描尚未开始。
 
 ## OSC 工程 benchmark 的结果审计
 
