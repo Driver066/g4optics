@@ -93,5 +93,5 @@ def table(rows):
                   *(format(v,'.17g') for v in (*r['position_mm'],*r['direction'],*r['polarization'],r['energy_ev']))])+"\n"
         for r in rows)
 
-def config(layout,scale):
-    return make_configuration(layout,24,.5,"legacy" if scale==0 else "painted-corner-v1",scale)
+def config(layout,scale,profile="painted-corner-v1"):
+    return make_configuration(layout,24,.5,"legacy" if scale==0 else profile,scale)

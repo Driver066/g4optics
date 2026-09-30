@@ -3,6 +3,7 @@
 #include "G4OpBoundaryProcess.hh"
 #include "G4OpticalPhysics.hh"
 #include "G4AffineTransform.hh"
+#include "CornerTransportation.hh"
 #include <map>
 class DetectorConstruction;
 class G4VPhysicalVolume;
@@ -23,6 +24,7 @@ class PaintedCornerBoundary final : public G4OpBoundaryProcess {
   G4int fEvent=-1;
   std::map<G4int, Pending> fPending;
   std::map<G4int, G4int> fLastCorrection;
+  CornerParticleChange fCornerChange;
 };
 
 class StackOpticalPhysics final : public G4OpticalPhysics {

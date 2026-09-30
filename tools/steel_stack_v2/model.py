@@ -45,7 +45,7 @@ def make_configuration(layout, thickness_mm, gap_mm, optical_numerics="legacy", 
     source_z = core_length / 2 + 1.5
     require(source_z < 500., "Source or stack would exceed the fixed world extent")
     require((optical_numerics == "legacy" and corner_scale == 0) or
-            (optical_numerics == "painted-corner-v1" and corner_scale in (16,32,64)), "Invalid numerical profile/scale")
+            (optical_numerics in ("painted-corner-v1","painted-corner-v2") and corner_scale in (16,32,64)), "Invalid numerical profile/scale")
     count = len(LOCAL_CENTRES[layout])
     return {"schema_version": SCHEMA_VERSION, "study_preset": STUDY_PRESET,
             "optical_numerics": {"profile":optical_numerics,"scale":corner_scale},

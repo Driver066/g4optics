@@ -37,10 +37,16 @@ def inspect_job(job):
         require(end['corrections']==len(cs),'Correction count differs')
         require(len({(r['track'],r['reflection_step']) for r in cs})==len(cs),'Repeated correction')
         for c in cs:
-            require(c['raw_status']==13 and c['step']==c['reflection_step']+1,'Correction is not next-step StepTooSmall')
+            immediate=identity['profile']=='painted-corner-v2'
+            if immediate:
+                require(c['raw_status']==7 and c['step']==c['reflection_step'],'Immediate correction is not its physical SpikeReflection')
+                require(c.get('transport_cache_verified') is True and c.get('physical_proposals_delegated_unchanged') is True,'Immediate correction lacks transport/physics verification')
+                require('raw_post' in c,'Original physical interface is missing')
+            else:
+                require(c['raw_status']==13 and c['step']==c['reflection_step']+1,'Correction is not next-step StepTooSmall')
             require(c['same_volume_navigator_verified'] is True and c['post']==c['next']==['Tank',c['tile']],'Relocation volume mismatch')
             require(c['faces'] in (3,5,6,7) and c['scale']==scale and scale>0,'Correction scope changed')
-            require(c['particle_change_modified_fields']==['position'],'Forbidden ParticleChange modification')
+            require(c['particle_change_modified_fields']==(['position','geometry_state'] if immediate else ['position']),'Forbidden ParticleChange modification')
             before=np.asarray(c['before_mm']);after=np.asarray(c['after_mm']);distance=float(np.linalg.norm(after-before))
             require(0<distance<=math.sqrt(3)*(scale+1)*TOLERANCE_MM,'Displacement exceeds bound')
             require(abs(distance-c['displacement_mm'])<1.e-20,'Reported displacement differs')
@@ -127,6 +133,11 @@ def audit(batch):
                     or current['physical']!=old['physical'] or current['sequence']!=old['sequence'] or current['terminal']!=old['terminal']):bad.append(key+': non-target physics/RNG changed')
             elif current['end']['painted_zero_step_escapes'] or current['end']['boundary_no_rindex']:
                 bad.append(key+': target still leaks or reaches NoRINDEX')
+            elif any(t[5][0] in ('World','SteelAbsorber','outside') for t in current['terminal']):
+                # With this fixture's opaque paint, a tile-born target photon
+                # cannot legally finish in air/steel. Catch escapes absorbed in
+                # air before they could trigger NoRINDEX at steel.
+                bad.append(key+': target terminates outside tile/SiPM despite opaque paint')
         candidates[scale]=dict(passed=not bad,failures=bad,non_target_controls=non_target)
     stability=[];selected=None
     for left,right in ((16,32),(32,64)):
@@ -135,7 +146,8 @@ def audit(batch):
         stability.append(dict(scales=[left,right],passed=passed,sequence_or_terminal_mismatches=mismatches))
         if passed and selected is None:selected=left
     if selected is None:failures.append('No stable passing adjacent scale pair; do not broaden the trigger or scale search')
-    return dict(passed=not failures,selected_scale=selected if not failures else None,
+    return dict(passed=not failures,audit_implementation_sha256=digest(Path(__file__)),
+        residual_target_world_or_steel_loss_checked=True,selected_scale=selected if not failures else None,
         status='eligible-for-full-engineering-acceptance' if not failures else 'promotion-failed-stop',
         failures=failures,legacy_neutron_reproduced=reproduced,captured_ray_reproduced=optical_reproduced,
         candidates=candidates,scale_stability=stability,jobs=report_jobs,

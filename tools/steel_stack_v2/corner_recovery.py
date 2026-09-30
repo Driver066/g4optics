@@ -22,7 +22,7 @@ read=infrastructure.read
 save=infrastructure.save
 local=infrastructure.local
 
-def prepare(batch):
+def prepare(batch,profile="painted-corner-v1"):
     require(not (batch/'corner-registry.json').exists(),'Registry already exists')
     batch.mkdir(parents=True,exist_ok=True)
     infrastructure.preserve_before(batch)
@@ -30,7 +30,10 @@ def prepare(batch):
     old_tasks={t['task_id']:t for t in read(OLD/'tasks.json')}
     old_manifest=read(OLD/'candidate/source-manifest.json')
     before=read(batch/'reference/source-manifest.json')
-    require(before['source_files']==old_manifest['source_files'],'Pre-repair frozen source differs from failed candidate')
+    infrastructure.verify_source(batch/'reference')
+    if profile=='painted-corner-v1':
+        require(before['source_files']==old_manifest['source_files'],'Pre-repair frozen source differs from failed candidate')
+    require(profile in ('painted-corner-v1','painted-corner-v2'),'Unknown candidate profile')
     refs={}
     for name in ('source-manifest.json','binary.json','environment.json'):
         refs[name]={'path':str(OLD/'candidate'/name),'sha256':sha(OLD/'candidate'/name)}
@@ -46,7 +49,7 @@ def prepare(batch):
             name=f'photons-s{scale:02d}-{layout}'
             source=single_file(old_tasks[f'smoke-{layout}-t24-g0500']['run_dir'],'macros/*.mac')
             job=dict(job_id=name,kind='photons',scale=scale,layout=layout,events=len(selected),
-                     config=config(layout,scale),independent_science_sample=False,timeout_seconds=900,
+                     config=config(layout,scale,profile),independent_science_sample=False,timeout_seconds=900,
                      template=str(source),template_sha256=sha(source))
             job['input_table']=str(batch/'inputs'/f'{name}.txt')
             Path(job['input_table']).parent.mkdir(parents=True,exist_ok=True)
@@ -55,7 +58,7 @@ def prepare(batch):
     source=single_file(old_failed['run_dir'],'macros/*.mac')
     for scale in SCALES:
         jobs.append(dict(job_id=f'neutrons-s{scale:02d}',kind='neutrons',scale=scale,layout='back-four',events=2,
-            config=config('back-four',scale),independent_science_sample=False,timeout_seconds=900,
+            config=config('back-four',scale,profile),independent_science_sample=False,timeout_seconds=900,
             template=str(source),template_sha256=sha(source),seed1=old_failed['seed1'],seed2=old_failed['seed2'],
             reference_run_dir=old_failed['run_dir']))
     # Ordered replay first, then the complete optical matrix. Promotion is a
@@ -64,7 +67,7 @@ def prepare(batch):
     for job in jobs:
         job['configuration_hash']=configuration_hash(job['config'])
         macro=Path(job['template']).read_text()
-        additions=f"/opnovice2/numerics/mode {'legacy' if job['scale']==0 else 'painted-corner-v1'}\n/opnovice2/numerics/cornerScale {job['scale']}\n"
+        additions=f"/opnovice2/numerics/mode {'legacy' if job['scale']==0 else profile}\n/opnovice2/numerics/cornerScale {job['scale']}\n"
         if job['kind']=='photons': additions+=f"/opnovice2/numerics/probeFile {local.cpath(job['input_table'])}\n"
         macro=macro.replace('/run/initialize',additions+'/run/initialize')
         macro=re.sub(r'^/run/beamOn .*$',f"/run/beamOn {job['events']}",macro,flags=re.M)
@@ -75,7 +78,7 @@ def prepare(batch):
         job.update(macro=str(path),macro_sha256=sha(path),run_dir=str(run_dir))
     assert sum(j['events'] for j in jobs if j['kind']=='photons')==10560
     assert sum(j['events'] for j in jobs if j['kind']=='neutrons')==8
-    save(batch/'corner-registry.json',dict(schema_version='painted-corner-validation-v1',jobs=jobs,
+    save(batch/'corner-registry.json',dict(schema_version='painted-corner-validation-v1',candidate_profile=profile,jobs=jobs,
         ray_input_sha256=sha(batch/'ray-inputs.json'),neutron_budget=130,photon_budget=10560,
         preflight_neutrons=8,remaining_acceptance_new_neutrons=122,timeout_seconds=900,
         scales=list(SCALES),surface_tolerance_mm=TOLERANCE_MM,promotion_rule='16/32 ->16; otherwise 32/64 ->32; else stop'))
@@ -145,9 +148,9 @@ def execute(batch,job_id=None):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('command',choices=['prepare','run','audit'])
-    p.add_argument('--batch-dir',required=True);p.add_argument('--job-id');a=p.parse_args()
+    p.add_argument('--batch-dir',required=True);p.add_argument('--job-id');p.add_argument('--profile',choices=['painted-corner-v1','painted-corner-v2'],default='painted-corner-v1');a=p.parse_args()
     batch=infrastructure.checked_batch(a.batch_dir)
-    if a.command=='prepare':prepare(batch)
+    if a.command=='prepare':prepare(batch,a.profile)
     elif a.command=='run':execute(batch,a.job_id)
     else:
         from corner_audit import audit

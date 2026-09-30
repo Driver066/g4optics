@@ -7,7 +7,12 @@
 opticalphoton 的 Scintillation。Cerenkov、Rayleigh、MieHG、OpWLS 仍遵循
 旧宏的关闭设置；不额外禁用任何过程。所有 SiPM 面进入均按旧模型计数。
 
-**2026-09-30 状态：棱边候选未通过晋级，尚无可用于科学扫描的新数值基线。**
+**2026-09-30 新进展：`painted-corner-v2` 已通过完整射线与尺度晋级测试，选择
+16τ 进入完整工程验收；尚未声明完整验收通过。** 见
+`docs/decisions/steel-module-stack-v2-immediate-validation.md`。原 legacy 与 v1
+入口继续保留，v1 的历史失败说明如下。
+
+**此前 `painted-corner-v1` 状态：棱边候选未通过晋级。**
 完整 10,560 个单光子事件和 8 个中子重放已完成。三个尺度都修复了原失败
 中子路径，但各有相同的 608 个靶向射线仍触发 `NoRINDEX`；其中包括反射后
 没有先返回 tile、直接沿 World 传播的路径。已停止后续 130 事件工程验收矩阵。
@@ -45,9 +50,9 @@ opticalphoton 的 Scintillation。Cerenkov、Rayleigh、MieHG、OpWLS 仍遵循
 环境中的旧二进制。`--stack-photon-accounting on|off` 默认 on；off 只用于
 同程序、同种子的无扰动验收，不关闭物理过程。
 
-数值接口 `--optical-numerics legacy|painted-corner-v1` 默认 `legacy`。
+数值接口 `--optical-numerics legacy|painted-corner-v1|painted-corner-v2` 默认 `legacy`。
 候选还要求显式 `--optical-corner-scale 16|32|64`，这些尺度仅用于工程诊断，
-没有任一尺度被选为正式值。v1 拒绝这些 v2 参数。配置哈希、宏、运行状态、
+painted-corner-v2 的 16τ 已晋级，完整验收仍待通过。stack-v1 拒绝这些 v2 参数。配置哈希、宏、运行状态、
 本地及未来 OSC 参数均携带数值身份；分析拒绝混合不同数值身份。
 
 Geant4 初始化前命令为 `/opnovice2/numerics/mode` 和

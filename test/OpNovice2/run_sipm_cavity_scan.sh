@@ -216,7 +216,7 @@ Output / execution options:
   --sipm-layout LAYOUT               steel-module-scan-v1: back-center,
                                       edge-center, edge-two, or back-four; v2 also back-two (no edge-center)
   --readout-gap-mm VALUE             stack-v2 only, required finite clearance >= 0.5 mm
-  --optical-numerics legacy|painted-corner-v1    v2 numerical identity; default legacy
+  --optical-numerics legacy|painted-corner-v1|painted-corner-v2    v2 numerical identity; default legacy
   --optical-corner-scale 16|32|64    diagnostic candidate scale, required with painted-corner-v1
   --stack-photon-accounting on|off    stack-v2 observer, default on; does not change transport
   --absorber-transverse-mm VALUE     neutron presets: 200, 300, or 500
@@ -954,8 +954,8 @@ if [[ "${STUDY_PRESET}" != "steel-module-stack-v2" &&
   exit 1
 fi
 case "${OPTICAL_NUMERICS}:${OPTICAL_CORNER_SCALE}" in
-  legacy:0|painted-corner-v1:16|painted-corner-v1:32|painted-corner-v1:64) ;;
-  *) echo "Use legacy with scale 0, or painted-corner-v1 with explicit diagnostic scale 16, 32 or 64." >&2; exit 1 ;;
+  legacy:0|painted-corner-v1:16|painted-corner-v1:32|painted-corner-v1:64|painted-corner-v2:16|painted-corner-v2:32|painted-corner-v2:64) ;;
+  *) echo "Use legacy with scale 0, or painted-corner-v1/v2 with explicit diagnostic scale 16, 32 or 64." >&2; exit 1 ;;
 esac
 if [[ -z "${STUDY_PRESET}" ]]; then
   if [[ -n "${TILE_THICKNESS_MM}" || -n "${ABSORBER_TRANSVERSE_MM}" ||

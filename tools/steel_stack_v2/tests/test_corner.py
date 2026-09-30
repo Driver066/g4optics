@@ -29,6 +29,8 @@ class CornerInterfaceTests(unittest.TestCase):
     def test_numerical_identity_cannot_collapse(self):
         configs=[make_configuration('back-four',24,.5,'legacy' if s==0 else 'painted-corner-v1',s) for s in (0,16,32,64)]
         self.assertEqual(len({configuration_hash(c) for c in configs}),4)
+        v2=make_configuration('back-four',24,.5,'painted-corner-v2',16)
+        self.assertNotIn(configuration_hash(v2),{configuration_hash(c) for c in configs})
         old=copy.deepcopy(configs[0]);old.pop('optical_numerics')
         validate_configuration(old)
         self.assertNotEqual(configuration_hash(old),configuration_hash(configs[0]))
@@ -36,8 +38,8 @@ class CornerInterfaceTests(unittest.TestCase):
             with self.assertRaises(ValueError):make_configuration('back-four',24,.5,mode,scale)
 
     def test_local_and_osc_arguments_keep_identity(self):
-        for scale in (0,16,32,64):
-            cfg=make_configuration('back-four',24,.5,'legacy' if scale==0 else 'painted-corner-v1',scale)
+        for scale,profile in ((0,'legacy'),(16,'painted-corner-v1'),(32,'painted-corner-v1'),(64,'painted-corner-v1'),(16,'painted-corner-v2'),(32,'painted-corner-v2'),(64,'painted-corner-v2')):
+            cfg=make_configuration('back-four',24,.5,profile,scale)
             task=dict(config=cfg,preset='steel-module-stack-v2',layout='back-four',tile_thickness_mm=24,
                       readout_gap_mm=.5,events=2,seed1=1,seed2=2,accounting=True)
             for args in (scan_args(task),osc_args(task)):

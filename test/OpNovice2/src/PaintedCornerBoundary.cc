@@ -10,6 +10,8 @@
 #include "G4LogicalVolume.hh"
 #include "G4Navigator.hh"
 #include "G4ParticleChange.hh"
+#include "G4OpticalPhoton.hh"
+#include "G4ProcessManager.hh"
 #include "G4Step.hh"
 #include "G4TouchableHistory.hh"
 #include "G4Track.hh"
@@ -113,6 +115,40 @@ G4VParticleChange* PaintedCornerBoundary::PostStepDoIt(const G4Track& track, con
   const auto tolerance = G4GeometryTolerance::GetInstance()->GetSurfaceTolerance();
   const auto faces=PaintedCornerRule::Faces({local.x(),local.y(),local.z()},
                                            {half.x(),half.y(),half.z()},tolerance);
+  if (faces && OpticalNumerics::Instance().Mode()=="painted-corner-v2") {
+    if (!change || (fLastCorrection.count(id) && fLastCorrection.at(id)==number)) {
+      OpticalNumerics::Fail("Missing stock ParticleChange or duplicate immediate correction"); return result;
+    }
+    const auto scale=OpticalNumerics::Instance().Scale();
+    const auto inset=PaintedCornerRule::Inset({local.x(),local.y(),local.z()},
+                                            {half.x(),half.y(),half.z()},tolerance,scale,faces);
+    const G4ThreeVector inside(inset[0],inset[1],inset[2]);
+    const auto position=transform.Inverse().TransformPoint(inside);
+    if (box->Inside(inside)!=kInside || box->DistanceToOut(inside)<=tolerance
+        || (position-*change->GetPosition()).mag()>std::sqrt(3.)*(scale+1.)*tolerance
+        || tile->GetLogicalVolume()->GetNoDaughters()!=0) {
+      OpticalNumerics::Fail("Immediate candidate is not strictly inside its unchanged tile"); return result;
+    }
+    auto* navigator=G4TransportationManager::GetTransportationManager()->GetNavigatorForTracking();
+    const auto direction=*change->GetMomentumDirection();
+    auto* foundVolume=navigator->LocateGlobalPointAndSetup(position,&direction,false,false);
+    const auto relocated=navigator->CreateTouchableHistoryHandle();
+    if (foundVolume!=tile || relocated->GetVolume()!=tile
+        || (navigator->GetCurrentLocalCoordinate()-inside).mag()>tolerance) {
+      OpticalNumerics::Fail("Immediate navigator relocation disagrees with the incident tile"); return result;
+    }
+    CornerTransportation* transport=nullptr;
+    auto* processes=G4OpticalPhoton::OpticalPhoton()->GetProcessManager()->GetProcessList();
+    for(int i=0;i<processes->entries();++i)
+      if (auto* candidate=dynamic_cast<CornerTransportation*>((*processes)[i])) transport=candidate;
+    if (!transport) { OpticalNumerics::Fail("Immediate correction lacks compatible optical Transportation"); return result; }
+    transport->AdoptRelocation(relocated,position);
+    change->ProposePosition(position); // Stock physical proposals are otherwise untouched.
+    fCornerChange.Prepare(track,step,result,relocated);
+    fLastCorrection[id]=number;
+    OpticalNumerics::Instance().ImmediateCorrection(track,step,position,faces,tolerance);
+    return &fCornerChange;
+  }
   if (faces) fPending.emplace(id, Pending{number,tile,transform,half,faces});
   return result;
 }

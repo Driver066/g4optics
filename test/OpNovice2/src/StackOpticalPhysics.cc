@@ -47,6 +47,7 @@
 #include "G4ParticleDefinition.hh"
 #include "G4ProcessManager.hh"
 #include "G4Scintillation.hh"
+#include <typeinfo>
 
 void StackOpticalPhysics::ConstructProcess()
 {
@@ -56,6 +57,21 @@ void StackOpticalPhysics::ConstructProcess()
   auto* params = G4OpticalParameters::Instance();
   auto* manager = G4OpticalPhoton::OpticalPhoton()->GetProcessManager();
   if (!manager) { OpticalNumerics::Fail("Optical photon has no process manager"); return; }
+  if (numerical.Mode()=="painted-corner-v2") {
+    G4Transportation* original=nullptr;
+    auto* list=manager->GetProcessList();
+    for (int i=0;i<manager->GetProcessListLength();++i)
+      if ((*list)[i]->GetProcessName()=="Transportation") original=dynamic_cast<G4Transportation*>((*list)[i]);
+    if (!original || typeid(*original)!=typeid(G4Transportation)
+        || !manager->GetProcessActivation(original)
+        || manager->GetProcessOrdering(original,idxAlongStep)!=0
+        || manager->GetProcessOrdering(original,idxPostStep)!=0) {
+      OpticalNumerics::Fail("Candidate requires the standard active optical Transportation and its original ordering"); return;
+    }
+    auto* transport=new CornerTransportation(original->GetVerboseLevel());
+    manager->RemoveProcess(original); // Shared with other particles: never delete it here.
+    manager->AddProcess(transport,-1,0,0);
+  }
   if (params->GetProcessActivation("OpAbsorption")) manager->AddDiscreteProcess(new G4OpAbsorption());
   if (params->GetProcessActivation("OpRayleigh")) manager->AddDiscreteProcess(new G4OpRayleigh());
   if (params->GetProcessActivation("OpMieHG")) manager->AddDiscreteProcess(new G4OpMieHG());
