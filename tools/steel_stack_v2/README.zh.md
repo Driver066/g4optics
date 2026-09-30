@@ -7,10 +7,22 @@
 opticalphoton 的 Scintillation。Cerenkov、Rayleigh、MieHG、OpWLS 仍遵循
 旧宏的关闭设置；不额外禁用任何过程。所有 SiPM 面进入均按旧模型计数。
 
-**2026-09-30 新进展：`painted-corner-v2` 已通过完整射线与尺度晋级测试，选择
-16τ 进入完整工程验收；尚未声明完整验收通过。** 见
-`docs/decisions/steel-module-stack-v2-immediate-validation.md`。原 legacy 与 v1
-入口继续保留，v1 的历史失败说明如下。
+**2026-09-30 已验收：`painted-corner-v2`，固定 16τ。** 完整射线晋级和
+130 事件工程矩阵均通过；本地 Geant4 11.4.2／ARM64／Serial 可使用此数值
+基线准备后续扫描。身份记录为 `accepted-numerical-baseline.json`，完整报告为
+`docs/decisions/steel-module-stack-v2-full-validation.md`。
+
+保留 `legacy` 默认值用于历史复查，已验收的旧默认二进制没有被替换。
+新扫描须显式选 `--optical-numerics painted-corner-v2 --optical-corner-scale 16`，
+并使用本批冻结的可执行文件：
+`outputs/steel_stack_v2/20260930-full-corner-acceptance-v2-s16-r2/candidate/build/OpNovice2`。
+该文件是 Linux ARM64 程序，放在已验收 Docker 中运行；不能直接作为 Mac
+程序或上传 OSC 执行。`run.py` 的旧默认准备流程仍生成 legacy 配置，不能把
+默认清单误当成新基线。新基线的 8/48 配置清单已保存在本批
+`pending-scans/`，均明确携带 v2/16τ 身份，没有分配科学事件或预算。
+
+0.5／1.0 mm 间隙仍待敏感性评估；工程通过不提供间隙选择或布局排序。
+原 `painted-corner-v1` 历史失败记录继续保留，说明如下。
 
 **此前 `painted-corner-v1` 状态：棱边候选未通过晋级。**
 完整 10,560 个单光子事件和 8 个中子重放已完成。三个尺度都修复了原失败
@@ -52,7 +64,7 @@ opticalphoton 的 Scintillation。Cerenkov、Rayleigh、MieHG、OpWLS 仍遵循
 
 数值接口 `--optical-numerics legacy|painted-corner-v1|painted-corner-v2` 默认 `legacy`。
 候选还要求显式 `--optical-corner-scale 16|32|64`，这些尺度仅用于工程诊断，
-painted-corner-v2 的 16τ 已晋级，完整验收仍待通过。stack-v1 拒绝这些 v2 参数。配置哈希、宏、运行状态、
+painted-corner-v2 的 16τ 已通过完整本地工程验收。stack-v1 拒绝这些 v2 参数。配置哈希、宏、运行状态、
 本地及未来 OSC 参数均携带数值身份；分析拒绝混合不同数值身份。
 
 Geant4 初始化前命令为 `/opnovice2/numerics/mode` 和
@@ -76,8 +88,8 @@ STEEL_STACK_V2_REPOSITORY_ROOT="$PWD" PYTHONDONTWRITEBYTECODE=1 \
   --batch-dir "$batch"
 ```
 
-该批次预期返回未通过。原始失败及三个候选尺度的结果均保留；继续修复需要
-先为“未正常返回 tile”的路径另定处理规则，本轮未扩大触发条件。
+该批次预期返回未通过。原始失败及三个候选尺度的结果均保留；该历史 v1 批次不被覆盖；后续 v2 已用独立批次覆盖“未正常返回 tile”的路径，
+见上方已验收状态。
 
 ## 工程验收流程
 

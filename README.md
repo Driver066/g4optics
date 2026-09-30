@@ -34,6 +34,12 @@ See the [Chinese workflow guide](tools/steel_stack_v2/README.zh.md) and
 engineering acceptance is separate from scientific scans and does not submit
 OSC jobs. Historical stack-v1 results and the accepted default binary are preserved.
 
+The opt-in numerical baseline `painted-corner-v2` at 16 surface tolerances has
+passed the targeted optical matrix and the complete 130-event local engineering
+acceptance. See the [validation report](docs/decisions/steel-module-stack-v2-full-validation.md)
+and `tools/steel_stack_v2/accepted-numerical-baseline.json`. The legacy default is
+retained; no scientific scan, production gap selection, or OSC execution is implied.
+
 ---
 
 ## Current Phase: Matching Lab Data & Predicting the 10×10×24mm Tile

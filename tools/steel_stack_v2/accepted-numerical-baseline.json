@@ -1,0 +1,54 @@
+{
+  "schema_version": "steel-stack-v2-accepted-numerical-baseline-v1",
+  "status": "accepted-local-engineering",
+  "profile": "painted-corner-v2",
+  "scale": 16,
+  "geant4_version": "11.4.2",
+  "run_manager": "Serial",
+  "validated_architecture": "aarch64",
+  "surface_tolerance_mm": 1e-09,
+  "scope": {
+    "preset": "steel-module-stack-v2",
+    "layouts": [
+      "back-four",
+      "back-two",
+      "edge-two",
+      "back-center"
+    ],
+    "tile_thicknesses_mm": [
+      4,
+      8,
+      12,
+      16,
+      20,
+      24
+    ],
+    "validated_gaps_mm": [
+      0.5,
+      1.0
+    ],
+    "optical_policy": "legacy-steel-optical-macro-with-opticalphoton-scintillation"
+  },
+  "full_acceptance": {
+    "batch": "outputs/steel_stack_v2/20260930-full-corner-acceptance-v2-s16-r2",
+    "verification_sha256": "548755b823eb7d6ed636b31b6847dc82d35f4347d2cf0cf77370c15f9682931c",
+    "numerical_audit_sha256": "6d095c5a6c89942fd4717637f4f40c1ad39868b950b67e81a02a725cd659fc7e",
+    "events_registered": 130,
+    "new_neutron_events": 122,
+    "imported_reference_events": 8
+  },
+  "promotion": {
+    "batch": "outputs/steel_stack_v2/20260930-full-corner-repair-v2",
+    "report_sha256": "f8081014793c349c49e278f62ca5d758b8c8e2c902e2e402ebd3157079166deb",
+    "photon_events": 10560,
+    "new_neutron_events": 8,
+    "extra_pilot_optical_events": 48
+  },
+  "frozen_executable": "outputs/steel_stack_v2/20260930-full-corner-acceptance-v2-s16-r2/candidate/build/OpNovice2",
+  "executable_sha256": "7f69a203e9182da23550b1e9afd7daa56a37edd8670c7703372c84256616ed86",
+  "source_manifest_sha256": "3b6e39aad6261ace73d66b3f182015926987df994004d2399d853786adc59dd0",
+  "default_profile_remains": "legacy",
+  "scientific_events": 0,
+  "osc_submissions": 0,
+  "final_gap_selected": null
+}
