@@ -118,7 +118,7 @@ def validate_source(manifest_path, source_root=None):
 def validate_inputs(source_manifest, build_receipt, *, matrix, gaps, events_per_task,
                     blocks, campaign_seed, total_event_budget, source_root=None,
                     allow_mock=False, optical_numerics="legacy", corner_scale=0,
-                    purpose="science"):
+                    purpose="science", excluded_seeds=()):
     source_manifest = Path(source_manifest).resolve()
     build_receipt = Path(build_receipt).resolve()
     source, source_root = validate_source(source_manifest, source_root)
@@ -167,13 +167,15 @@ def validate_inputs(source_manifest, build_receipt, *, matrix, gaps, events_per_
     for key in ("executable", "sif", "data_root"):
         require(source_remote not in PurePosixPath(paths[key]).parents and paths[key] != paths["source_root"],
                 "Remote artifacts must be staged outside the frozen source tree")
-    require(purpose in ("science", "benchmark"), "Purpose must be science or benchmark")
+    require(purpose in ("science", "benchmark", "calibration"), "Purpose must be science, benchmark or calibration")
     configs = [make_configuration(c["layout"], c["tile_thickness_mm"], c["gap_mm"],
                                   optical_numerics, corner_scale) for c in make_matrix(matrix, gaps)]
     tasks = prepare_tasks(configs, events_per_task=events_per_task, blocks=blocks,
-                          campaign_seed=campaign_seed, total_event_budget=total_event_budget, stage=purpose)
+                          campaign_seed=campaign_seed, total_event_budget=total_event_budget, stage=purpose,
+                          excluded_seeds=excluded_seeds)
     for task in tasks:
-        task["purpose"] = "engineering-benchmark-not-scientific-evidence" if purpose == "benchmark" else "science"
+        task["purpose"] = {"benchmark":"engineering-benchmark-not-scientific-evidence",
+                           "calibration":"sample-size-calibration-only", "science":"science"}[purpose]
     summary = validate_tasks(tasks, total_event_budget=total_event_budget)
     return {
         "schema_version": SCHEMA, "state": "validated-not-submitted", "submitted": False,
@@ -239,6 +241,10 @@ check(1 <= index <= len(tasks), 'Invalid array index')
 task = tasks[index-1]
 p = m['remote_paths']
 
+def check_stop():
+    if m['purpose'] == 'calibration':
+        check(not Path(m['calibration_control']['stop_file']).exists(), 'Calibration stopped by an earlier failure')
+
 def verify_inputs():
     check(digest(p['executable']) == m['executable_sha256'], 'Executable changed')
     with Path(p['executable']).open('rb') as stream: header = stream.read(64)
@@ -256,6 +262,7 @@ def verify_inputs():
     for directory, expected in m['dataset_package_receipts'].items():
         check(digest(data/directory/'.geant4-dataset-receipt.json') == expected, 'Dataset package receipt changed')
 
+check_stop()
 verify_inputs()
 job = os.environ['SLURM_ARRAY_JOB_ID']
 check(re.fullmatch(r'[0-9]+', job) is not None, 'Invalid array job identity')
@@ -295,6 +302,7 @@ command = ['apptainer','exec','--cleanenv',
 started = time.monotonic()
 usage_before = resource.getrusage(resource.RUSAGE_CHILDREN)
 try:
+    check_stop()
     with (task_dir/'launcher.log').open('x') as log:
         result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=False)
     usage_after = resource.getrusage(resource.RUSAGE_CHILDREN)
@@ -333,6 +341,10 @@ def render(plan, output_dir, *, remote_bundle_root, remote_output_root, account,
     for value, label in ((time_minutes, "time_minutes"), (memory_gib, "memory_gib"), (max_parallel, "max_parallel")):
         positive_integer(value, label)
     require(node_constraint in (None, "40core", "48core"), "Unsupported Pitzer node constraint")
+    if plan["purpose"] == "calibration":
+        require("calibration_control" in plan, "Calibration rendering requires precision.py prepare and task audits")
+        require((time_minutes, memory_gib, max_parallel, node_constraint) == (60, 4, 4, "40core"),
+                "Calibration resources differ from the registered plan")
     for path in (bundle, output):
         for protected in (plan["remote_paths"]["source_root"], plan["remote_paths"]["data_root"]):
             require(path != protected and PurePosixPath(protected) not in PurePosixPath(path).parents,
@@ -356,6 +368,14 @@ def render(plan, output_dir, *, remote_bundle_root, remote_output_root, account,
         write(stage/"manifest.json", manifest)
         h, minute = divmod(time_minutes, 60)
         constraint_line = f"#SBATCH --constraint={node_constraint}\n" if node_constraint else ""
+        launch = f"exec python3 {shlex.quote(bundle+'/array_task.py')} {shlex.quote(bundle+'/manifest.json')} {sha256(stage/'manifest.json')}"
+        preamble = ""
+        if plan["purpose"] == "calibration":
+            control = plan["calibration_control"]
+            preamble = "#SBATCH --no-requeue\n#SBATCH --signal=B:TERM@60\n"
+            launch = ("module load python/3.12\nexport PYTHONNOUSERSITE=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1\nexec "
+                      +shlex.join([control["python"], control["root"]+"/precision_worker.py",
+                                   bundle+"/manifest.json", sha256(stage/"manifest.json")]))
         sbatch = f'''#!/usr/bin/env bash
 # Rendered only. No job has been submitted; inspect the frozen inputs first.
 #SBATCH --job-name=g4-stack-v2
@@ -367,9 +387,9 @@ def render(plan, output_dir, *, remote_bundle_root, remote_output_root, account,
 #SBATCH --mem={memory_gib}G
 {constraint_line}#SBATCH --array=1-{len(tasks)}%{min(max_parallel,len(tasks))}
 #SBATCH --output={bundle}/slurm-%x-%A_%a.out
-set -euo pipefail
+{preamble}set -euo pipefail
 export G4RUN_MANAGER_TYPE=Serial OMP_NUM_THREADS=1 PYTHONDONTWRITEBYTECODE=1
-exec python3 {shlex.quote(bundle+'/array_task.py')} {shlex.quote(bundle+'/manifest.json')} {sha256(stage/'manifest.json')}
+{launch}
 '''
         (stage/"array.sbatch").write_text(sbatch, encoding="utf-8")
         (stage/"scan-args.txt").write_text("\n".join(shlex.join(t["scan_args"]) for t in tasks)+"\n", encoding="utf-8")
@@ -396,7 +416,7 @@ def main(argv=None):
     parser.add_argument("--allow-mock", action="store_true")
     parser.add_argument("--optical-numerics", choices=("legacy", "painted-corner-v1", "painted-corner-v2"), default="legacy")
     parser.add_argument("--optical-corner-scale", type=int, default=0)
-    parser.add_argument("--purpose", choices=("science", "benchmark"), default="science")
+    parser.add_argument("--purpose", choices=("science", "benchmark", "calibration"), default="science")
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--remote-bundle-root")
     parser.add_argument("--remote-output-root")

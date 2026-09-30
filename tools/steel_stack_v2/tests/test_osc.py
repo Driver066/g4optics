@@ -243,6 +243,21 @@ class OfflineOSCTests(unittest.TestCase):
         for field in ("launcher_elapsed_seconds", "child_max_rss_kib", "child_user_seconds"):
             self.assertIn(field, worker)
 
+    def test_calibration_requires_audited_controller_and_keeps_distinct_seeds(self):
+        plan = self.validate(purpose="calibration", optical_numerics="painted-corner-v2", corner_scale=16)
+        self.assertTrue(all(t["stage"] == "calibration" and t["purpose"] == "sample-size-calibration-only"
+                            for t in plan["tasks"]))
+        with self.assertRaisesRegex(ValueError,"precision.py prepare"):
+            self.render(plan)
+        self.assertFalse(self.output.exists())
+        plan["calibration_control"] = {"python":"/frozen/venv/bin/python", "root":"/frozen/controller"}
+        result = self.render(plan, node_constraint="40core")
+        script = (self.output/"array.sbatch").read_text()
+        self.assertIn("precision_worker.py",script)
+        self.assertIn("--signal=B:TERM@60",script)
+        self.assertIn("--no-requeue",script)
+        self.assertIn("check_stop()",(self.output/"array_task.py").read_text())
+
     def test_invalid_numerical_scale_is_rejected_before_render(self):
         for profile, scale in (("legacy",16),("painted-corner-v2",0),("painted-corner-v2",128)):
             with self.subTest(profile=profile, scale=scale), self.assertRaisesRegex(ValueError, "numerical profile"):
