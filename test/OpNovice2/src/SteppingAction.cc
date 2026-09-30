@@ -30,12 +30,15 @@
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
 #include "SteppingAction.hh"
+#include "OpticalNumerics.hh"
 
 #include "DetectorConstruction.hh"
 #include "HistoManager.hh"
 #include "Run.hh"
 #include "SteppingMessenger.hh"
 #include "TrackInformation.hh"
+#include "W08PhotonDiagnostics.hh"
+#include "StackPhotonAccounting.hh"
 
 #include "G4Cerenkov.hh"
 #include "G4Event.hh"
@@ -134,11 +137,19 @@ void SteppingAction::UserSteppingAction(const G4Step* step)
     }
   }
 
+  OpticalNumerics::Instance().ObserveStep(step);
+  auto* w08Diagnostics = run->GetW08Diagnostics();
+  if (w08Diagnostics) w08Diagnostics->ObserveStep(step);
+  auto* stackAccounting = run->GetStackAccounting();
+  if (stackAccounting) stackAccounting->ObserveStep(step);
+
   if (particleDef == opticalphoton) {
     // SiPM detection
     if (prePV && prePV->GetName() == "SiPM") {
       const G4int originLayer = trackInfo ? trackInfo->GetOpticalOriginLayer() : -1;
       run->AddSiPMDetection(prePV->GetCopyNo(), originLayer);
+      if (w08Diagnostics) w08Diagnostics->ObserveSiPMCollection(step);
+      if (stackAccounting) stackAccounting->ObserveSiPMCollection(step);
 
       G4double en = track->GetKineticEnergy();
       analysisMan->FillH1(27, en / eV);  // detected photon energy

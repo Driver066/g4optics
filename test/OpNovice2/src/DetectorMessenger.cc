@@ -54,6 +54,23 @@
 DetectorMessenger::DetectorMessenger(DetectorConstruction* Det) : G4UImessenger(), fDetector(Det)
 {
   fOpticalDir = new G4UIdirectory("/opnovice2/");
+  fDiagnosticsDir = new G4UIdirectory("/opnovice2/diagnostics/");
+  fDiagnosticsDir->SetGuidance("Read-only, opt-in diagnostics for fixed study configurations.");
+  fW08PhotonLossCmd =
+    new G4UIcmdWithABool("/opnovice2/diagnostics/w08PhotonLoss", this);
+  fW08PhotonLossCmd->SetGuidance(
+    "Observe W08 photon histories without changing transport; requires the fixed W08 baseline.");
+  fW08PhotonLossCmd->SetParameterName("enabled", false);
+  fW08PhotonLossCmd->SetDefaultValue(false);
+  fW08PhotonLossCmd->AvailableForStates(G4State_PreInit);
+  fW08PhotonLossCmd->SetToBeBroadcasted(false);
+  fStackPhotonAccountingCmd =
+    new G4UIcmdWithABool("/opnovice2/diagnostics/stackPhotonAccounting", this);
+  fStackPhotonAccountingCmd->SetGuidance("Enable read-only stack-v2 photon accounting; default true for v2.");
+  fStackPhotonAccountingCmd->SetParameterName("enabled", false);
+  fStackPhotonAccountingCmd->SetDefaultValue(true);
+  fStackPhotonAccountingCmd->AvailableForStates(G4State_PreInit);
+  fStackPhotonAccountingCmd->SetToBeBroadcasted(false);
   fOpticalDir->SetGuidance("Parameters for optical simulation.");
 
   fSurfaceTypeCmd = new G4UIcmdWithAString("/opnovice2/surfaceType", this);
@@ -172,6 +189,18 @@ DetectorMessenger::DetectorMessenger(DetectorConstruction* Det) : G4UImessenger(
   fStackLayersCmd->SetParameterName("layers", false);
   fStackLayersCmd->AvailableForStates(G4State_PreInit);
   fStackLayersCmd->SetToBeBroadcasted(false);
+  fStackModelCmd = new G4UIcmdWithAString("/opnovice2/stack/model", this);
+  fStackModelCmd->SetGuidance("Stack geometry contract: v1 legacy edge-two; v2 four-layout readout gaps.");
+  fStackModelCmd->SetCandidates("v1 v2");
+  fStackModelCmd->AvailableForStates(G4State_PreInit);
+  fStackModelCmd->SetToBeBroadcasted(false);
+  fStackReadoutGapCmd = new G4UIcmdWithADoubleAndUnit("/opnovice2/stack/readoutGap", this);
+  fStackReadoutGapCmd->SetGuidance("Explicit v2 tile-back to next-steel clearance; nine internal gaps, minimum 0.5 mm.");
+  fStackReadoutGapCmd->SetParameterName("gap", false);
+  fStackReadoutGapCmd->SetUnitCategory("Length");
+  fStackReadoutGapCmd->SetDefaultUnit("mm");
+  fStackReadoutGapCmd->AvailableForStates(G4State_PreInit);
+  fStackReadoutGapCmd->SetToBeBroadcasted(false);
 
   fDimpleEnabledCmd = new G4UIcmdWithABool("/opnovice2/dimple/enabled", this);
   fDimpleEnabledCmd->SetGuidance("Enable the Week 8.1 bottom-center hemispherical dimple.");
@@ -217,7 +246,7 @@ DetectorMessenger::DetectorMessenger(DetectorConstruction* Det) : G4UImessenger(
   fSiPMLayoutCmd = new G4UIcmdWithAString("/opnovice2/sipm/layout", this);
   fSiPMLayoutCmd->SetGuidance(
     "Set SiPM layout: single, edge-two (two +X sensors at local u=+/-25 mm), "
-    "or back-four (four -Z sensors at x,y=+/-25 mm).");
+    "back-two (diagonal -Z sensors), or back-four (four -Z sensors at x,y=+/-25 mm).");
   fSiPMLayoutCmd->AvailableForStates(G4State_PreInit);
   fSiPMLayoutCmd->SetToBeBroadcasted(false);
 
@@ -292,6 +321,9 @@ DetectorMessenger::DetectorMessenger(DetectorConstruction* Det) : G4UImessenger(
 
 DetectorMessenger::~DetectorMessenger()
 {
+  delete fW08PhotonLossCmd;
+  delete fStackPhotonAccountingCmd;
+  delete fDiagnosticsDir;
   delete fOpticalDir;
   delete fSurfaceFinishCmd;
   delete fSurfaceTypeCmd;
@@ -311,6 +343,8 @@ DetectorMessenger::~DetectorMessenger()
   delete fAbsorberSizeCmd;
   delete fStackEnabledCmd;
   delete fStackLayersCmd;
+  delete fStackModelCmd;
+  delete fStackReadoutGapCmd;
   delete fDimpleEnabledCmd;
   delete fDimpleRadiusCmd;
   delete fDimpleModeCmd;
@@ -334,6 +368,14 @@ DetectorMessenger::~DetectorMessenger()
 
 void DetectorMessenger::SetNewValue(G4UIcommand* command, G4String newValue)
 {
+  if (command == fW08PhotonLossCmd) {
+    fDetector->SetW08PhotonLossEnabled(fW08PhotonLossCmd->GetNewBoolValue(newValue));
+    return;
+  }
+  if (command == fStackPhotonAccountingCmd) {
+    fDetector->SetStackPhotonAccounting(fStackPhotonAccountingCmd->GetNewBoolValue(newValue));
+    return;
+  }
   //    FINISH
   if (command == fSurfaceFinishCmd) {
     if (newValue == "polished") {
@@ -678,6 +720,12 @@ void DetectorMessenger::SetNewValue(G4UIcommand* command, G4String newValue)
   }
   else if (command == fStackLayersCmd) {
     fDetector->SetStackLayers(fStackLayersCmd->GetNewIntValue(newValue));
+  }
+  else if (command == fStackModelCmd) {
+    fDetector->SetStackModel(newValue);
+  }
+  else if (command == fStackReadoutGapCmd) {
+    fDetector->SetStackReadoutGap(fStackReadoutGapCmd->GetNewDoubleValue(newValue));
   }
   else if (command == fDimpleEnabledCmd) {
     fDetector->SetDimpleEnabled(fDimpleEnabledCmd->GetNewBoolValue(newValue));

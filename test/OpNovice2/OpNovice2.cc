@@ -35,7 +35,8 @@
 #include "SteppingVerbose.hh"
 
 #include "G4EmStandardPhysics_option4.hh"
-#include "G4OpticalPhysics.hh"
+#include "PaintedCornerBoundary.hh"
+#include "OpticalNumerics.hh"
 #include "G4RadioactiveDecayPhysics.hh"
 #include "G4RunManagerFactory.hh"
 #include "G4String.hh"
@@ -71,12 +72,13 @@ int main(int argc, char** argv)
 
   auto runManager = G4RunManagerFactory::CreateRunManager();
 
+  OpticalNumerics::Instance().InstallMessenger();
   auto detector = new DetectorConstruction();
   runManager->SetUserInitialization(detector);
 
   G4VModularPhysicsList* physicsList = new FTFP_BERT;
   physicsList->ReplacePhysics(new G4EmStandardPhysics_option4());
-  auto opticalPhysics = new G4OpticalPhysics();
+  auto opticalPhysics = new StackOpticalPhysics(detector);
 
   physicsList->RegisterPhysics(opticalPhysics);
   physicsList->RegisterPhysics(new G4RadioactiveDecayPhysics());

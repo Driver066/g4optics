@@ -1,7 +1,10 @@
 #include "EventAction.hh"
+#include "OpticalNumerics.hh"
 
 #include "DetectorConstruction.hh"
 #include "Run.hh"
+#include "W08PhotonDiagnostics.hh"
+#include "StackPhotonAccounting.hh"
 
 #include "G4AnalysisManager.hh"
 #include "G4Event.hh"
@@ -16,9 +19,12 @@
 
 void EventAction::BeginOfEventAction(const G4Event* event)
 {
+  OpticalNumerics::Instance().BeginEvent(event);
   auto run = static_cast<Run*>(G4RunManager::GetRunManager()->GetNonConstCurrentRun());
   if (run) {
     run->BeginEvent(event ? event->GetEventID() : -1);
+    if (run->GetW08Diagnostics()) run->GetW08Diagnostics()->ObservePrimary(event);
+    if (run->GetStackAccounting()) run->GetStackAccounting()->ObservePrimaries(event);
   }
 }
 
@@ -139,7 +145,7 @@ void EventAction::EndOfEventAction(const G4Event* event)
 
   const auto detector = static_cast<const DetectorConstruction*>(
     G4RunManager::GetRunManager()->GetUserDetectorConstruction());
-  if (detector && detector->IsStackEnabled()) {
+  if (detector && detector->IsStackEnabled() && !detector->IsStackV2()) {
     for (G4int layer = 0; layer < Run::kStackLayerCount; ++layer) {
       const auto& record = run->GetEventStackLayer(layer);
       const G4bool entryValid = record.primaryNeutronTileEntryValid;
@@ -197,4 +203,9 @@ void EventAction::EndOfEventAction(const G4Event* event)
   }
 
   run->CommitEventStatistics();
+  if (run->GetW08Diagnostics()) {
+    run->GetW08Diagnostics()->WriteEvent(run->GetRunID(), event->GetEventID(), generatedOptical);
+  }
+  if (run->GetStackAccounting()) run->GetStackAccounting()->WriteEvent(*run);
+  OpticalNumerics::Instance().EndEvent();
 }

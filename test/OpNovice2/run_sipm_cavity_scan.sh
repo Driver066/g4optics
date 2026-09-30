@@ -26,6 +26,12 @@ STUDY_PRESET=""
 TILE_THICKNESS_MM=""
 ABSORBER_TRANSVERSE_MM=""
 SIPM_STUDY_LAYOUT=""
+READOUT_GAP_MM=""
+STACK_PHOTON_ACCOUNTING="on"
+STACK_PHOTON_ACCOUNTING_SET="0"
+OPTICAL_NUMERICS="legacy"
+OPTICAL_CORNER_SCALE="0"
+OPTICAL_NUMERICS_SET="0"
 DETECTOR_SIPM_LAYOUT="single"
 ABSORBER_THICKNESS_MM="40"
 NEUTRON_MOMENTUM_GEV_C="1"
@@ -80,6 +86,7 @@ EJ550_TRANSMISSION_CSV="optical_data/ej550_transmission_empirical.csv"
 EJ550_TRANSMISSION_SOURCE_URL="https://eljentechnology.com/images/products/spectra/EJ-550_trans.png"
 EJ550_TRANSMISSION_REFERENCE_THICKNESS_MM="0.1"
 DIMPLE_ENABLED="0"
+W08_PHOTON_LOSS="0"
 DIMPLE_RADIUS=""
 DIMPLE_UNIT="mm"
 DIMPLE_SIPM_MODE="surface"
@@ -108,6 +115,8 @@ LATEST_RUN_LINK="${LATEST_RUN_LINK:-scan_latest}"
 LATEST_POINTS_CSV="${LATEST_POINTS_CSV:-points.csv}"
 LATEST_RUN_CONFIG="${LATEST_RUN_CONFIG:-run_config.json}"
 LATEST_EFFICIENCY_MAP="${LATEST_EFFICIENCY_MAP:-efficiency_map.csv}"
+UPDATE_LATEST="${UPDATE_LATEST:-1}"
+SCAN_RESULT_POINTER="${SCAN_RESULT_POINTER:-}"
 
 SR90_SPECTRUM_MODEL="sr90_allowed_beta_v1"
 SR90_SPECTRUM_TABLE="spectra/sr90_allowed_beta_v1.csv"
@@ -178,6 +187,7 @@ Geometry options:
   --tank-size-preset PRESET           5x5x0p4, 5x5x0p8, 5x5x1p6,
                                       10x10x0p4, 10x10x0p8, or 10x10x1p6
   --dimple                            enable Week 8.1 strict hemispherical dimple
+  --w08-photon-loss                    observe W08 photon losses without changing physics
   --dimple-radius VALUE               dimple radius/depth; required with --dimple
   --dimple-unit UNIT                  mm or cm; default mm
   --dimple-sipm-mode MODE             surface or opening; default surface
@@ -201,10 +211,14 @@ Grid / beam options:
 Output / execution options:
   --study-preset PRESET              locked scientific preset;
                                       realistic-neutron-v1, steel-module-scan-v1,
-                                      or steel-module-stack-v1
+                                      steel-module-stack-v1, or steel-module-stack-v2
   --tile-thickness-mm VALUE          preset-controlled tile thickness
   --sipm-layout LAYOUT               steel-module-scan-v1: back-center,
-                                      edge-center, edge-two, or back-four
+                                      edge-center, edge-two, or back-four; v2 also back-two (no edge-center)
+  --readout-gap-mm VALUE             stack-v2 only, required finite clearance >= 0.5 mm
+  --optical-numerics legacy|painted-corner-v1    v2 numerical identity; default legacy
+  --optical-corner-scale 16|32|64    diagnostic candidate scale, required with painted-corner-v1
+  --stack-photon-accounting on|off    stack-v2 observer, default on; does not change transport
   --absorber-transverse-mm VALUE     neutron presets: 200, 300, or 500
   --seed1 N                          first explicit Geant4 random seed
   --seed2 N                          second explicit Geant4 random seed
@@ -229,6 +243,8 @@ Environment:
   ROOT_PLOT_FIDUCIAL_LIMIT_MM=45      fiducial box half-width shown by ROOT plots
   SCAN_LOG_TAIL_LINES=120             lines printed from a failed point log
   SCAN_RUN_ID_SUFFIX=value            optional suffix appended to the run directory
+  UPDATE_LATEST=0                     leave all existing latest files/links unchanged
+  SCAN_RESULT_POINTER=path           write the completed run's absolute directory here
 
 Output:
   scan_runs/<UTC timestamp>_<mode>_<grid>/
@@ -303,6 +319,34 @@ while [[ $# -gt 0 ]]; do
       ;;
     --sipm-layout=*)
       SIPM_STUDY_LAYOUT="${1#*=}"
+      shift
+      ;;
+    --readout-gap-mm)
+      if [[ $# -lt 2 ]]; then echo "Missing value for --readout-gap-mm" >&2; exit 1; fi
+      READOUT_GAP_MM="$2"
+      shift 2
+      ;;
+    --readout-gap-mm=*)
+      READOUT_GAP_MM="${1#*=}"
+      shift
+      ;;
+    --optical-numerics)
+      if [[ $# -lt 2 ]]; then echo "Missing numerical profile" >&2; exit 1; fi
+      OPTICAL_NUMERICS="$2"; OPTICAL_NUMERICS_SET="1"; shift 2 ;;
+    --optical-numerics=*) OPTICAL_NUMERICS="${1#*=}"; OPTICAL_NUMERICS_SET="1"; shift ;;
+    --optical-corner-scale)
+      if [[ $# -lt 2 ]]; then echo "Missing diagnostic scale" >&2; exit 1; fi
+      OPTICAL_CORNER_SCALE="$2"; OPTICAL_NUMERICS_SET="1"; shift 2 ;;
+    --optical-corner-scale=*) OPTICAL_CORNER_SCALE="${1#*=}"; OPTICAL_NUMERICS_SET="1"; shift ;;
+    --stack-photon-accounting)
+      if [[ $# -lt 2 ]]; then echo "Missing value for --stack-photon-accounting" >&2; exit 1; fi
+      STACK_PHOTON_ACCOUNTING="$2"
+      STACK_PHOTON_ACCOUNTING_SET="1"
+      shift 2
+      ;;
+    --stack-photon-accounting=*)
+      STACK_PHOTON_ACCOUNTING="${1#*=}"
+      STACK_PHOTON_ACCOUNTING_SET="1"
       shift
       ;;
     --seed1)
@@ -715,6 +759,10 @@ while [[ $# -gt 0 ]]; do
       GREASE_ABS_LENGTH_SET="1"
       shift
       ;;
+    --w08-photon-loss)
+      W08_PHOTON_LOSS="1"
+      shift
+      ;;
     --dimple)
       DIMPLE_ENABLED="1"
       shift
@@ -900,6 +948,15 @@ if [[ "${#POSITIONAL[@]}" -ge 2 ]]; then
   GRID="${POSITIONAL[1]}"
 fi
 
+if [[ "${STUDY_PRESET}" != "steel-module-stack-v2" &&
+      ( -n "${READOUT_GAP_MM}" || "${STACK_PHOTON_ACCOUNTING_SET}" == "1" || "${OPTICAL_NUMERICS_SET}" == "1" ) ]]; then
+  echo "--readout-gap-mm and --stack-photon-accounting require steel-module-stack-v2." >&2
+  exit 1
+fi
+case "${OPTICAL_NUMERICS}:${OPTICAL_CORNER_SCALE}" in
+  legacy:0|painted-corner-v1:16|painted-corner-v1:32|painted-corner-v1:64) ;;
+  *) echo "Use legacy with scale 0, or painted-corner-v1 with explicit diagnostic scale 16, 32 or 64." >&2; exit 1 ;;
+esac
 if [[ -z "${STUDY_PRESET}" ]]; then
   if [[ -n "${TILE_THICKNESS_MM}" || -n "${ABSORBER_TRANSVERSE_MM}" ||
         -n "${SIPM_STUDY_LAYOUT}" ]]; then
@@ -908,7 +965,7 @@ if [[ -z "${STUDY_PRESET}" ]]; then
   fi
 else
   case "${STUDY_PRESET}" in
-    realistic-neutron-v1|steel-module-scan-v1|steel-module-stack-v1)
+    realistic-neutron-v1|steel-module-scan-v1|steel-module-stack-v1|steel-module-stack-v2)
       ;;
     *)
       echo "Unknown --study-preset: ${STUDY_PRESET}. Use realistic-neutron-v1, steel-module-scan-v1, or steel-module-stack-v1." >&2
@@ -1002,6 +1059,38 @@ else
         exit 1
         ;;
     esac
+  elif [[ "${STUDY_PRESET}" == "steel-module-stack-v2" ]]; then
+    case "${TILE_THICKNESS_MM}" in
+      4|8|12|16|20|24) ;;
+      *) echo "stack-v2 requires --tile-thickness-mm 4, 8, 12, 16, 20, or 24." >&2; exit 1 ;;
+    esac
+    case "${SIPM_STUDY_LAYOUT}" in
+      back-center|back-two|back-four|edge-two) ;;
+      *) echo "stack-v2 requires --sipm-layout back-center, back-two, back-four, or edge-two." >&2; exit 1 ;;
+    esac
+    if [[ -n "${ABSORBER_TRANSVERSE_MM}" ]]; then
+      echo "stack-v2 fixes the steel transverse size at 500 mm; do not override it." >&2
+      exit 1
+    fi
+    if [[ -z "${READOUT_GAP_MM}" ]]; then
+      echo "stack-v2 requires explicit --readout-gap-mm; no production gap is selected by default." >&2
+      exit 1
+    fi
+    READOUT_GAP_MM="$(python3 - "${READOUT_GAP_MM}" <<'GAP_PY'
+import math, sys
+try:
+    gap = float(sys.argv[1])
+except ValueError:
+    raise SystemExit("readout gap must be a finite number >= 0.5 mm")
+if not math.isfinite(gap) or gap < 0.5:
+    raise SystemExit("readout gap must be a finite number >= 0.5 mm")
+print(format(gap, '.12g'))
+GAP_PY
+)"
+    case "${STACK_PHOTON_ACCOUNTING}" in
+      on|off) ;;
+      *) echo "--stack-photon-accounting must be on or off." >&2; exit 1 ;;
+    esac
   else
     case "${TILE_THICKNESS_MM}" in
       4|8|12|16|20|24)
@@ -1050,7 +1139,7 @@ else
     DETECTOR_SIPM_LAYOUT="single"
     TANK_SIZE_OVERRIDE="50 50 ${TILE_THICKNESS_MM} mm"
     CUSTOM_BEAM_DIVERGENCE_MRAD="55"
-  elif [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ]]; then
+  elif [[ "${STUDY_PRESET}" == "steel-module-scan-v1" || "${STUDY_PRESET}" == "steel-module-stack-v2" ]]; then
     TANK_SIZE_OVERRIDE="100 100 ${TILE_THICKNESS_MM} mm"
     CUSTOM_BEAM_DIVERGENCE_MRAD=""
     case "${SIPM_STUDY_LAYOUT}" in
@@ -1067,6 +1156,11 @@ else
       edge-two)
         DETECTOR_SIPM_LAYOUT="edge-two"
         SIPM_FACE_OVERRIDE="+X"
+        SIPM_LOCAL_POSITION_OVERRIDE="0 0 0 mm"
+        ;;
+      back-two)
+        DETECTOR_SIPM_LAYOUT="back-two"
+        SIPM_FACE_OVERRIDE="-Z"
         SIPM_LOCAL_POSITION_OVERRIDE="0 0 0 mm"
         ;;
       back-four)
@@ -1089,7 +1183,8 @@ RUN_CONFIG_SCHEMA_VERSION="opnovice2-run-config-v3"
 EVENT_SCHEMA_VERSION="opnovice2-scan-event-v2"
 if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ||
       "${STUDY_PRESET}" == "steel-module-scan-v1" ||
-      "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
+      "${STUDY_PRESET}" == "steel-module-stack-v1" ||
+      "${STUDY_PRESET}" == "steel-module-stack-v2" ]]; then
   IS_NEUTRON_STUDY_PRESET="true"
 fi
 if [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ]]; then
@@ -1099,6 +1194,11 @@ fi
 if [[ "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
   RUN_CONFIG_SCHEMA_VERSION="opnovice2-run-config-v5"
   EVENT_SCHEMA_VERSION="opnovice2-stack-event-v1"
+fi
+
+if [[ "${STUDY_PRESET}" == "steel-module-stack-v2" ]]; then
+  RUN_CONFIG_SCHEMA_VERSION="opnovice2-run-config-v6"
+  EVENT_SCHEMA_VERSION="opnovice2-stack-event-v2"
 fi
 
 if [[ -n "${RANDOM_SEED_1}" || -n "${RANDOM_SEED_2}" ]]; then
@@ -1131,7 +1231,8 @@ done
 if [[ "${campaign_metadata_count}" -ne 0 ]]; then
   if [[ "${STUDY_PRESET}" != "realistic-neutron-v1" &&
         "${STUDY_PRESET}" != "steel-module-scan-v1" &&
-        "${STUDY_PRESET}" != "steel-module-stack-v1" ]]; then
+        "${STUDY_PRESET}" != "steel-module-stack-v1" &&
+        "${STUDY_PRESET}" != "steel-module-stack-v2" ]]; then
     echo "Campaign provenance options require a supported neutron --study-preset." >&2
     exit 1
   fi
@@ -1195,6 +1296,15 @@ if [[ "${execution_metadata_count}" -ne 0 ]]; then
     fi
   done
 fi
+
+case "${UPDATE_LATEST}" in
+  1|true|TRUE|yes|YES|on|ON) UPDATE_LATEST="1" ;;
+  0|false|FALSE|no|NO|off|OFF) UPDATE_LATEST="0" ;;
+  *)
+    echo "Invalid UPDATE_LATEST: ${UPDATE_LATEST}. Use 1 or 0." >&2
+    exit 1
+    ;;
+esac
 
 case "${PLOT_WITH_ROOT}" in
   1|true|TRUE|yes|YES|on|ON)
@@ -1280,7 +1390,7 @@ esac
 
 if [[ -n "${SOURCE_MODEL_OVERRIDE}" ]]; then
   case "${SOURCE_MODEL_OVERRIDE}" in
-    fixed-electron|sr90-spectrum|sr90-empirical|sr90-decay|realistic-neutron-v1|steel-module-scan-v1|steel-module-stack-v1)
+    fixed-electron|sr90-spectrum|sr90-empirical|sr90-decay|realistic-neutron-v1|steel-module-scan-v1|steel-module-stack-v1|steel-module-stack-v2)
       ;;
     *)
       echo "Invalid --source-model: ${SOURCE_MODEL_OVERRIDE}. Use fixed-electron, sr90-spectrum, sr90-empirical, sr90-decay, realistic-neutron-v1, steel-module-scan-v1, or steel-module-stack-v1." >&2
@@ -1290,7 +1400,7 @@ if [[ -n "${SOURCE_MODEL_OVERRIDE}" ]]; then
 fi
 if [[ ( "${SOURCE_MODEL_OVERRIDE}" == "realistic-neutron-v1" ||
         "${SOURCE_MODEL_OVERRIDE}" == "steel-module-scan-v1" ||
-        "${SOURCE_MODEL_OVERRIDE}" == "steel-module-stack-v1" ) &&
+        ( "${SOURCE_MODEL_OVERRIDE}" == "steel-module-stack-v1" || "${SOURCE_MODEL_OVERRIDE}" == "steel-module-stack-v2" ) ) &&
       "${STUDY_PRESET}" != "${SOURCE_MODEL_OVERRIDE}" ]]; then
   echo "The ${SOURCE_MODEL_OVERRIDE} source model is available only through its matching --study-preset." >&2
   exit 1
@@ -2077,6 +2187,14 @@ infer_custom_beam_z() {
   fi
 
   thickness_grid="$(length_to_unit "${thickness_value}" "${thickness_unit}" "${GRID_UNIT}")"
+  if [[ "${STUDY_PRESET}" == "steel-module-stack-v2" ]]; then
+    awk -v t="${thickness_grid}" \
+      -v steel="$(length_to_unit "${ABSORBER_THICKNESS_MM}" "mm" "${GRID_UNIT}")" \
+      -v gap="$(length_to_unit "${READOUT_GAP_MM}" "mm" "${GRID_UNIT}")" \
+      -v clearance="$(length_to_unit "${SOURCE_CLEARANCE_MM}" "mm" "${GRID_UNIT}")" \
+      'BEGIN { printf "%.10g", 0.5 * (10 * (steel + t) + 9 * gap) + clearance }'
+    return
+  fi
   if [[ "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
     offset_grid="$(length_to_unit "${ABSORBER_THICKNESS_MM}" "mm" "${GRID_UNIT}")"
     awk -v t="${thickness_grid}" -v steel="${offset_grid}" \
@@ -2234,7 +2352,7 @@ if [[ "${IS_NEUTRON_STUDY_PRESET}" == "true" ]]; then
   y_min_mm="$(length_to_unit "${Y_MIN_VALUE}" "${GRID_UNIT}" "mm")"
   y_max_mm="$(length_to_unit "${Y_MAX_VALUE}" "${GRID_UNIT}" "mm")"
   if [[ ( "${STUDY_PRESET}" == "steel-module-scan-v1" ||
-          "${STUDY_PRESET}" == "steel-module-stack-v1" ) ]] &&
+          ( "${STUDY_PRESET}" == "steel-module-stack-v1" || "${STUDY_PRESET}" == "steel-module-stack-v2" ) ) ]] &&
       ! awk -v xmin="${x_min_mm}" -v xmax="${x_max_mm}" \
         -v ymin="${y_min_mm}" -v ymax="${y_max_mm}" \
         'BEGIN { exit(xmin == 0 && xmax == 0 && ymin == 0 && ymax == 0 ? 0 : 1) }'; then
@@ -2262,7 +2380,10 @@ if [[ "${IS_NEUTRON_STUDY_PRESET}" == "true" ]]; then
   fi
 
   source_z_mm="$(length_to_unit "${Z0}" "${GRID_UNIT}" "mm")"
-  if [[ "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
+  if [[ "${STUDY_PRESET}" == "steel-module-stack-v2" ]]; then
+    absorber_upstream_z_mm="$(awk -v tile="${TILE_THICKNESS_MM}" -v gap="${READOUT_GAP_MM}" \
+      'BEGIN { printf "%.10g", 0.5 * (10 * (40 + tile) + 9 * gap) }')"
+  elif [[ "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
     absorber_upstream_z_mm="$(awk \
       -v tile="${TILE_THICKNESS_MM}" -v steel="${ABSORBER_THICKNESS_MM}" \
       'BEGIN { printf "%.10g", 0.5 * 10 * (tile + steel) }')"
@@ -2329,7 +2450,7 @@ fi
 if [[ -n "${SOURCE_MODEL_OVERRIDE}" ]]; then
   source_model="${SOURCE_MODEL_OVERRIDE}"
   case "${source_model}" in
-    fixed-electron|sr90-spectrum|sr90-decay|realistic-neutron-v1|steel-module-scan-v1|steel-module-stack-v1)
+    fixed-electron|sr90-spectrum|sr90-decay|realistic-neutron-v1|steel-module-scan-v1|steel-module-stack-v1|steel-module-stack-v2)
       electron_energy_mode="fixed"
       ;;
     sr90-empirical)
@@ -2412,7 +2533,7 @@ if [[ "${source_model}" == "sr90-decay" ]]; then
 fi
 if [[ "${source_model}" == "realistic-neutron-v1" ||
       "${source_model}" == "steel-module-scan-v1" ||
-      "${source_model}" == "steel-module-stack-v1" ]]; then
+      ( "${source_model}" == "steel-module-stack-v1" || "${source_model}" == "steel-module-stack-v2" ) ]]; then
   if [[ "${SOURCE_MODE}" != "gps" ]]; then
     echo "--study-preset ${STUDY_PRESET} requires the GPS source." >&2
     exit 1
@@ -2629,7 +2750,7 @@ grease_transmission_source=""
 grease_transmission_reference_thickness_mm=""
 grease_abs_length_derivation=""
 if [[ ( "${STUDY_PRESET}" == "steel-module-scan-v1" ||
-        "${STUDY_PRESET}" == "steel-module-stack-v1" ) &&
+        ( "${STUDY_PRESET}" == "steel-module-stack-v1" || "${STUDY_PRESET}" == "steel-module-stack-v2" ) ) &&
       "${OPTICAL_COUPLING}" == "none" ]]; then
   grease_geometry_model="undimpled-zero-gap-ej550-proxy"
   grease_geometry_caveat="No explicit grease solid; this intentionally reproduces the previous lab-optimization coupling proxy because the physical EJ-550 layer thickness is not fixed."
@@ -2881,6 +3002,9 @@ COMMAND_ENV=(
   "ROOT_PLOT_FIDUCIAL_LIMIT_MM=${ROOT_PLOT_FIDUCIAL_LIMIT_MM}"
   "G4RUN_MANAGER_TYPE=${G4RUN_MANAGER_TYPE:-}"
   "SCAN_RUN_ID_SUFFIX=${SCAN_RUN_ID_SUFFIX}"
+  "SCAN_RUNS_DIR=${SCAN_RUNS_DIR}"
+  "UPDATE_LATEST=${UPDATE_LATEST}"
+  "SCAN_RESULT_POINTER=${SCAN_RESULT_POINTER}"
 )
 COMMAND_SHELL="$(shell_join "${COMMAND_ENV[@]}" "${COMMAND_ARGV[@]}")"
 
@@ -2902,6 +3026,67 @@ mkdir -p "${MACRO_DIR}" "${ROOT_DIR}" "${LOG_DIR}"
     done
   done
 } > "${POINTS_CSV}"
+
+stack_v2_metadata_json=""
+stack_v2_copy_numbers_json="[]"
+stack_v2_sensors_per_layer="0"
+if [[ "${STUDY_PRESET}" == "steel-module-stack-v2" ]]; then
+  case "${SIPM_STUDY_LAYOUT}" in
+    back-four) stack_v2_sensors_per_layer=4 ;;
+    back-two|edge-two) stack_v2_sensors_per_layer=2 ;;
+    back-center) stack_v2_sensors_per_layer=1 ;;
+  esac
+  stack_v2_copy_numbers_json="$(python3 - "${stack_v2_sensors_per_layer}" <<'COPIES_PY'
+import json, sys
+print(json.dumps([4*i+j for i in range(10) for j in range(int(sys.argv[1]))]))
+COPIES_PY
+)"
+  stack_v2_metadata_json="$(python3 - "${TILE_THICKNESS_MM}" "${READOUT_GAP_MM}" \
+      "${SIPM_STUDY_LAYOUT}" "${STACK_PHOTON_ACCOUNTING}" "${OPTICAL_NUMERICS}" "${OPTICAL_CORNER_SCALE}" <<'STACK_PY'
+import json, sys
+t, g = float(sys.argv[1]), float(sys.argv[2])
+layout, enabled = sys.argv[3], sys.argv[4] == 'on'
+positions = {'back-center':[(0,0)], 'back-two':[(-25,-25),(25,25)],
+ 'back-four':[(-25,-25),(-25,25),(25,-25),(25,25)], 'edge-two':[(-25,0),(25,0)]}[layout]
+length, pitch = 10*(40+t)+9*g, 40+t+g
+layers, sensors = [], []
+for i in range(10):
+    sz, tz = length/2-i*pitch-20, length/2-i*pitch-40-t/2
+    layers.append({'layer':i,'steel_center_mm':[0,0,sz],'tile_center_mm':[0,0,tz]})
+    for j,(u,v) in enumerate(positions):
+        side = layout == 'edge-two'
+        sensors.append({'global_copy':4*i+j,'layer':i,'local_sensor':j,
+         'center_mm':[50.25,u,tz+v] if side else [u,v,tz-t/2-.25],
+         'half_size_mm':[.25,1.2,1.2] if side else [1.2,1.2,.25]})
+print(json.dumps({'enabled':True,'model':'v2','schema_version':'steel-module-stack-v2',
+ 'optical_numerics':{'profile':sys.argv[5],'scale':int(sys.argv[6])},
+ 'layers':10,'module_order':['steel','tile'],'layer_zero':'upstream','axis':'-Z',
+ 'stack_length_mm':length,'stack_core_length_mm':length,'module_pitch_mm':pitch,
+ 'readout_gap_mm':g,'readout_gap_explicit':True,'internal_gap_count':9,
+ 'last_layer_boundary':'world-no-downstream-steel-no-tenth-gap',
+ 'last_sensor_overhang_mm':0 if layout=='edge-two' else .5,
+ 'source_z_mm':length/2+1.5,'world_full_size_mm':[1000,1000,1000],
+ 'steel_center_formula':'Lcore/2-i*(40+t+g)-20 mm',
+ 'tile_center_formula':'Lcore/2-i*(40+t+g)-40-t/2 mm',
+ 'sipm_layout':layout,'sensors_per_layer':len(positions),'sensor_copy_stride':4,
+ 'active_local_sensors':list(range(len(positions))),
+ 'active_global_copies':[v['global_copy'] for v in sensors],
+ 'sensor_copy_rule':'4*layer+local_sensor; inactive slots are not sensors',
+ 'layer_geometry':layers,'sensors':sensors,'accounting_enabled':enabled,
+ 'event_tree':'stack_event_v2' if enabled else None,
+ 'layers_tree':'stack_layer_v2' if enabled else None,
+ 'sensors_tree':'stack_sensor_v2' if enabled else None,
+ 'flows_tree':'stack_photon_flow_v2' if enabled else None,
+ 'physics_policy':'legacy-steel-optical-macro','opticalphoton_scintillation_override':None,
+ 'runtime_sidecar_suffix':'.stack-v2-runtime.json',
+ 'runtime_sidecar_schema':'steel-stack-v2-runtime-v1',
+ 'runtime_sidecar_note':'Written by the executable from resolved state; absence is expected only in dry-run',
+ 'upstream_tile_to_steel_paint':True,'downstream_tile_to_steel_border':False,
+ 'exposed_tile_to_world_paint':True,'tile_sipm_gap_mm':0,
+ 'geometry_overlap_check':'/geometry/test/run after initialization in both accounting modes'}))
+STACK_PY
+)"
+fi
 
 write_run_config() {
   {
@@ -2976,7 +3161,10 @@ write_run_config() {
     printf '      "ROOT_COMMAND": "%s",\n' "$(json_string "${ROOT_COMMAND}")"
     printf '      "ROOT_PLOT_FIDUCIAL_LIMIT_MM": "%s",\n' "$(json_string "${ROOT_PLOT_FIDUCIAL_LIMIT_MM}")"
     printf '      "G4RUN_MANAGER_TYPE": "%s",\n' "$(json_string "${G4RUN_MANAGER_TYPE:-}")"
-    printf '      "SCAN_RUN_ID_SUFFIX": "%s"\n' "$(json_string "${SCAN_RUN_ID_SUFFIX}")"
+    printf '      "SCAN_RUN_ID_SUFFIX": "%s",\n' "$(json_string "${SCAN_RUN_ID_SUFFIX}")"
+    printf '      "SCAN_RUNS_DIR": "%s",\n' "$(json_string "${SCAN_RUNS_DIR}")"
+    printf '      "UPDATE_LATEST": "%s",\n' "${UPDATE_LATEST}"
+    printf '      "SCAN_RESULT_POINTER": "%s"\n' "$(json_string "${SCAN_RESULT_POINTER}")"
     printf '    }\n'
     printf '  },\n'
     printf '  "scan_name": "%s",\n' "$(json_string "${SCAN_NAME}")"
@@ -3006,6 +3194,7 @@ write_run_config() {
     printf '    "beam_divergence_mrad": %s,\n' "$(if [[ -n "${CUSTOM_BEAM_DIVERGENCE_MRAD}" ]]; then echo true; else echo false; fi)"
     printf '    "dimple": %s\n' "$(if [[ "${DIMPLE_ENABLED}" == "1" ]]; then echo true; else echo false; fi)"
     printf '  },\n'
+    printf '  "diagnostics": {"w08_photon_loss": %s},\n' "$(if [[ "${W08_PHOTON_LOSS}" == "1" ]]; then echo true; else echo false; fi)"
     printf '  "git": {\n'
     printf '    "commit": "%s",\n' "$(json_string "${git_commit}")"
     printf '    "branch": "%s",\n' "$(json_string "${git_branch}")"
@@ -3019,7 +3208,7 @@ write_run_config() {
     if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
       printf '"momentum"'
     elif [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ||
-            "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
+            ( "${STUDY_PRESET}" == "steel-module-stack-v1" || "${STUDY_PRESET}" == "steel-module-stack-v2" ) ]]; then
       printf '"kinetic_energy"'
     else
       printf 'null'
@@ -3034,7 +3223,7 @@ write_run_config() {
     printf ',\n'
     printf '    "authoritative_kinetic_energy_mev": '
     if [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ||
-          "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
+          ( "${STUDY_PRESET}" == "steel-module-stack-v1" || "${STUDY_PRESET}" == "steel-module-stack-v2" ) ]]; then
       printf '%s' "${STEEL_MODULE_NEUTRON_KINETIC_ENERGY_MEV}"
     else
       printf 'null'
@@ -3042,7 +3231,7 @@ write_run_config() {
     printf ',\n'
     printf '    "derived_momentum_gev_c": '
     if [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ||
-          "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
+          ( "${STUDY_PRESET}" == "steel-module-stack-v1" || "${STUDY_PRESET}" == "steel-module-stack-v2" ) ]]; then
       printf '%s' "${STEEL_MODULE_NEUTRON_MOMENTUM_GEV_C}"
     else
       printf 'null'
@@ -3052,7 +3241,7 @@ write_run_config() {
     if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
       printf '%s' "${NEUTRON_TOTAL_ENERGY_GEV}"
     elif [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ||
-            "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
+            ( "${STUDY_PRESET}" == "steel-module-stack-v1" || "${STUDY_PRESET}" == "steel-module-stack-v2" ) ]]; then
       printf '%s' "${STEEL_MODULE_NEUTRON_TOTAL_ENERGY_GEV}"
     else
       printf 'null'
@@ -3062,7 +3251,7 @@ write_run_config() {
     if [[ "${STUDY_PRESET}" == "realistic-neutron-v1" ]]; then
       printf '%s' "${NEUTRON_KINETIC_ENERGY_MEV}"
     elif [[ "${STUDY_PRESET}" == "steel-module-scan-v1" ||
-            "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
+            ( "${STUDY_PRESET}" == "steel-module-stack-v1" || "${STUDY_PRESET}" == "steel-module-stack-v2" ) ]]; then
       printf '%s' "${STEEL_MODULE_NEUTRON_KINETIC_ENERGY_MEV}"
     else
       printf 'null'
@@ -3233,9 +3422,11 @@ write_run_config() {
     fi
     printf ',\n'
     printf '    "detector_layout": "%s",\n' "$(json_string "${DETECTOR_SIPM_LAYOUT}")"
-    printf '    "sensor_count": %s,\n' "$(if [[ "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then echo 20; elif [[ "${DETECTOR_SIPM_LAYOUT}" == "back-four" ]]; then echo 4; elif [[ "${DETECTOR_SIPM_LAYOUT}" == "edge-two" ]]; then echo 2; else echo 1; fi)"
+    printf '    "sensor_count": %s,\n' "$(if [[ "${STUDY_PRESET}" == "steel-module-stack-v2" ]]; then echo $((10 * stack_v2_sensors_per_layer)); elif [[ "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then echo 20; elif [[ "${DETECTOR_SIPM_LAYOUT}" == "back-four" ]]; then echo 4; elif [[ "${DETECTOR_SIPM_LAYOUT}" == "edge-two" ]]; then echo 2; else echo 1; fi)"
     printf '    "copy_number_order": '
-    if [[ "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
+    if [[ "${STUDY_PRESET}" == "steel-module-stack-v2" ]]; then
+      printf '%s' "${stack_v2_copy_numbers_json}"
+    elif [[ "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
       printf '[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]'
     elif [[ "${DETECTOR_SIPM_LAYOUT}" == "back-four" ]]; then
       printf '[0, 1, 2, 3]'
@@ -3248,6 +3439,8 @@ write_run_config() {
     printf '    "fixed_local_positions_mm": '
     if [[ "${SIPM_STUDY_LAYOUT}" == "back-four" ]]; then
       printf '[[-25, -25, 0], [-25, 25, 0], [25, -25, 0], [25, 25, 0]]'
+    elif [[ "${SIPM_STUDY_LAYOUT}" == "back-two" ]]; then
+      printf '[[-25, -25, 0], [25, 25, 0]]'
     elif [[ "${SIPM_STUDY_LAYOUT}" == "edge-two" ]]; then
       printf '[[-25, 0, 0], [25, 0, 0]]'
     else
@@ -3271,6 +3464,9 @@ write_run_config() {
       printf '    "near_field_step": null\n'
     fi
     printf '  },\n'
+    if [[ "${STUDY_PRESET}" == "steel-module-stack-v2" ]]; then
+      printf '  "stack": %s,\n' "${stack_v2_metadata_json}"
+    else
     printf '  "stack": {\n'
     printf '    "enabled": %s,\n' "$(if [[ "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then echo true; else echo false; fi)"
     if [[ "${STUDY_PRESET}" == "steel-module-stack-v1" ]]; then
@@ -3306,6 +3502,7 @@ write_run_config() {
       printf '    "unknown_origin_allowed_for_accepted_evidence": null\n'
     fi
     printf '  },\n'
+    fi
     printf '  "optical_coupling": {\n'
     printf '    "model": "%s",\n' "$(json_string "${OPTICAL_COUPLING}")"
     printf '    "geometry_model": "%s",\n' "$(json_string "${grease_geometry_model}")"
@@ -3765,14 +3962,16 @@ if [[ "${grease_enabled}" == "true" ]]; then
   } > "${GREASE_PROPERTIES_FRAGMENT}"
 fi
 
-cp "${RUN_CONFIG}" "${LATEST_RUN_CONFIG}"
-cp "${POINTS_CSV}" "${LATEST_POINTS_CSV}"
-if [[ -L "${LATEST_RUN_LINK}" || ! -e "${LATEST_RUN_LINK}" ]]; then
-  if ! ln -sfn "${RUN_DIR}" "${LATEST_RUN_LINK}"; then
-    echo "Warning: not updating ${LATEST_RUN_LINK}; another scan task likely updated it concurrently." >&2
+if [[ "${UPDATE_LATEST}" == "1" ]]; then
+  cp "${RUN_CONFIG}" "${LATEST_RUN_CONFIG}"
+  cp "${POINTS_CSV}" "${LATEST_POINTS_CSV}"
+  if [[ -L "${LATEST_RUN_LINK}" || ! -e "${LATEST_RUN_LINK}" ]]; then
+    if ! ln -sfn "${RUN_DIR}" "${LATEST_RUN_LINK}"; then
+      echo "Warning: not updating ${LATEST_RUN_LINK}; another scan task likely updated it concurrently." >&2
+    fi
+  else
+    echo "Not updating ${LATEST_RUN_LINK}: it exists and is not a symlink." >&2
   fi
-else
-  echo "Not updating ${LATEST_RUN_LINK}: it exists and is not a symlink." >&2
 fi
 
 echo "Scan: ${SCAN_NAME}"
@@ -3848,7 +4047,11 @@ if [[ "${DIMPLE_ENABLED}" == "1" ]]; then
 fi
 echo "SiPM size: ${sipm_size}"
 echo "Metadata: ${RUN_CONFIG}, ${POINTS_CSV}"
-echo "Latest pointers: ${LATEST_RUN_LINK}, ${LATEST_RUN_CONFIG}, ${LATEST_POINTS_CSV}"
+if [[ "${UPDATE_LATEST}" == "1" ]]; then
+  echo "Latest pointers: ${LATEST_RUN_LINK}, ${LATEST_RUN_CONFIG}, ${LATEST_POINTS_CSV}"
+else
+  echo "Latest pointers: unchanged (UPDATE_LATEST=0)"
+fi
 
 tail -n +2 "${POINTS_CSV}" | while IFS=, read -r tag x y z unit macro root log; do
   outfile="${root%.root}"
@@ -3876,10 +4079,10 @@ tail -n +2 "${POINTS_CSV}" | while IFS=, read -r tag x y z unit macro root log; 
 
   if [[ "${source_model}" == "realistic-neutron-v1" ||
         "${source_model}" == "steel-module-scan-v1" ||
-        "${source_model}" == "steel-module-stack-v1" ]]; then
+        ( "${source_model}" == "steel-module-stack-v1" || "${source_model}" == "steel-module-stack-v2" ) ]]; then
     neutron_energy_mev="${NEUTRON_KINETIC_ENERGY_MEV}"
     if [[ "${source_model}" == "steel-module-scan-v1" ||
-          "${source_model}" == "steel-module-stack-v1" ]]; then
+          ( "${source_model}" == "steel-module-stack-v1" || "${source_model}" == "steel-module-stack-v2" ) ]]; then
       neutron_energy_mev="${STEEL_MODULE_NEUTRON_KINETIC_ENERGY_MEV}"
     fi
     macro_args+=(
@@ -3948,6 +4151,33 @@ tail -n +2 "${POINTS_CSV}" | while IFS=, read -r tag x y z unit macro root log; 
       --set "/opnovice2/stack/layers=10"
       --require "/opnovice2/stack/enabled"
       --require "/opnovice2/stack/layers"
+    )
+  fi
+  if [[ "${STUDY_PRESET}" == "steel-module-stack-v2" ]]; then
+    macro_args+=(
+      --set "/opnovice2/stack/enabled=true"
+      --set "/opnovice2/stack/layers=10"
+      --set "/opnovice2/stack/model=v2"
+      --set "/opnovice2/numerics/mode=${OPTICAL_NUMERICS}"
+      --set "/opnovice2/numerics/cornerScale=${OPTICAL_CORNER_SCALE}"
+      --set "/opnovice2/stack/readoutGap=${READOUT_GAP_MM} mm"
+      --set "/opnovice2/diagnostics/stackPhotonAccounting=$(if [[ "${STACK_PHOTON_ACCOUNTING}" == "on" ]]; then echo true; else echo false; fi)"
+      --set "/geometry/test/run="
+      --require "/opnovice2/stack/enabled"
+      --require "/opnovice2/stack/layers"
+      --require "/opnovice2/stack/model"
+      --require "/opnovice2/numerics/mode"
+      --require "/opnovice2/numerics/cornerScale"
+      --require "/opnovice2/stack/readoutGap"
+      --require "/opnovice2/diagnostics/stackPhotonAccounting"
+      --require "/geometry/test/run"
+      --insert-missing-before "/geometry/test/run=/analysis/setFileName"
+    )
+  fi
+  if [[ "${W08_PHOTON_LOSS}" == "1" ]]; then
+    macro_args+=(
+      --set "/opnovice2/diagnostics/w08PhotonLoss=true"
+      --require "/opnovice2/diagnostics/w08PhotonLoss"
     )
   fi
   if [[ "${DIMPLE_ENABLED}" == "1" ]]; then
@@ -4060,6 +4290,40 @@ tail -n +2 "${POINTS_CSV}" | while IFS=, read -r tag x y z unit macro root log; 
       fi
       exit "${status}"
     fi
+    if [[ "${STUDY_PRESET}" == "steel-module-stack-v2" ]]; then
+      python3 - "${outfile}.stack-v2-runtime.json" "${SIPM_STUDY_LAYOUT}" \
+          "${READOUT_GAP_MM}" "${STACK_PHOTON_ACCOUNTING}" "${OPTICAL_NUMERICS}" "${OPTICAL_CORNER_SCALE}" <<'RUNTIME_PY'
+import json, math, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+if not path.is_file():
+    raise SystemExit(f"Missing observed stack-v2 runtime sidecar: {path}")
+observed = json.loads(path.read_text())
+layout = {'single':'back-center'}.get(observed.get('layout'), observed.get('layout'))
+if (observed.get('schema_version') != 'steel-stack-v2-runtime-v1' or
+    observed.get('model') != 'v2' or observed.get('layers') != 10 or
+    layout != sys.argv[2] or
+    not math.isclose(float(observed.get('readout_gap_mm', -1)), float(sys.argv[3]), rel_tol=0, abs_tol=1e-9) or
+    observed.get('accounting_enabled') is not (sys.argv[4] == 'on')):
+    raise SystemExit(f"Observed stack-v2 runtime does not match the requested configuration: {path}")
+numerics = observed.get('optical_numerics', {})
+if numerics.get('profile') != sys.argv[5] or numerics.get('scale') != int(sys.argv[6]) or numerics.get('diagnostic_primary') is not False:
+    raise SystemExit('Runtime numerical identity differs or diagnostic source used by production wrapper')
+physics = observed.get('physics', {})
+activation = physics.get('actual_process_activation', {})
+expected = {'Cerenkov':False, 'Scintillation':True, 'OpAbsorption':True,
+            'OpBoundary':True, 'OpRayleigh':False, 'OpMieHG':False, 'OpWLS':False}
+flags = {'scintillation_by_particle_type':False, 'scintillation_track_info':False,
+         'scintillation_finite_rise_time':True, 'scintillation_stack_photons':True,
+         'scintillation_track_secondaries_first':True, 'kill_on_second_surface':False,
+         'opticalphoton_scintillation_active':True}
+if (physics.get('requested_policy') != 'legacy-steel-optical-macro' or
+    any(activation.get(k) is not v for k,v in expected.items()) or
+    not isinstance(activation.get('OpWLS2'), bool) or
+    any(physics.get(k) is not v for k,v in flags.items())):
+    raise SystemExit(f"Observed stack-v2 optical physics differs from the retained legacy macro policy: {path}")
+RUNTIME_PY
+    fi
   fi
 done
 
@@ -4067,9 +4331,20 @@ if [[ "${DRY_RUN}" == "1" ]]; then
   echo "Dry run complete; no simulations were executed."
 else
   write_efficiency_map
-  cp "${EFFICIENCY_MAP_CSV}" "${LATEST_EFFICIENCY_MAP}"
+  if [[ "${UPDATE_LATEST}" == "1" ]]; then
+    cp "${EFFICIENCY_MAP_CSV}" "${LATEST_EFFICIENCY_MAP}"
+  fi
   echo "Efficiency map: ${EFFICIENCY_MAP_CSV}"
-  echo "Latest efficiency map: ${LATEST_EFFICIENCY_MAP}"
+  if [[ "${UPDATE_LATEST}" == "1" ]]; then
+    echo "Latest efficiency map: ${LATEST_EFFICIENCY_MAP}"
+  fi
   generate_root_plots
   echo "Scan complete."
+fi
+
+if [[ -n "${SCAN_RESULT_POINTER}" ]]; then
+  mkdir -p "$(dirname "${SCAN_RESULT_POINTER}")"
+  result_pointer_tmp="$(mktemp "${SCAN_RESULT_POINTER}.tmp.XXXXXX")"
+  (cd "${RUN_DIR}" && pwd -P) > "${result_pointer_tmp}"
+  mv -f "${result_pointer_tmp}" "${SCAN_RESULT_POINTER}"
 fi

@@ -1,3 +1,2 @@
-numpy
-pandas
-matplotlib
+# Host analysis environment verified for the local Geant4 11.4.2 workflow.
+-r requirements-analysis.lock.txt

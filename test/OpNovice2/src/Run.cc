@@ -34,8 +34,11 @@
 
 #include "DetectorConstruction.hh"
 #include "HistoManager.hh"
+#include "W08PhotonDiagnostics.hh"
+#include "StackPhotonAccounting.hh"
 
 #include "G4OpBoundaryProcess.hh"
+#include "G4RunManager.hh"
 #include "G4SystemOfUnits.hh"
 #include "G4UnitsTable.hh"
 
@@ -47,7 +50,19 @@
 Run::Run() : G4Run()
 {
   fBoundaryProcs.assign(43, 0);
+  const auto* manager = G4RunManager::GetRunManager();
+  const auto* detector = manager ? static_cast<const DetectorConstruction*>(
+    manager->GetUserDetectorConstruction()) : nullptr;
+  if (detector && detector->IsW08PhotonDiagnosticsEnabled()) {
+    fW08Diagnostics = std::make_unique<W08PhotonDiagnostics>(detector->GetW08GeometrySnapshot());
+  }
+  fStackV2 = detector && detector->IsStackV2();
+  if (fStackV2 && detector->IsStackAccountingEnabled()) {
+    fStackAccounting = std::make_unique<StackPhotonAccounting>(*detector);
+  }
 }
+
+Run::~Run() = default;
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 void Run::BeginEvent(G4int eventID)
@@ -89,6 +104,8 @@ void Run::BeginEvent(G4int eventID)
   fEventOtherChargedTileEnergyDeposit = 0.;
   fEventNeutralTileEnergyDeposit = 0.;
   fEventStatisticsCommitted = false;
+  if (fW08Diagnostics) fW08Diagnostics->BeginEvent();
+  if (fStackAccounting) fStackAccounting->BeginEvent();
 }
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
@@ -330,7 +347,9 @@ void Run::AddSiPMDetection(G4int sensorIndex, G4int originLayer)
     fSiPMDetectionCounts[index] += 1;
     fEventSiPMDetectionCounts[index] += 1;
   }
-  if (sensorIndex < 0 || sensorIndex >= kStackSensorCount) {
+  // v2 has a separate normalized sensor/flow ledger with a four-slot stride.
+  // The legacy aggregate and copy-0..3 projection above retain their meaning.
+  if (fStackV2 || sensorIndex < 0 || sensorIndex >= kStackSensorCount) {
     return;
   }
 

@@ -5,6 +5,8 @@ __pycache__/
 build/
 build-osc*/
 build-gui/
+build-linux-arm64-g4-11.4.2-uivis/
+build-linux-arm64-g4-11.3.2-work/
 build-wsl/
 output/
 .venv-analysis/

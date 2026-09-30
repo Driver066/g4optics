@@ -32,6 +32,7 @@
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
 #include "PrimaryGeneratorAction.hh"
+#include "OpticalNumerics.hh"
 
 #include "PrimaryGeneratorMessenger.hh"
 
@@ -104,6 +105,7 @@ PrimaryGeneratorAction::~PrimaryGeneratorAction()
 
 void PrimaryGeneratorAction::GeneratePrimaries(G4Event* anEvent)
 {
+  if (OpticalNumerics::Instance().GenerateProbe(anEvent)) return;
   if (fElectronEnergyMode == "sr90Beta") {
     auto particle = fGeneralParticleSource->GetParticleDefinition();
     if (!particle || particle->GetParticleName() != "e-") {

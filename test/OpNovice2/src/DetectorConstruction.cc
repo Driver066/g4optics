@@ -34,16 +34,20 @@
 #include "DetectorConstruction.hh"
 
 #include "DetectorMessenger.hh"
+#include "W08PhotonDiagnostics.hh"
 
 #include "G4Box.hh"
+#include "G4DisplacedSolid.hh"
 #include "G4Element.hh"
 #include "G4IntersectionSolid.hh"
 #include "G4LogicalBorderSurface.hh"
 #include "G4LogicalSkinSurface.hh"
 #include "G4LogicalVolume.hh"
 #include "G4Material.hh"
+#include "G4MaterialPropertiesTable.hh"
 #include "G4NistManager.hh"
 #include "G4OpticalSurface.hh"
+#include "G4PhysicalConstants.hh"
 #include "G4PVPlacement.hh"
 #include "G4Sphere.hh"
 #include "G4SubtractionSolid.hh"
@@ -55,8 +59,93 @@
 #include "G4VisAttributes.hh"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <string>
+
+namespace {
+// These checks only read resolved objects. In particular, they do not query a
+// navigator, sample a solid, interpolate a physics vector, or draw randoms.
+void RequireW08(G4bool condition, const G4String& detail)
+{
+  if (!condition) {
+    G4ExceptionDescription message;
+    message << "W08 photon-loss diagnostics require the fixed W08 baseline. "
+            << detail;
+    G4Exception("DetectorConstruction::ValidateW08PhotonLossConfiguration",
+                "OpNovice2_W08_001", FatalException, message);
+  }
+}
+
+G4bool W08Equal(G4double actual, G4double expected)
+{
+  return std::isfinite(actual) &&
+         std::abs(actual - expected) <= 1.e-12 * std::max(1., std::abs(expected));
+}
+
+G4bool W08SamePosition(const G4ThreeVector& actual, const G4ThreeVector& expected)
+{
+  return W08Equal(actual.x() / mm, expected.x() / mm) &&
+         W08Equal(actual.y() / mm, expected.y() / mm) &&
+         W08Equal(actual.z() / mm, expected.z() / mm);
+}
+
+void CheckW08PropertyNames(const G4MaterialPropertiesTable* table,
+                          const G4String& label,
+                          const std::vector<G4String>& allowedProperties,
+                          const std::vector<G4String>& allowedConstants)
+{
+  RequireW08(table != nullptr, label + " has no material properties table.");
+  if (!table) return;
+  const auto& values = table->GetProperties();
+  const auto& names = table->GetMaterialPropertyNames();
+  for (std::size_t i = 0; i < values.size(); ++i) {
+    if (values[i]) {
+      RequireW08(i < names.size(), label + " has an unnamed material property.");
+      if (i >= names.size()) return;
+      RequireW08(std::find(allowedProperties.begin(), allowedProperties.end(), names[i]) !=
+                   allowedProperties.end(),
+                 label + " has an extra material property: " + names[i]);
+    }
+  }
+  const auto& constants = table->GetConstProperties();
+  const auto& constantNames = table->GetMaterialConstPropertyNames();
+  for (std::size_t i = 0; i < constants.size(); ++i) {
+    if (constants[i].second) {
+      RequireW08(i < constantNames.size(), label + " has an unnamed material constant.");
+      if (i >= constantNames.size()) return;
+      RequireW08(std::find(allowedConstants.begin(), allowedConstants.end(), constantNames[i]) !=
+                   allowedConstants.end(),
+                 label + " has an extra material constant: " + constantNames[i]);
+    }
+  }
+}
+
+void CheckW08ConstantVector(const G4MaterialPropertiesTable* table,
+                           const G4String& label,
+                           const G4String& name,
+                           G4double expected)
+{
+  const auto* property = table ? table->GetProperty(name) : nullptr;
+  RequireW08(property && property->GetVectorLength() == 2,
+             label + " " + name + " must have the two W08 endpoints.");
+  if (!property || property->GetVectorLength() != 2) return;
+  RequireW08(W08Equal(property->Energy(0) / eV, 2.) &&
+               W08Equal(property->Energy(1) / eV, 3.3) &&
+               W08Equal((*property)[0], expected) && W08Equal((*property)[1], expected),
+             label + " " + name + " differs from its W08 energy/value pair.");
+}
+
+void CheckW08Constant(const G4MaterialPropertiesTable* table,
+                     const G4String& name,
+                     G4double expected)
+{
+  RequireW08(table && table->ConstPropertyExists(name), "EJ-200 is missing " + name);
+  if (!table || !table->ConstPropertyExists(name)) return;
+  RequireW08(W08Equal(table->GetConstProperty(name), expected),
+             "EJ-200 " + name + " differs from W08.");
+}
+}  // namespace
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
@@ -135,6 +224,7 @@ DetectorConstruction::~DetectorConstruction()
 
 G4VPhysicalVolume* DetectorConstruction::Construct()
 {
+  fWorld = nullptr;
   fTank = nullptr;
   fAbsorber = nullptr;
   fAbsorber_LV = nullptr;
@@ -145,8 +235,19 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
   fGrease = nullptr;
   fGrease_LV = nullptr;
 
+  if ((fStackModel == "v2" && !fStackEnabled) ||
+      (fStackReadoutGapExplicit && (fStackModel != "v2" || !fStackEnabled))) {
+    G4Exception("DetectorConstruction::Construct", "OpNovice2_Stack_007", FatalException,
+                "The v2 model/readoutGap requires an enabled v2 longitudinal stack.");
+  }
   if (fStackEnabled) {
     ValidateStackConfiguration();
+    if (IsStackV2()) {
+      G4cout << "Stack v2: core_length=" << GetStackCoreLength() / mm
+             << " mm, readout_gap=" << GetStackReadoutGap() / mm
+             << " mm, internal_gaps=9, copy_stride=4, active_sensors_per_layer="
+             << GetActiveSensorsPerLayer() << ", final_layer_boundary=World" << G4endl;
+    }
   }
 
   fTankMaterial->SetMaterialPropertiesTable(fTankMPT);
@@ -166,6 +267,7 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
 
   G4VPhysicalVolume* world_PV =
     new G4PVPlacement(nullptr, G4ThreeVector(), fWorld_LV, "World", nullptr, false, 0);
+  fWorld = world_PV;
 
   // The tank
   auto tank_box = new G4Box("Tank_Box", fTank_x, fTank_y, fTank_z);
@@ -373,7 +475,7 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
         placementPos.setZ(placementPos.z() + GetStackTileCenterZ(layer));
       }
       const G4int copyNumber = fStackEnabled
-        ? 2 * layer + static_cast<G4int>(index)
+        ? GetSensorCopyStride() * layer + static_cast<G4int>(index)
         : static_cast<G4int>(index);
 
       auto placement = new G4PVPlacement(nullptr,
@@ -421,7 +523,7 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
         fTanks[layer],
         fAbsorbers[layer],
         fSurface);
-      if (fStackEnabled && layer + 1 < layerCount) {
+      if (fStackEnabled && !IsStackV2() && layer + 1 < layerCount) {
         new G4LogicalBorderSurface(
           "TankToDownstreamSteelSurface_" + std::to_string(layer),
           fTanks[layer],
@@ -439,7 +541,179 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
   }
   G4cout << "******  end of opticalSurface->DumpInfo" << G4endl;
 
+  ValidateW08PhotonLossConfiguration();
   return world_PV;
+}
+
+void DetectorConstruction::SetW08PhotonLossEnabled(G4bool enabled)
+{
+  // A diagnostics flag is not a geometry/physics modification. The UI command
+  // is PreInit-only so the action/ntuple layout is fixed before initialization.
+  fW08PhotonLossEnabled = enabled;
+  G4cout << "W08 photon-loss diagnostics " << (enabled ? "enabled" : "disabled") << G4endl;
+}
+
+W08GeometrySnapshot DetectorConstruction::GetW08GeometrySnapshot() const
+{
+  W08GeometrySnapshot result;
+  result.enabled = fW08PhotonLossEnabled;
+  result.dimple = fDimpleEnabled;
+  result.worldPV = fWorld;
+  result.tilePV = fTank;
+  result.sipmPV = fSiPM;
+  RequireW08(fWorld && fTank && fSiPM, "Geometry snapshot requested before construction.");
+  if (!fWorld || !fTank || !fSiPM) return result;
+  const auto* worldBox = dynamic_cast<const G4Box*>(fWorld->GetLogicalVolume()->GetSolid());
+  const auto* sipmBox = dynamic_cast<const G4Box*>(fSiPM->GetLogicalVolume()->GetSolid());
+  RequireW08(worldBox && sipmBox, "World and SiPM must be unrotated boxes.");
+  if (!worldBox || !sipmBox) return result;
+  const auto* tileSolid = fTank->GetLogicalVolume()->GetSolid();
+  const auto* subtraction = dynamic_cast<const G4SubtractionSolid*>(tileSolid);
+  const auto* tileBox = dynamic_cast<const G4Box*>(
+    subtraction ? subtraction->GetConstituentSolid(0) : tileSolid);
+  RequireW08(tileBox != nullptr, "The tile must be a box or a subtraction from that box.");
+  if (!tileBox) return result;
+  result.worldHalfSize = G4ThreeVector(worldBox->GetXHalfLength(), worldBox->GetYHalfLength(),
+                                     worldBox->GetZHalfLength());
+  result.tileHalfSize = G4ThreeVector(tileBox->GetXHalfLength(), tileBox->GetYHalfLength(),
+                                    tileBox->GetZHalfLength());
+  result.tileCenter = fTank->GetObjectTranslation();
+  result.sipmHalfSize = G4ThreeVector(sipmBox->GetXHalfLength(), sipmBox->GetYHalfLength(),
+                                    sipmBox->GetZHalfLength());
+  result.sipmCenter = fSiPM->GetObjectTranslation();
+  result.dimpleCenter = result.tileCenter + G4ThreeVector(0., 0., -result.tileHalfSize.z());
+  if (fDimpleEnabled) {
+    const auto* displaced = subtraction
+      ? dynamic_cast<const G4DisplacedSolid*>(subtraction->GetConstituentSolid(1)) : nullptr;
+    const auto* sphere = displaced
+      ? dynamic_cast<const G4Sphere*>(displaced->GetConstituentMovedSolid()) : nullptr;
+    RequireW08(sphere != nullptr, "The dimple must subtract a displaced sphere.");
+    if (!sphere) return result;
+    RequireW08(W08Equal(sphere->GetInnerRadius() / mm, 0.) &&
+                 W08Equal(sphere->GetStartPhiAngle(), 0.) &&
+                 W08Equal(sphere->GetDeltaPhiAngle(), twopi) &&
+                 W08Equal(sphere->GetStartThetaAngle(), 0.) &&
+                 W08Equal(sphere->GetDeltaThetaAngle(), pi),
+               "The subtracted dimple primitive must be a complete solid sphere.");
+    result.dimpleCenter = result.tileCenter + displaced->GetObjectTranslation();
+    result.dimpleRadius = sphere->GetOuterRadius();
+  }
+  return result;
+}
+
+void DetectorConstruction::ValidateW08PhotonLossConfiguration() const
+{
+  if (!fW08PhotonLossEnabled) return;
+  RequireW08(!fBottomCavityEnabled && !fGreaseEnabled && !fAbsorberEnabled && !fStackEnabled,
+             "Legacy cavity, grease, absorber, and stack must all be disabled.");
+  RequireW08(fSiPMLayout == "single" && fTanks.size() == 1 && fSiPMs.size() == 1 &&
+               fAbsorbers.empty() && fGrease == nullptr && fAbsorber == nullptr,
+             "Exactly one tile and one SiPM are supported.");
+  RequireW08((fSiPMFace == "-Z" || fSiPMFace == "bottom") &&
+               W08SamePosition(fSiPMLocalPosition, G4ThreeVector()),
+             "The SiPM must use bottom-center placement.");
+  if (fDimpleEnabled) {
+    RequireW08(fDimpleMode == "hemisphere" && W08Equal(fDimpleRadius / mm, 3.) &&
+                 GetEffectiveDimpleSiPMMode() == "opening",
+               "The only supported dimple is a strict r=3 mm hemisphere with opening placement.");
+  }
+  const auto geometry = GetW08GeometrySnapshot();
+  if (fDimpleEnabled) {
+    RequireW08(W08Equal(geometry.dimpleRadius / mm, 3.) &&
+                 W08SamePosition(geometry.dimpleCenter, G4ThreeVector(0., 0., -2.5) * mm),
+               "The resolved dimple radius/center differs from W08.");
+  }
+  RequireW08(W08SamePosition(geometry.worldHalfSize, G4ThreeVector(500., 500., 500.) * mm) &&
+               W08SamePosition(fWorld->GetObjectTranslation(), G4ThreeVector()),
+             "The World must remain a centered 1000 x 1000 x 1000 mm box.");
+  RequireW08(W08SamePosition(geometry.tileHalfSize, G4ThreeVector(50., 50., 2.5) * mm) &&
+               W08SamePosition(geometry.tileCenter, G4ThreeVector()),
+             "The tile must remain centered with full size 100 x 100 x 5 mm.");
+  RequireW08(W08SamePosition(geometry.sipmHalfSize, G4ThreeVector(1., 1., 0.25) * mm) &&
+               W08SamePosition(geometry.sipmCenter,
+                               G4ThreeVector(0., 0., fDimpleEnabled ? -2.25 : -2.75) * mm),
+             "The SiPM must retain its W08 size and resolved world position.");
+  RequireW08(fWorld->GetRotation() == nullptr && fTank->GetRotation() == nullptr &&
+               fSiPM->GetRotation() == nullptr &&
+               fTank->GetMotherLogical() == fWorld_LV && fSiPM->GetMotherLogical() == fWorld_LV &&
+               fWorld_LV->GetNoDaughters() == 2 && fTank_LV->GetNoDaughters() == 0 &&
+               fSiPM_LV->GetNoDaughters() == 0,
+             "Unexpected rotations, hierarchy, or additional volumes.");
+  RequireW08(fTank->GetCopyNo() == 0 && fSiPM->GetCopyNo() == 0,
+             "The tile and SiPM must retain copy number zero.");
+  RequireW08(fTank_LV->GetSolid()->GetEntityType() ==
+               (fDimpleEnabled ? "G4SubtractionSolid" : "G4Box"),
+             "The tile solid does not match the selected W08 geometry.");
+
+  RequireW08(fSurface && fSurface->GetType() == dielectric_dielectric &&
+               fSurface->GetModel() == unified && fSurface->GetFinish() == polished &&
+               W08Equal(fSurface->GetSigmaAlpha(), 0.),
+             "The shared Tank-to-World boundary must remain unified/dielectric_dielectric/polished.");
+  const auto* border = G4LogicalBorderSurface::GetSurface(fTank, fWorld);
+  RequireW08(border && border->GetSurfaceProperty() == fSurface,
+             "The actual Tank-to-World optical border has changed.");
+  RequireW08(G4LogicalBorderSurface::GetSurface(fWorld, fTank) == nullptr &&
+               G4LogicalBorderSurface::GetSurface(fTank, fSiPM) == nullptr &&
+               G4LogicalBorderSurface::GetSurface(fSiPM, fTank) == nullptr &&
+               G4LogicalBorderSurface::GetSurface(fWorld, fSiPM) == nullptr &&
+               G4LogicalBorderSurface::GetSurface(fSiPM, fWorld) == nullptr &&
+               G4LogicalSkinSurface::GetSurface(fWorld_LV) == nullptr &&
+               G4LogicalSkinSurface::GetSurface(fTank_LV) == nullptr &&
+               G4LogicalSkinSurface::GetSurface(fSiPM_LV) == nullptr,
+             "Additional optical borders or skins are outside W08.");
+  CheckW08PropertyNames(fSurface->GetMaterialPropertiesTable(), "Surface", {}, {});
+
+  RequireW08(fTank_LV->GetMaterial() == fTankMaterial &&
+               fTankMaterial->GetName() == "G4_PLASTIC_SC_VINYLTOLUENE" &&
+               fWorld_LV->GetMaterial() == fWorldMaterial && fWorldMaterial->GetName() == "G4_AIR" &&
+               fSiPM_LV->GetMaterial() == fSiPMMaterial && fSiPMMaterial->GetName() == "G4_Si",
+             "EJ-200 proxy, air, and silicon material identities must remain unchanged.");
+  const auto* tankTable = fTank_LV->GetMaterial()->GetMaterialPropertiesTable();
+  const auto* worldTable = fWorld_LV->GetMaterial()->GetMaterialPropertiesTable();
+  const auto* sipmTable = fSiPM_LV->GetMaterial()->GetMaterialPropertiesTable();
+  CheckW08PropertyNames(tankTable, "EJ-200",
+                       {"RINDEX", "GROUPVEL", "ABSLENGTH", "SCINTILLATIONCOMPONENT1"},
+                       {"SCINTILLATIONYIELD", "SCINTILLATIONYIELD1", "RESOLUTIONSCALE",
+                        "SCINTILLATIONRISETIME1", "SCINTILLATIONTIMECONSTANT1"});
+  CheckW08PropertyNames(worldTable, "World", {"RINDEX", "GROUPVEL", "ABSLENGTH"}, {});
+  CheckW08PropertyNames(sipmTable, "SiPM", {"RINDEX", "GROUPVEL", "ABSLENGTH"}, {});
+  CheckW08ConstantVector(tankTable, "EJ-200", "RINDEX", 1.58);
+  CheckW08ConstantVector(tankTable, "EJ-200", "ABSLENGTH", 3800. * mm);
+  CheckW08ConstantVector(worldTable, "World", "RINDEX", 1.0003);
+  CheckW08ConstantVector(worldTable, "World", "ABSLENGTH", 100. * mm);
+  CheckW08ConstantVector(sipmTable, "SiPM", "RINDEX", 4.);
+  CheckW08ConstantVector(sipmTable, "SiPM", "ABSLENGTH", 1. * um);
+  // GROUPVEL is automatically generated by Geant4 when RINDEX is installed.
+  CheckW08ConstantVector(tankTable, "EJ-200", "GROUPVEL", c_light / 1.58);
+  CheckW08ConstantVector(worldTable, "World", "GROUPVEL", c_light / 1.0003);
+  CheckW08ConstantVector(sipmTable, "SiPM", "GROUPVEL", c_light / 4.);
+  CheckW08Constant(tankTable, "SCINTILLATIONYIELD", 10000. / MeV);
+  CheckW08Constant(tankTable, "SCINTILLATIONYIELD1", 1.);
+  CheckW08Constant(tankTable, "RESOLUTIONSCALE", 1.);
+  CheckW08Constant(tankTable, "SCINTILLATIONRISETIME1", 0.9 * ns);
+  CheckW08Constant(tankTable, "SCINTILLATIONTIMECONSTANT1", 2.1 * ns);
+  RequireW08(W08Equal(fTankMaterial->GetIonisation()->GetBirksConstant(), 0.126 * mm / MeV),
+             "EJ-200 Birks constant must remain 0.126 mm/MeV.");
+
+  // Exact spectrum from ej200_sipm_gps_test.mac, in increasing photon energy.
+  const std::array<G4double, 18> energiesEV = {
+    2.4982, 2.5419, 2.5623, 2.5838, 2.6039, 2.6273,
+    2.6495, 2.6823, 2.7196, 2.7700, 2.8458, 2.9033,
+    2.9173, 2.9313, 2.9383, 2.9516, 3.0092, 3.1001};
+  const std::array<G4double, 18> intensities = {
+    0.069, 0.109, 0.134, 0.174, 0.214, 0.274,
+    0.335, 0.415, 0.468, 0.582, 0.851, 0.991,
+    1.000, 0.985, 0.960, 0.881, 0.352, 0.017};
+  const auto* spectrum = tankTable ? tankTable->GetProperty("SCINTILLATIONCOMPONENT1") : nullptr;
+  RequireW08(spectrum && spectrum->GetVectorLength() == energiesEV.size(),
+             "EJ-200 must retain the complete W08 scintillation spectrum.");
+  if (spectrum && spectrum->GetVectorLength() == energiesEV.size()) {
+    for (std::size_t i = 0; i < energiesEV.size(); ++i) {
+      RequireW08(W08Equal(spectrum->Energy(i) / eV, energiesEV[i]) &&
+                   W08Equal((*spectrum)[i], intensities[i]),
+                 "EJ-200 spectrum differs from W08 at point " + std::to_string(i));
+    }
+  }
 }
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
@@ -751,15 +1025,76 @@ void DetectorConstruction::SetStackLayers(G4int layers)
   G4cout << "Longitudinal stack layer count set to " << fStackLayers << G4endl;
 }
 
+void DetectorConstruction::SetStackModel(const G4String& model)
+{
+  if (model != "v1" && model != "v2") {
+    G4Exception("DetectorConstruction::SetStackModel", "OpNovice2_Stack_008",
+                FatalException, "Stack model must be v1 or v2.");
+    return;
+  }
+  fStackModel = model;
+  G4RunManager::GetRunManager()->GeometryHasBeenModified();
+}
+
+void DetectorConstruction::SetStackReadoutGap(G4double gap)
+{
+  if (!std::isfinite(gap) || gap < 0.5 * mm) {
+    G4Exception("DetectorConstruction::SetStackReadoutGap", "OpNovice2_Stack_009",
+                FatalException, "The explicit stack-v2 readout gap must be finite and at least 0.5 mm.");
+    return;
+  }
+  fStackReadoutGap = gap;
+  fStackReadoutGapExplicit = true;
+  G4RunManager::GetRunManager()->GeometryHasBeenModified();
+}
+
+void DetectorConstruction::SetStackPhotonAccounting(G4bool enabled)
+{
+  fStackPhotonAccounting = enabled;
+}
+
+G4int DetectorConstruction::GetActiveSensorsPerLayer() const
+{
+  if (fSiPMLayout == "back-four") return 4;
+  if (fSiPMLayout == "back-two" || fSiPMLayout == "edge-two") return 2;
+  return 1;
+}
+
+G4bool DetectorConstruction::IsSensorCopyActive(G4int copyNumber) const
+{
+  if (copyNumber < 0) return false;
+  if (!fStackEnabled) return copyNumber < GetActiveSensorsPerLayer();
+  return copyNumber < GetSensorCopyStride() * fStackLayers &&
+         copyNumber % GetSensorCopyStride() < GetActiveSensorsPerLayer();
+}
+
+G4ThreeVector DetectorConstruction::GetSiPMHalfSize() const
+{
+  G4double hx = 0., hy = 0., hz = 0.;
+  G4ThreeVector center;
+  ComputeSiPMPlacementFor(fSiPMFace, GetSiPMLocalPositions().front(), hx, hy, hz, center);
+  return {hx, hy, hz};
+}
+
+G4ThreeVector DetectorConstruction::GetSiPMWorldPosition(G4int copyNumber) const
+{
+  for (const auto* sensor : fSiPMs) {
+    if (sensor->GetCopyNo() == copyNumber) return sensor->GetObjectTranslation();
+  }
+  G4Exception("DetectorConstruction::GetSiPMWorldPosition", "OpNovice2_Stack_010",
+              FatalException, "Requested inactive or unconstructed SiPM copy.");
+  return {};
+}
+
 G4double DetectorConstruction::GetStackSteelCenterZ(G4int layer) const
 {
-  const G4double moduleLength = 2. * fAbsorber_z + 2. * fTank_z;
+  const G4double moduleLength = GetStackModulePitch();
   return 0.5 * GetStackLength() - layer * moduleLength - fAbsorber_z;
 }
 
 G4double DetectorConstruction::GetStackTileCenterZ(G4int layer) const
 {
-  const G4double moduleLength = 2. * fAbsorber_z + 2. * fTank_z;
+  const G4double moduleLength = GetStackModulePitch();
   return 0.5 * GetStackLength() - layer * moduleLength
          - 2. * fAbsorber_z - fTank_z;
 }
@@ -785,8 +1120,8 @@ G4int DetectorConstruction::GetSensorLayer(G4int copyNumber) const
   if (!fStackEnabled) {
     return copyNumber >= 0 ? 0 : -1;
   }
-  return copyNumber >= 0 && copyNumber < 2 * fStackLayers
-    ? copyNumber / 2
+  return IsSensorCopyActive(copyNumber)
+    ? copyNumber / GetSensorCopyStride()
     : -1;
 }
 
@@ -795,8 +1130,8 @@ G4int DetectorConstruction::GetSensorLocalIndex(G4int copyNumber) const
   if (!fStackEnabled) {
     return copyNumber;
   }
-  return copyNumber >= 0 && copyNumber < 2 * fStackLayers
-    ? copyNumber % 2
+  return IsSensorCopyActive(copyNumber)
+    ? copyNumber % GetSensorCopyStride()
     : -1;
 }
 
@@ -989,7 +1324,43 @@ void DetectorConstruction::ValidateStackConfiguration() const
                 FatalException,
                 msg);
   }
-  if (fSiPMLayout != "edge-two" ||
+  if (IsStackV2()) {
+    const auto equalLength = [](G4double value, G4double expected) {
+      return std::isfinite(value) && std::abs(value - expected) <= 1.e-9 * mm;
+    };
+    const auto require = [](G4bool condition, const char* message) {
+      if (!condition) G4Exception("DetectorConstruction::ValidateStackConfiguration",
+                                 "OpNovice2_StackV2_001", FatalException, message);
+    };
+    require(fStackReadoutGapExplicit && std::isfinite(fStackReadoutGap) &&
+              fStackReadoutGap >= 0.5 * mm,
+            "stack-v2 requires an explicit finite readoutGap >= 0.5 mm; no production default is selected.");
+    require(equalLength(fTank_x, 50. * mm) && equalLength(fTank_y, 50. * mm) &&
+              equalLength(fAbsorber_x, 250. * mm) && equalLength(fAbsorber_y, 250. * mm) &&
+              equalLength(fAbsorber_z, 20. * mm),
+            "stack-v2 requires 100x100 mm tiles and 500x500x40 mm steel slabs.");
+    G4bool acceptedThickness = false;
+    for (const auto thickness : {4., 8., 12., 16., 20., 24.}) {
+      acceptedThickness = acceptedThickness || equalLength(2. * fTank_z, thickness * mm);
+    }
+    require(acceptedThickness, "stack-v2 supports tile thicknesses 4, 8, 12, 16, 20, 24 mm only.");
+    require(equalLength(fSiPMActiveU, 2.4 * mm) && equalLength(fSiPMActiveV, 2.4 * mm) &&
+              equalLength(fSiPMThickness, 0.5 * mm),
+            "stack-v2 requires 2.4x2.4x0.5 mm SiPM proxies.");
+    require(fSiPMLocalPosition.mag() <= 1.e-9 * mm,
+            "stack-v2 requires the registered fixed layout positions, not a local-position override.");
+    const G4bool side = fSiPMLayout == "edge-two" &&
+                         (fSiPMFace == "+X" || fSiPMFace == "right");
+    const G4bool back = (fSiPMLayout == "single" || fSiPMLayout == "back-two" ||
+                         fSiPMLayout == "back-four") &&
+                         (fSiPMFace == "-Z" || fSiPMFace == "bottom");
+    require(side || back, "stack-v2 supports back-center, back-two, back-four on -Z or edge-two on +X.");
+    require(0.5 * GetStackCoreLength() + 1.5 * mm < fExpHall_z - safety &&
+              0.5 * GetStackCoreLength() + (back ? fSiPMThickness : 0.) < fExpHall_z - safety &&
+              fAbsorber_x < fExpHall_x - safety && fAbsorber_y < fExpHall_y - safety,
+            "stack-v2 steel, source clearance, or final back-SiPM protrusion exceeds the World.");
+  }
+  else if (fSiPMLayout != "edge-two" ||
       (fSiPMFace != "+X" && fSiPMFace != "right")) {
     G4ExceptionDescription msg;
     msg << "The longitudinal stack requires edge-two on the +X face.";
@@ -1435,6 +1806,10 @@ std::vector<G4ThreeVector> DetectorConstruction::GetSiPMLocalPositions() const
       G4ThreeVector(offset, offset, 0.)
     };
   }
+  if (fSiPMLayout == "back-two") {
+    const G4double offset = 25. * mm;
+    return {G4ThreeVector(-offset, -offset, 0.), G4ThreeVector(offset, offset, 0.)};
+  }
   return {fSiPMLocalPosition};
 }
 
@@ -1480,7 +1855,7 @@ void DetectorConstruction::ValidateSiPMLayout() const
     }
     return;
   }
-  if (fSiPMLayout != "back-four") {
+  if (fSiPMLayout != "back-four" && fSiPMLayout != "back-two") {
     G4ExceptionDescription msg;
     msg << "Unknown SiPM layout: " << fSiPMLayout
         << ". Use single, edge-two, or back-four.";
@@ -1529,10 +1904,10 @@ void DetectorConstruction::ValidateSiPMLayout() const
 
 void DetectorConstruction::SetSiPMLayout(const G4String& layout)
 {
-  if (layout != "single" && layout != "edge-two" && layout != "back-four") {
+  if (layout != "single" && layout != "edge-two" && layout != "back-four" && layout != "back-two") {
     G4ExceptionDescription msg;
     msg << "Invalid SiPM layout: " << layout
-        << ". Use single, edge-two, or back-four.";
+        << ". Use single, edge-two, back-two, or back-four.";
     G4Exception("DetectorConstruction::SetSiPMLayout",
                 "OpNovice2_SiPM_011",
                 FatalException,

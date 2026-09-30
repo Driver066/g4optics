@@ -38,9 +38,12 @@
 
 #include <array>
 #include <limits>
+#include <memory>
 #include <unordered_set>
 
 class G4ParticleDefinition;
+class W08PhotonDiagnostics;
+class StackPhotonAccounting;
 
 struct StackLayerEventRecord
 {
@@ -81,7 +84,10 @@ class Run : public G4Run
     static constexpr G4int kUnknownOriginIndex = kStackLayerCount;
 
     Run();
-    ~Run() override = default;
+    ~Run() override;
+
+    W08PhotonDiagnostics* GetW08Diagnostics() { return fW08Diagnostics.get(); }
+    StackPhotonAccounting* GetStackAccounting() { return fStackAccounting.get(); }
 
     void SetPrimary(G4ParticleDefinition* particle, G4double energy, G4bool polarized,
                     G4double polarization, const G4String& electronEnergyMode);
@@ -407,6 +413,10 @@ class Run : public G4Run
     std::vector<G4long> fBoundaryProcs;
 
     G4long fTotalSurface = 0;
+
+    std::unique_ptr<W08PhotonDiagnostics> fW08Diagnostics;
+    std::unique_ptr<StackPhotonAccounting> fStackAccounting;
+    G4bool fStackV2 = false;
 
     // SiPM counting
     G4long fSiPMDetectionCount = 0;

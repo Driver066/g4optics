@@ -29,10 +29,13 @@
 //
 
 #include "TrackingAction.hh"
+#include "OpticalNumerics.hh"
 
 #include "DetectorConstruction.hh"
 #include "Run.hh"
 #include "TrackInformation.hh"
+#include "W08PhotonDiagnostics.hh"
+#include "StackPhotonAccounting.hh"
 
 #include "G4AnalysisManager.hh"
 #include "G4OpticalPhoton.hh"
@@ -56,6 +59,14 @@ void TrackingAction::PreUserTrackingAction(const G4Track* aTrack)
   }
 
   trackInfo->SetIsFirstTankX(true);
+
+  auto* currentRun = static_cast<Run*>(G4RunManager::GetRunManager()->GetNonConstCurrentRun());
+  if (currentRun && currentRun->GetW08Diagnostics()) {
+    currentRun->GetW08Diagnostics()->BeginTracking(aTrack);
+  }
+  if (currentRun && currentRun->GetStackAccounting()) {
+    currentRun->GetStackAccounting()->BeginTracking(aTrack);
+  }
 
   // Optical secondaries inherit their parent's TrackInformation.  Bind a
   // previously unknown origin to the tile in which the optical track starts;
@@ -117,6 +128,14 @@ void TrackingAction::PreUserTrackingAction(const G4Track* aTrack)
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 void TrackingAction::PostUserTrackingAction(const G4Track* aTrack)
 {
+  OpticalNumerics::Instance().EndTracking(aTrack);
+  auto* currentRun = static_cast<Run*>(G4RunManager::GetRunManager()->GetNonConstCurrentRun());
+  if (currentRun && currentRun->GetW08Diagnostics()) {
+    currentRun->GetW08Diagnostics()->EndTracking(aTrack);
+  }
+  if (currentRun && currentRun->GetStackAccounting()) {
+    currentRun->GetStackAccounting()->EndTracking(aTrack);
+  }
   G4TrackVector* secondaries = fpTrackingManager->GimmeSecondaries();
   if (secondaries) {
     auto info = (TrackInformation*)(aTrack->GetUserInformation());

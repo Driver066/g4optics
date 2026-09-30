@@ -45,6 +45,7 @@
 #include <vector>
 
 class DetectorMessenger;
+struct W08GeometrySnapshot;
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 
@@ -56,14 +57,44 @@ class DetectorConstruction : public G4VUserDetectorConstruction
 
     G4VPhysicalVolume* Construct() override;
 
+    void SetW08PhotonLossEnabled(G4bool enabled);
+    G4bool IsW08PhotonDiagnosticsEnabled() const { return fW08PhotonLossEnabled; }
+    W08GeometrySnapshot GetW08GeometrySnapshot() const;
+    // Read-only guard: also called at BeginRun, after any Idle-state commands.
+    void ValidateW08PhotonLossConfiguration() const;
+
     G4VPhysicalVolume* GetTank() const { return fTank; }
     G4double GetTankXSize() const { return fTank_x; }
     G4bool IsStackEnabled() const { return fStackEnabled; }
+    G4bool IsStackV2() const { return fStackEnabled && fStackModel == "v2"; }
+    G4bool IsStackAccountingEnabled() const { return IsStackV2() && fStackPhotonAccounting; }
+    const G4String& GetStackModel() const { return fStackModel; }
+    G4double GetStackReadoutGap() const { return IsStackV2() ? fStackReadoutGap : 0.; }
     G4int GetStackLayerCount() const { return fStackEnabled ? fStackLayers : 1; }
-    G4double GetStackLength() const
+    G4double GetStackCoreLength() const
     {
-      return GetStackLayerCount() * (2. * fAbsorber_z + 2. * fTank_z);
+      return GetStackLayerCount() * (2. * fAbsorber_z + 2. * fTank_z)
+             + (IsStackV2() ? (GetStackLayerCount() - 1) * fStackReadoutGap : 0.);
     }
+    G4double GetStackLength() const { return GetStackCoreLength(); }
+    G4double GetStackModulePitch() const
+    {
+      return 2. * fAbsorber_z + 2. * fTank_z + GetStackReadoutGap();
+    }
+    G4int GetSensorCopyStride() const { return IsStackV2() ? 4 : 2; }
+    G4int GetActiveSensorsPerLayer() const;
+    G4bool IsSensorCopyActive(G4int copyNumber) const;
+    std::vector<G4ThreeVector> GetSiPMLocalPositions() const;
+    const std::vector<G4VPhysicalVolume*>& GetSiPMs() const { return fSiPMs; }
+    const std::vector<G4VPhysicalVolume*>& GetStackTiles() const { return fTanks; }
+    const std::vector<G4VPhysicalVolume*>& GetStackAbsorbers() const { return fAbsorbers; }
+    G4VPhysicalVolume* GetWorld() const { return fWorld; }
+    G4ThreeVector GetWorldHalfSize() const { return {fExpHall_x, fExpHall_y, fExpHall_z}; }
+    G4ThreeVector GetTileHalfSize() const { return {fTank_x, fTank_y, fTank_z}; }
+    G4ThreeVector GetSiPMHalfSize() const;
+    G4ThreeVector GetSiPMWorldPosition(G4int copyNumber) const;
+    const G4String& GetSiPMLayout() const { return fSiPMLayout; }
+    const G4String& GetSiPMFace() const { return fSiPMFace; }
     G4double GetStackSteelCenterZ(G4int layer) const;
     G4double GetStackTileCenterZ(G4int layer) const;
     G4int GetTileLayer(const G4VPhysicalVolume* volume) const;
@@ -88,6 +119,7 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     }
 
     G4OpticalSurface* GetSurface(void) { return fSurface; }
+    const G4OpticalSurface* GetSurface() const { return fSurface; }
 
     void SetSurfaceFinish(const G4OpticalSurfaceFinish finish)
     {
@@ -116,14 +148,17 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     void AddTankMPV(const G4String& prop, G4MaterialPropertyVector* mpv);
     void AddTankMPC(const G4String& prop, G4double v);
     G4MaterialPropertiesTable* GetTankMaterialPropertiesTable() { return fTankMPT; }
+    const G4MaterialPropertiesTable* GetTankMaterialPropertiesTable() const { return fTankMPT; }
 
     void AddWorldMPV(const G4String& prop, G4MaterialPropertyVector* mpv);
     void AddWorldMPC(const G4String& prop, G4double v);
     G4MaterialPropertiesTable* GetWorldMaterialPropertiesTable() { return fWorldMPT; }
+    const G4MaterialPropertiesTable* GetWorldMaterialPropertiesTable() const { return fWorldMPT; }
 
     void AddSurfaceMPV(const G4String& prop, G4MaterialPropertyVector* mpv);
     void AddSurfaceMPC(const G4String& prop, G4double v);
     G4MaterialPropertiesTable* GetSurfaceMaterialPropertiesTable() { return fSurfaceMPT; }
+    const G4MaterialPropertiesTable* GetSurfaceMaterialPropertiesTable() const { return fSurfaceMPT; }
 
     void SetGreaseEnabled(G4bool enabled);
     void SetGreaseThickness(G4double thickness);
@@ -142,6 +177,9 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     void SetAbsorberSize(const G4ThreeVector& fullSize);
     void SetStackEnabled(G4bool enabled);
     void SetStackLayers(G4int layers);
+    void SetStackModel(const G4String& model);
+    void SetStackReadoutGap(G4double gap);
+    void SetStackPhotonAccounting(G4bool enabled);
     void SetBottomCavityEnabled(G4bool enabled);
     void SetDimpleEnabled(G4bool enabled);
     void SetDimpleRadius(G4double radius);
@@ -156,6 +194,8 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     void SetSiPMSize(const G4ThreeVector& size);
 
   private:
+    G4bool fW08PhotonLossEnabled = false;
+    G4VPhysicalVolume* fWorld = nullptr;
     G4double fExpHall_x = 50. * CLHEP::cm;
     G4double fExpHall_y = 50. * CLHEP::cm;
     G4double fExpHall_z = 50. * CLHEP::cm;
@@ -174,6 +214,10 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     G4double fAbsorber_z = 2. * CLHEP::cm;
     G4bool fStackEnabled = false;
     G4int fStackLayers = 10;
+    G4String fStackModel = "v1";
+    G4double fStackReadoutGap = 0.;
+    G4bool fStackReadoutGapExplicit = false;
+    G4bool fStackPhotonAccounting = true;
     G4bool fBottomCavityEnabled = false;
     G4bool fDimpleEnabled = false;
     G4double fDimpleRadius = 3. * CLHEP::mm;
@@ -254,7 +298,6 @@ class DetectorConstruction : public G4VUserDetectorConstruction
                                  G4double& hy,
                                  G4double& hz,
                                  G4ThreeVector& pos) const;
-    std::vector<G4ThreeVector> GetSiPMLocalPositions() const;
     void ValidateSiPMLayout() const;
     G4double GetBottomCavityRadius() const;
     G4String GetEffectiveDimpleSiPMMode() const;

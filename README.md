@@ -3,6 +3,37 @@
 **Duration:** 4 Weeks  
 **Goal:** Study light collection uniformity in plastic scintillator tiles of varying sizes/thicknesses using Geant4 simulations.
 
+## Current local environment — Geant4 11.4.2
+
+The local ARM64 environment is managed by `tools/local/g4env.sh`. It uses a pinned
+Geant4 11.4.2 GUI base plus the Python dependency required by the scan runner,
+version-matched datasets, and a separate Release build. ROOT and Python analysis
+run on the Mac. The default interactive viewer is `TSGQtZB`, verified with XQuartz.
+
+```sh
+tools/local/g4env.sh start
+tools/local/g4env.sh shell
+tools/local/g4env.sh gui
+```
+
+See [the Chinese environment guide](tools/local/README.zh.md) for installation,
+acceptance, isolated output, and rollback. The retained container named `g4dev`
+is the historical 11.3.2 environment; the managed 11.4.2 container is `g4dev-1142`.
+The original week-by-week setup commands below are historical notes, not the
+current installation entrypoint.
+
+## Ten-layer steel-module layout/gap infrastructure
+
+`steel-module-stack-v2` supports back-four, diagonal back-two, same-face
+edge-two and back-center layouts with an explicit readout gap. The existing
+steel optical settings and optical-photon Scintillation are retained. The
+0.5/1.0 mm gap candidates remain under evaluation; no production gap is selected.
+
+See the [Chinese workflow guide](tools/steel_stack_v2/README.zh.md) and
+[v2 model contract](docs/decisions/steel-module-stack-v2.md). Its finite local
+engineering acceptance is separate from scientific scans and does not submit
+OSC jobs. Historical stack-v1 results and the accepted default binary are preserved.
+
 ---
 
 ## Current Phase: Matching Lab Data & Predicting the 10×10×24mm Tile

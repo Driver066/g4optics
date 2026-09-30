@@ -1,14 +1,19 @@
+# Values are generated from tools/local/environment.json and image-lock.json.
+# The g4env manager owns the existing container; this is its matching deployment specification.
+name: g4optics-local
 services:
   geant4:
-    image: my-geant4:11.3.2
+    image: ${G4_LOCAL_IMAGE:?Use the generated outputs/environment/compose.env}
     platform: linux/arm64
-    volumes:
-      - ./:/work
-    working_dir: /work
+    container_name: ${G4_LOCAL_CONTAINER:-g4dev-1142}
+    entrypoint: /bin/bash
+    working_dir: /work/g4optics/test/OpNovice2
     stdin_open: true
     tty: true
+    volumes:
+      - ${G4_HOST_WORKDIR:?Versioned environment required}:/work
+      - ${G4_LOCAL_DATA_ROOT:?Versioned datasets required}:/g4data:ro
     environment:
-      - DISPLAY=${DISPLAY}
-    # Uncomment for Linux X11:
-    # network_mode: host
-    # volumes also include: - /tmp/.X11-unix:/tmp/.X11-unix
+      DISPLAY: host.docker.internal:0
+      QT_X11_NO_MITSHM: "1"
+      G4VIS_DEFAULT_DRIVER: ${G4_LOCAL_VIEWER:-TSGQtZB}

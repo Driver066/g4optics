@@ -1,0 +1,18 @@
+{
+  "version": "11.4.2",
+  "platform": "linux/arm64",
+  "image": "carlomt/geant4@sha256:6ca84898d1346dfd9b511251dc158eada0f906fdcae6d9139415c0c3f932e7b6",
+  "image_tag_reference": "carlomt/geant4:11.4.2-gui",
+  "local_image_tag": "g4optics/geant4:11.4.2-gui-arm64-v1",
+  "container": "g4dev-1142",
+  "data_root": "/Users/edison/geant4-docker/geant4-datasets/11.4.2",
+  "container_data_root": "/g4data",
+  "container_project_root": "/work/g4optics",
+  "build_dir": "build-linux-arm64-g4-11.4.2-uivis",
+  "build_jobs": 4,
+  "default_viewer": "TSGQtZB",
+  "root_command": "/opt/homebrew/bin/root",
+  "legacy_container": "g4dev",
+  "legacy_image_id": "sha256:a1a0eab8c226a0438877cc8ba79941a1e6915ec35253df2657f972fc2b618fc2",
+  "legacy_build_dir": "build-linux-arm64-g4-11.3.2-work"
+}

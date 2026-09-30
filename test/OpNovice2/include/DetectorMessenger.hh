@@ -60,6 +60,9 @@ class DetectorMessenger : public G4UImessenger
   private:
     DetectorConstruction* fDetector = nullptr;
     G4UIdirectory* fOpticalDir = nullptr;
+    G4UIdirectory* fDiagnosticsDir = nullptr;
+    G4UIcmdWithABool* fW08PhotonLossCmd = nullptr;
+    G4UIcmdWithABool* fStackPhotonAccountingCmd = nullptr;
 
     // the surface
     G4UIcmdWithAString* fSurfaceTypeCmd = nullptr;
@@ -82,6 +85,8 @@ class DetectorMessenger : public G4UImessenger
     G4UIcmdWith3VectorAndUnit* fAbsorberSizeCmd = nullptr;
     G4UIcmdWithABool* fStackEnabledCmd = nullptr;
     G4UIcmdWithAnInteger* fStackLayersCmd = nullptr;
+    G4UIcmdWithAString* fStackModelCmd = nullptr;
+    G4UIcmdWithADoubleAndUnit* fStackReadoutGapCmd = nullptr;
     G4UIcmdWithABool* fDimpleEnabledCmd = nullptr;
     G4UIcmdWithADoubleAndUnit* fDimpleRadiusCmd = nullptr;
     G4UIcmdWithAString* fDimpleModeCmd = nullptr;

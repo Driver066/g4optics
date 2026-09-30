@@ -47,7 +47,7 @@ class SteppingAction : public G4UserSteppingAction
     void UserSteppingAction(const G4Step*) override;
 
     inline void SetKillOnSecondSurface(G4bool val) { fKillOnSecondSurface = val; }
-    inline G4bool GetKillOnSecondSurface() { return fKillOnSecondSurface; }
+    inline G4bool GetKillOnSecondSurface() const { return fKillOnSecondSurface; }
 
   private:
     SteppingMessenger* fSteppingMessenger = nullptr;
