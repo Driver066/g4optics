@@ -244,6 +244,8 @@ p = m['remote_paths']
 def check_stop():
     if m['purpose'] == 'calibration':
         check(not Path(m['calibration_control']['stop_file']).exists(), 'Calibration stopped by an earlier failure')
+    if m['purpose'] == 'science' and 'science_control' in m:
+        check(not Path(m['science_control']['stop_file']).exists(), 'Formal campaign stopped by an earlier failure')
 
 def verify_inputs():
     check(digest(p['executable']) == m['executable_sha256'], 'Executable changed')
@@ -273,6 +275,7 @@ receipt = dict(schema_version='steel-stack-v2-osc-execution-v1', task_id=task['t
               executable_sha256=m['executable_sha256'], source_manifest_sha256=m['source_manifest_sha256'],
               sif_sha256=m['sif_sha256'], dataset_receipt_sha256=m['dataset_receipt_sha256'],
               status='running', scheduler_job=job, array_index=index,
+              global_task_index=m.get('task_offset',0)+index,
               purpose=task.get('purpose','science'), optical_numerics=task['config']['optical_numerics'],
               hostname=platform.node())
 receipt_path = task_dir/'execution.json'
@@ -370,11 +373,12 @@ def render(plan, output_dir, *, remote_bundle_root, remote_output_root, account,
         constraint_line = f"#SBATCH --constraint={node_constraint}\n" if node_constraint else ""
         launch = f"exec python3 {shlex.quote(bundle+'/array_task.py')} {shlex.quote(bundle+'/manifest.json')} {sha256(stage/'manifest.json')}"
         preamble = ""
-        if plan["purpose"] == "calibration":
-            control = plan["calibration_control"]
+        if plan["purpose"] == "calibration" or "science_control" in plan:
+            control = plan["calibration_control"] if plan["purpose"] == "calibration" else plan["science_control"]
+            wrapper = "precision_worker.py" if plan["purpose"] == "calibration" else "science_worker.py"
             preamble = "#SBATCH --no-requeue\n#SBATCH --signal=B:TERM@60\n"
             launch = ("module load python/3.12\nexport PYTHONNOUSERSITE=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1\nexec "
-                      +shlex.join([control["python"], control["root"]+"/precision_worker.py",
+                      +shlex.join([control["python"], control["root"]+"/"+wrapper,
                                    bundle+"/manifest.json", sha256(stage/"manifest.json")]))
         sbatch = f'''#!/usr/bin/env bash
 # Rendered only. No job has been submitted; inspect the frozen inputs first.

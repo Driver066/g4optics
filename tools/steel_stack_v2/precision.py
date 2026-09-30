@@ -167,7 +167,7 @@ def freeze_main(pairs, configurations, calibration_tasks, excluded, manifest, ou
     return proposal
 
 
-def plots(groups, output):
+def plots(groups, output, *, sample_label="Independent calibration"):
     os.environ["MPLBACKEND"] = "Agg"
     os.environ["MPLCONFIGDIR"] = str(output/"plot-cache")
     import matplotlib.pyplot as plt
@@ -178,7 +178,7 @@ def plots(groups, output):
         ax.hist(np.log10(1+x), bins=30, color="#3975a3", edgecolor="white")
         ax.set(title=f"{key[1]}, t={key[0]:g} mm, g={key[2]:g} mm",
                xlabel="log10(1 + collected photons / neutron)", ylabel="Neutron events")
-    fig.suptitle("Independent calibration only — includes zero responses", fontsize=14)
+    fig.suptitle(sample_label+" only — includes zero responses", fontsize=14)
     for suffix in ("png", "pdf"):
         fig.savefig(output/("event-distributions."+suffix), dpi=160)
     plt.close(fig)
@@ -190,7 +190,7 @@ def plots(groups, output):
                     label=f"{key[1]}, t={key[0]:g}, g={key[2]:g}")
     ax.plot([0,1], [0,1], color="gray", linestyle=":")
     ax.set(xlabel="Fraction of neutron events (smallest response first)",
-           ylabel="Fraction of collected photons", title="Calibration tail contributions — no event trimming")
+           ylabel="Fraction of collected photons", title=sample_label+" tail contributions — no event trimming")
     ax.legend(fontsize=8)
     for suffix in ("png", "pdf"):
         fig.savefig(output/("tail-contributions."+suffix), dpi=160)

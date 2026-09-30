@@ -35,7 +35,7 @@ def analysis_identity():
                           for d in importlib.metadata.distributions()})
 
 
-def verify_controller(control):
+def verify_controller(control, *, files=CONTROLLER_FILES):
     root = Path(control["root"])
     document_path = root/"controller.json"
     require(sha256(document_path) == control["sha256"], "Frozen controller manifest changed")
@@ -45,7 +45,7 @@ def verify_controller(control):
         require(not p.is_symlink(), "Symlink in controller snapshot")
         if p.is_file() and p.name != "controller.json" and "__pycache__" not in p.parts:
             actual[p.relative_to(root).as_posix()] = sha256(p)
-    require(actual == document["files"] and set(actual) == set(CONTROLLER_FILES), "Controller inventory changed")
+    require(actual == document["files"] and set(actual) == set(files), "Controller inventory changed")
     require(analysis_identity() == document["analysis_identity"], "Analysis interpreter/dependencies changed")
     return document
 

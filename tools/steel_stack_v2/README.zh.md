@@ -221,3 +221,43 @@ bootstrap 90% 分位中的较大值，加 20% 余量，按每任务 100 事件�
 若分母或方差退化，生成诊断与 `rejected.json`，不生成正式清单。
 若实测耗时无法保留既定一小时余量，建议清单标记 `executable=false`，不会自动换资源。
 正式任务完成后仍须检查实际区间宽度；本规划不承诺精度达标、不判定等价、不选择间隙。
+
+## 独立正式扫描与自动续接
+
+`science.py prepare|advance|status|analyze` 执行已获授权的冻结正式清单，
+从校准批 `analysis/formal-plan/` 原样读取 247,200 事件、2,472 项任务及独立种子；
+不重新生成种子、调整样本量或把校准／benchmark 纳入正式估计。
+
+准备时显式给出校准 manifest、正式建议 manifest 的 SHA-256、控制工具提交、
+分析解释器、研究账户及实测 `MaxArraySize`。Pitzer 本次值为 1001；
+工具按 900、900、672 项拆成三个 array，每项仍是 100 事件／1 CPU／4 GiB／
+40core／一小时，上限四并发。提交和模拟执行使用独立目录及冻结控制工具。
+
+```bash
+python science.py prepare --batch-dir <新正式批次> --calibration-dir <已完成校准批次> \
+  --calibration-manifest-sha256 <校准校验值> --proposal-sha256 <正式建议校验值> \
+  --controller-commit <控制工具提交> --analysis-python <固定解释器> \
+  --account pas2524 --max-array-size 1001
+
+python <正式批次>/controller/science.py advance \
+  --batch-dir <正式批次> --campaign-sha256 <prepare 输出的校验值>
+python <正式批次>/controller/science.py status \
+  --batch-dir <正式批次> --campaign-sha256 <prepare 输出的校验值>
+```
+
+首次 `advance` 提交第一 array 和一个依赖它结束的短续接作业；array 先保留在
+hold 状态，提交回执和续接回执落盘后才 release，避免启动快于归档的竞态。
+每项结束即完整审计并写正式接受回执；续接作业要求此前 array 全部完成且回执完整，
+再提交下一 array。三组共用 `STOP.json`，后续 array 不能提前启动；因此总并发不叠加。
+续接不依赖 Mac 持续在线。提交前保存 intent；未知提交结果保留 intent 并拒绝重复提交。
+同一正式中子任务只允许一个 attempt，失败不自动改变种子、重跑或增加时限。
+
+第三 array 全部完成并通过审计后，续接提交独立的单核分析作业。
+它重新核对全部输出、实际 Slurm 身份、光子账本、有效传感器合计、数值修正记录及过程状态，
+才读取 ROOT。按完整中子事件在任务块内重采 10,000 次，输出四项 98.75% 校正区间、
+逐项 95% 区间、辅助指标及图表；只检查实际半宽是否不超过 5 个百分点。
+精度未达标会如实报告，不追加事件或选择间隙。最终结果为 `analysis/main-result.json`，
+中文报告为 `analysis/report.zh.md`，完整输出由 `analysis/artifact-index.json` 绑定。
+
+`status` 保存每次只读进度快照；它不会在未完成时输出科学比较或改变任务预算。
+观察到调度失败或正式审计失败时停止推进，保留原输出和第一份失败证据。
