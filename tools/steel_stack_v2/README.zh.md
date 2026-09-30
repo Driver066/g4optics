@@ -161,7 +161,8 @@ OSC 的清单生成可显式指定 `--optical-numerics painted-corner-v2
 `osc.py` 只做校验、脚本生成与替身测试，不连接远端或自动调用 sbatch。
 OSC 须使用对应架构独立构建并冻结的程序，不能直接使用本地 ARM64 程序。
 2026-09-30 已完成远端 x86_64 数值资格验证及 400 事件资源 benchmark，
-见 `docs/decisions/steel-module-stack-v2-osc-benchmark.md`；科学扫描尚未开始。
+见 `docs/decisions/steel-module-stack-v2-osc-benchmark.md`。后续独立校准已完成，
+正式比较样本尚未提交，见下方统计精度校准记录。
 
 ## OSC 工程 benchmark 的结果审计
 
@@ -186,6 +187,12 @@ Pitzer 的单核内存限额随节点类型不同：40 核节点约 4556 MiB／�
 参见 [OSC 的 Pitzer 资源说明](https://www.osc.edu/resources/technical_support/supercomputers/pitzer/guidance_on_requesting_resources_on_pitzer)。
 
 ## 统计精度校准：8,000 事件与正式样本量建议
+
+**2026-09-30 校准已完成：80 项、8,000 事件全部通过审计。**
+预登记规则给出 247,200 个独立正式事件、2,472 项任务的冻结建议，预计约 320.1 核时；
+正式扫描尚未提交。4 mm back-center 的大响应尾部使其占建议事件数约 70.2%，
+前后半样本规划有明显波动，因此建议量不保证精度。完整结果、任务分配和归档身份见
+[校准报告](../../docs/decisions/steel-module-stack-v2-precision-calibration.md)。
 
 `precision.py prepare` 复用已通过远端数值资格验证及 benchmark 的冻结程序，
 准备 8 配置 × 10 个独立任务 × 100 事件。它要求源清单、构建回执、benchmark
