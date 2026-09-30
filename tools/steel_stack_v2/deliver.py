@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import shlex
 
-from model import make_matrix
+from model import make_matrix, make_configuration
 
 
 def sha(path):
@@ -26,11 +26,15 @@ def write_once(path, contents):
 
 
 def inventories(batch):
+    manifest_path=batch/'manifest.json'
+    numerics=json.loads(manifest_path.read_text()).get('optical_numerics',{'profile':'legacy','scale':0}) if manifest_path.exists() else {'profile':'legacy','scale':0}
     for name in ("sensitivity", "full"):
+        configs=[make_configuration(c['layout'],c['tile_thickness_mm'],c['gap_mm'],numerics['profile'],numerics['scale'])
+                 for c in make_matrix(name,[.5,1.])]
         value = dict(schema_version="steel-stack-v2-pending-configurations-v1", matrix=name,
                      execution_status="not-scheduled-not-executed", scientific_events=0,
                      events_per_task=None, blocks=None, campaign_seed=None, total_event_budget=None,
-                     requires_explicit_allocation=True, configurations=make_matrix(name, [.5, 1.]))
+                     requires_explicit_allocation=True, optical_numerics=numerics, configurations=configs)
         write_once(batch / "pending-scans" / f"{name}-configurations.json", json.dumps(value, indent=2) + "\n")
 
 
@@ -81,11 +85,15 @@ def closeout(batch):
     exact = [t for t in tasks if t.get("compare_to")]
     candidate = json.loads((batch / "candidate/binary.json").read_text())
     reference = json.loads((batch / "reference/binary.json").read_text())
+    manifest=json.loads((batch/"manifest.json").read_text())
+    numerics=manifest.get("optical_numerics",{"profile":"legacy","scale":0})
     description = "\n".join([
         "# 十层 Steel Module v2 工程验收报告", "",
         "状态：130 个计划内工程验收事件全部通过。此处不构成间隙敏感性研究或正式扫描结果。", "",
         "## 已完成", "",
-        f"- {len(tasks)} 次运行、130 个事件；48 个候选几何全部完成实际 Geant4 检查。",
+        f"- {len(tasks)} 项任务、130 个工程事件；其中 {manifest.get('imported_reference_events',0)} 个为校验后复用的历史参考，{manifest.get('new_event_count',130)} 个为本批新增事件。",
+        "- 48 个候选几何全部完成新程序的实际 Geant4 检查。",
+        f"- 数值基线：{numerics['profile']}，尺度 {numerics['scale']}τ。",
         f"- {len(exact)} 组精确比较覆盖旧行为回归、观察器 off/on 和固定种子重放。",
         "- 比较旧 ROOT 逐事件字段、直方图、summary 和 RNG 末态；不比较 ROOT 序列化元数据。",
         "- v2 账本核对全部出生、started、终态、sensor 合计和能量沉积分解；再闪烁保持开启。",
@@ -105,7 +113,7 @@ def closeout(batch):
         "未来 OSC 使用对应架构重新构建的程序；本阶段仅离线验证适配器。", "",
         "## 保留的诊断记录", "",
         "Serial 下旧 ntuple 合并设置被忽略的 Analysis_W001 是明确识别的非物理提示。",
-        "首个参考输出曾被初版日志检查误判，原记录保留，随后重审同一数据，未额外运行事件。",
+        "导入的历史参考保留原执行、原审计与原文件身份，不作为本批新增模拟。",
         "所有真实失败、重试或重审均见 journal.jsonl 和各 attempt；不能用新的验收记录覆盖它们。", "",
         "最终间隙、最小有意义差异阈值和正式计算预算仍未确定。", ""
     ])
