@@ -125,6 +125,20 @@ class OfflineOSCTests(unittest.TestCase):
                 exec(compile(worker.read_text(), str(worker), "exec"), {"__file__": str(worker), "__name__": "__main__"})
         self.assertEqual(self.scheduler_calls, [])
 
+    def test_explicit_node_constraint_is_recorded_without_changing_single_cpu(self):
+        result = self.render(node_constraint="40core")
+        self.assertEqual(result["scheduler"]["node_constraint"], "40core")
+        script = (self.output/"array.sbatch").read_text()
+        self.assertIn("#SBATCH --constraint=40core\n", script)
+        self.assertIn("#SBATCH --cpus-per-task=1\n", script)
+        self.assertIn("#SBATCH --mem=4G\n", script)
+
+    def test_unknown_or_injected_node_constraints_are_rejected(self):
+        for value in ("", "unknown", "40core\n#SBATCH --exclusive"):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "node constraint"):
+                self.render(node_constraint=value)
+        self.assertFalse(self.output.exists())
+
     def test_mock_requires_explicit_opt_in(self):
         with self.assertRaisesRegex(ValueError, "allow-mock"):
             self.validate(allow_mock=False)

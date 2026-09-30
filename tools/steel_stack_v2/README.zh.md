@@ -177,3 +177,9 @@ OSC 适配仅做校验、脚本生成与替身测试；工具不连接远端或�
 报告中的一小时任务容量使用最慢观测速度、两倍耗时余量和 5 分钟启动余量。
 短样本可能漏掉耗时很长的中子簇射，该容量只是资源建议，不能用来确定科学
 统计量、选择间隙或宣称两配置等价。失败报告独立保存，不改写模拟结果。
+
+Pitzer 的单核内存限额随节点类型不同：40 核节点约 4556 MiB／核，48 核
+节点约 3797 MiB／核。请求 `--memory-gib 4` 时应明确使用
+`--node-constraint 40core`，否则调度器可能增加 CPU 配额，触发本工具的
+单核检查。该选项会写入清单和调度脚本；不会修改模拟线程、种子或物理过程。
+参见 [OSC 的 Pitzer 资源说明](https://www.osc.edu/resources/technical_support/supercomputers/pitzer/guidance_on_requesting_resources_on_pitzer)。

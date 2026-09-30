@@ -321,7 +321,7 @@ finally:
 
 
 def render(plan, output_dir, *, remote_bundle_root, remote_output_root, account,
-           time_minutes, memory_gib, max_parallel):
+           time_minutes, memory_gib, max_parallel, node_constraint=None):
     output_dir = Path(output_dir).expanduser().resolve()
     require(not output_dir.exists(), "Render output already exists; refusing to overwrite an earlier plan")
     frozen_source = Path(plan["local_staging_inputs"]["source_root"]).resolve()
@@ -332,6 +332,7 @@ def render(plan, output_dir, *, remote_bundle_root, remote_output_root, account,
     require(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", account or ""), "Explicit OSC account is required")
     for value, label in ((time_minutes, "time_minutes"), (memory_gib, "memory_gib"), (max_parallel, "max_parallel")):
         positive_integer(value, label)
+    require(node_constraint in (None, "40core", "48core"), "Unsupported Pitzer node constraint")
     for path in (bundle, output):
         for protected in (plan["remote_paths"]["source_root"], plan["remote_paths"]["data_root"]):
             require(path != protected and PurePosixPath(protected) not in PurePosixPath(path).parents,
@@ -342,6 +343,7 @@ def render(plan, output_dir, *, remote_bundle_root, remote_output_root, account,
     manifest.update(state="rendered-not-submitted", remote_bundle_root=bundle, remote_output_root=output,
                     scheduler={"kind":"ordinary-slurm-array", "account":account, "nodes":1, "ntasks":1,
                                "cpus_per_task":1, "time_minutes":time_minutes, "memory_gib":memory_gib,
+                               "node_constraint":node_constraint,
                                "max_parallel":min(max_parallel,len(tasks)),
                                "maximum_requested_cpu_hours":len(tasks)*time_minutes/60})
     output_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -353,6 +355,7 @@ def render(plan, output_dir, *, remote_bundle_root, remote_output_root, account,
         manifest["worker_sha256"] = sha256(stage/"array_task.py")
         write(stage/"manifest.json", manifest)
         h, minute = divmod(time_minutes, 60)
+        constraint_line = f"#SBATCH --constraint={node_constraint}\n" if node_constraint else ""
         sbatch = f'''#!/usr/bin/env bash
 # Rendered only. No job has been submitted; inspect the frozen inputs first.
 #SBATCH --job-name=g4-stack-v2
@@ -362,7 +365,7 @@ def render(plan, output_dir, *, remote_bundle_root, remote_output_root, account,
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem={memory_gib}G
-#SBATCH --array=1-{len(tasks)}%{min(max_parallel,len(tasks))}
+{constraint_line}#SBATCH --array=1-{len(tasks)}%{min(max_parallel,len(tasks))}
 #SBATCH --output={bundle}/slurm-%x-%A_%a.out
 set -euo pipefail
 export G4RUN_MANAGER_TYPE=Serial OMP_NUM_THREADS=1 PYTHONDONTWRITEBYTECODE=1
@@ -401,6 +404,7 @@ def main(argv=None):
     parser.add_argument("--time-minutes", type=int)
     parser.add_argument("--memory-gib", type=int)
     parser.add_argument("--max-parallel", type=int)
+    parser.add_argument("--node-constraint", choices=("40core", "48core"))
     args = parser.parse_args(argv)
     if args.command == "render":
         for name in ("output_dir", "remote_bundle_root", "remote_output_root", "account", "time_minutes", "memory_gib", "max_parallel"):
@@ -413,7 +417,8 @@ def main(argv=None):
     if args.command == "render":
         plan = render(plan, args.output_dir, remote_bundle_root=args.remote_bundle_root,
                       remote_output_root=args.remote_output_root, account=args.account, time_minutes=args.time_minutes,
-                      memory_gib=args.memory_gib, max_parallel=args.max_parallel)
+                      memory_gib=args.memory_gib, max_parallel=args.max_parallel,
+                      node_constraint=args.node_constraint)
     print(json.dumps({key:plan[key] for key in ("state", "submitted", "remote_runtime_verified", "mock", "summary")}, indent=2))
     return 0
 
