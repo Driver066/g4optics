@@ -47,8 +47,8 @@ struct StackLayerEventRecord
   G4int generatedOptical = 0;
   G4int cerenkov = 0;
   G4int scintillation = 0;
-  std::array<G4int, 2> sensorAllOrigin = {0, 0};
-  std::array<G4int, 2> sensorLocalOrigin = {0, 0};
+  std::array<G4int, 4> sensorAllOrigin = {0, 0, 0, 0};
+  std::array<G4int, 4> sensorLocalOrigin = {0, 0, 0, 0};
   G4double steelEnergyDeposit = 0.;
   G4int neutronElasticCount = 0;
   G4int neutronInelasticCount = 0;
@@ -78,6 +78,9 @@ class Run : public G4Run
     static constexpr G4int kStackSensorsPerLayer = 2;
     static constexpr G4int kStackSensorCount =
       kStackLayerCount * kStackSensorsPerLayer;
+    static constexpr G4int kMaxStackSensorsPerLayer = 4;
+    static constexpr G4int kMaxStackSensorCount =
+      kStackLayerCount * kMaxStackSensorsPerLayer;
     static constexpr G4int kUnknownOriginIndex = kStackLayerCount;
 
     Run();
@@ -447,7 +450,9 @@ class Run : public G4Run
     G4double fEventOtherChargedTileEnergyDeposit = 0.;
     G4double fEventNeutralTileEnergyDeposit = 0.;
     std::array<StackLayerEventRecord, kStackLayerCount> fEventStackLayers;
-    std::array<std::array<G4int, kStackSensorCount>, kStackLayerCount + 1>
+    G4int fEventStackSensorStride = kStackSensorsPerLayer;
+    G4int fEventStackSensorsPerLayer = kStackSensorsPerLayer;
+    std::array<std::array<G4int, kMaxStackSensorCount>, kStackLayerCount + 1>
       fEventStackTransfers = {};
     G4bool fEventStatisticsCommitted = false;
 

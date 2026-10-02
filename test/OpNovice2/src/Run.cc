@@ -36,6 +36,7 @@
 #include "HistoManager.hh"
 
 #include "G4OpBoundaryProcess.hh"
+#include "G4RunManager.hh"
 #include "G4SystemOfUnits.hh"
 #include "G4UnitsTable.hh"
 
@@ -53,6 +54,12 @@ Run::Run() : G4Run()
 void Run::BeginEvent(G4int eventID)
 {
   fCurrentEventID = eventID;
+  const auto detector = static_cast<const DetectorConstruction*>(
+    G4RunManager::GetRunManager()->GetUserDetectorConstruction());
+  fEventStackSensorStride = detector
+    ? detector->GetStackSensorStride() : kStackSensorsPerLayer;
+  fEventStackSensorsPerLayer = detector
+    ? detector->GetStackSensorsPerLayer() : kStackSensorsPerLayer;
   fEventGeneratedOpticalCount = 0;
   fEventCerenkovCount = 0;
   fEventScintCount = 0;
@@ -330,12 +337,16 @@ void Run::AddSiPMDetection(G4int sensorIndex, G4int originLayer)
     fSiPMDetectionCounts[index] += 1;
     fEventSiPMDetectionCounts[index] += 1;
   }
-  if (sensorIndex < 0 || sensorIndex >= kStackSensorCount) {
+  if (sensorIndex < 0 || sensorIndex >= kMaxStackSensorCount) {
     return;
   }
 
-  const G4int destinationLayer = sensorIndex / kStackSensorsPerLayer;
-  const G4int localSensor = sensorIndex % kStackSensorsPerLayer;
+  const G4int destinationLayer = sensorIndex / fEventStackSensorStride;
+  const G4int localSensor = sensorIndex % fEventStackSensorStride;
+  if (destinationLayer >= kStackLayerCount ||
+      localSensor >= fEventStackSensorsPerLayer) {
+    return;
+  }
   auto& destination =
     fEventStackLayers[static_cast<std::size_t>(destinationLayer)];
   destination.sensorAllOrigin[static_cast<std::size_t>(localSensor)] += 1;
@@ -362,7 +373,7 @@ G4int Run::GetEventStackTransfer(G4int originLayer, G4int sensorCopy) const
   const G4int originIndex = originLayer >= 0 && originLayer < kStackLayerCount
     ? originLayer
     : kUnknownOriginIndex;
-  if (sensorCopy < 0 || sensorCopy >= kStackSensorCount) {
+  if (sensorCopy < 0 || sensorCopy >= kMaxStackSensorCount) {
     return 0;
   }
   return fEventStackTransfers[static_cast<std::size_t>(originIndex)]

@@ -81,6 +81,7 @@ class DetectorMessenger : public G4UImessenger
     G4UIcmdWithABool* fAbsorberEnabledCmd = nullptr;
     G4UIcmdWith3VectorAndUnit* fAbsorberSizeCmd = nullptr;
     G4UIcmdWithABool* fStackEnabledCmd = nullptr;
+    G4UIcmdWithABool* fStackLayoutStudyCmd = nullptr;
     G4UIcmdWithAnInteger* fStackLayersCmd = nullptr;
     G4UIcmdWithABool* fDimpleEnabledCmd = nullptr;
     G4UIcmdWithADoubleAndUnit* fDimpleRadiusCmd = nullptr;

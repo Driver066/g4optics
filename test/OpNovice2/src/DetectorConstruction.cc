@@ -145,8 +145,21 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
   fGrease = nullptr;
   fGrease_LV = nullptr;
 
+  if (fStackLayoutStudy && !fStackEnabled) {
+    G4Exception("DetectorConstruction::Construct", "OpNovice2_LayoutStudy_001",
+                FatalException, "stack/layoutStudy requires stack/enabled true.");
+  }
   if (fStackEnabled) {
     ValidateStackConfiguration();
+  }
+  if (IsStackLayoutStudy()) {
+    G4cout << "Stack layout study: layout=" << fSiPMLayout
+           << ", layers=" << fStackLayers
+           << ", internal_gaps=9, readout_gap=" << GetStackReadoutGap() / mm
+           << " mm, core_length=" << GetStackLength() / mm
+           << " mm, required_source_z=" << (0.5 * GetStackLength() + 1.5 * mm) / mm
+           << " mm, sensor_stride=" << GetStackSensorStride()
+           << ", sensors_per_layer=" << GetStackSensorsPerLayer() << G4endl;
   }
 
   fTankMaterial->SetMaterialPropertiesTable(fTankMPT);
@@ -228,6 +241,12 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
                                        layer,
                                        fStackEnabled);
     fTanks.push_back(placement);
+    if (IsStackLayoutStudy()) {
+      G4cout << "Stack tile placement: layer=" << layer
+             << ", world=" << placement->GetObjectTranslation() / mm
+             << " mm, full_size=" << G4ThreeVector(2.*fTank_x, 2.*fTank_y, 2.*fTank_z) / mm
+             << " mm" << G4endl;
+    }
     if (layer == 0) {
       fTank = placement;
     }
@@ -258,6 +277,11 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
                                          layer,
                                          true);
       fAbsorbers.push_back(placement);
+      if (IsStackLayoutStudy()) {
+        G4cout << "Stack steel placement: layer=" << layer
+               << ", world=" << placement->GetObjectTranslation() / mm
+               << " mm, full_size=" << GetAbsorberFullSize() / mm << " mm" << G4endl;
+      }
       if (layer == 0) {
         fAbsorber = placement;
       }
@@ -373,7 +397,7 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
         placementPos.setZ(placementPos.z() + GetStackTileCenterZ(layer));
       }
       const G4int copyNumber = fStackEnabled
-        ? 2 * layer + static_cast<G4int>(index)
+        ? GetStackSensorStride() * layer + static_cast<G4int>(index)
         : static_cast<G4int>(index);
 
       auto placement = new G4PVPlacement(nullptr,
@@ -398,6 +422,9 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
     }
   }
 
+  if (IsStackLayoutStudy()) {
+    ValidateStackLayoutGeometry();
+  }
 
   // ------------- Surface --------------
 
@@ -421,7 +448,7 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
         fTanks[layer],
         fAbsorbers[layer],
         fSurface);
-      if (fStackEnabled && layer + 1 < layerCount) {
+      if (fStackEnabled && !IsStackLayoutStudy() && layer + 1 < layerCount) {
         new G4LogicalBorderSurface(
           "TankToDownstreamSteelSurface_" + std::to_string(layer),
           fTanks[layer],
@@ -736,6 +763,22 @@ void DetectorConstruction::SetStackEnabled(G4bool enabled)
          << (fStackEnabled ? "true" : "false") << G4endl;
 }
 
+void DetectorConstruction::SetStackLayoutStudy(G4bool enabled)
+{
+  fStackLayoutStudy = enabled;
+  G4RunManager::GetRunManager()->GeometryHasBeenModified();
+  G4cout << "Stack layout study set to " << (enabled ? "true" : "false") << G4endl;
+}
+
+G4int DetectorConstruction::GetStackSensorsPerLayer() const
+{
+  if (!IsStackLayoutStudy()) return 2;
+  if (fSiPMLayout == "back-four") return 4;
+  if (fSiPMLayout == "back-two" || fSiPMLayout == "edge-two") return 2;
+  if (fSiPMLayout == "back-center") return 1;
+  return 0;
+}
+
 void DetectorConstruction::SetStackLayers(G4int layers)
 {
   if (layers <= 0) {
@@ -753,13 +796,13 @@ void DetectorConstruction::SetStackLayers(G4int layers)
 
 G4double DetectorConstruction::GetStackSteelCenterZ(G4int layer) const
 {
-  const G4double moduleLength = 2. * fAbsorber_z + 2. * fTank_z;
+  const G4double moduleLength = 2. * fAbsorber_z + 2. * fTank_z + GetStackReadoutGap();
   return 0.5 * GetStackLength() - layer * moduleLength - fAbsorber_z;
 }
 
 G4double DetectorConstruction::GetStackTileCenterZ(G4int layer) const
 {
-  const G4double moduleLength = 2. * fAbsorber_z + 2. * fTank_z;
+  const G4double moduleLength = 2. * fAbsorber_z + 2. * fTank_z + GetStackReadoutGap();
   return 0.5 * GetStackLength() - layer * moduleLength
          - 2. * fAbsorber_z - fTank_z;
 }
@@ -785,8 +828,10 @@ G4int DetectorConstruction::GetSensorLayer(G4int copyNumber) const
   if (!fStackEnabled) {
     return copyNumber >= 0 ? 0 : -1;
   }
-  return copyNumber >= 0 && copyNumber < 2 * fStackLayers
-    ? copyNumber / 2
+  const auto stride = GetStackSensorStride();
+  return copyNumber >= 0 && copyNumber < stride * fStackLayers
+         && copyNumber % stride < GetStackSensorsPerLayer()
+    ? copyNumber / stride
     : -1;
 }
 
@@ -795,8 +840,10 @@ G4int DetectorConstruction::GetSensorLocalIndex(G4int copyNumber) const
   if (!fStackEnabled) {
     return copyNumber;
   }
-  return copyNumber >= 0 && copyNumber < 2 * fStackLayers
-    ? copyNumber % 2
+  const auto stride = GetStackSensorStride();
+  return copyNumber >= 0 && copyNumber < stride * fStackLayers
+         && copyNumber % stride < GetStackSensorsPerLayer()
+    ? copyNumber % stride
     : -1;
 }
 
@@ -989,7 +1036,42 @@ void DetectorConstruction::ValidateStackConfiguration() const
                 FatalException,
                 msg);
   }
-  if (fSiPMLayout != "edge-two" ||
+  if (IsStackLayoutStudy()) {
+    const auto equalLength = [](G4double value, G4double expected) {
+      return std::isfinite(value) && std::abs(value - expected) <= 1.e-9 * mm;
+    };
+    const auto require = [](G4bool accepted, const char* message) {
+      if (!accepted) {
+        G4Exception("DetectorConstruction::ValidateStackConfiguration",
+                    "OpNovice2_LayoutStudy_002", FatalException, message);
+      }
+    };
+    require(equalLength(2.*fAbsorber_x, 500.*mm) &&
+            equalLength(2.*fAbsorber_y, 500.*mm) &&
+            equalLength(2.*fAbsorber_z, 40.*mm) &&
+            equalLength(2.*fTank_x, 100.*mm) && equalLength(2.*fTank_y, 100.*mm),
+            "Layout study requires 500x500x40 mm steel and whole 100x100 mm tiles.");
+    G4bool thicknessAccepted = false;
+    for (const auto thickness : {4., 8., 12., 16., 20., 24.}) {
+      thicknessAccepted = thicknessAccepted || equalLength(2.*fTank_z, thickness*mm);
+    }
+    require(thicknessAccepted, "Layout study tile thickness must be 4, 8, 12, 16, 20, or 24 mm.");
+    require(equalLength(fSiPMActiveU, 2.4*mm) && equalLength(fSiPMActiveV, 2.4*mm) &&
+            equalLength(fSiPMThickness, 0.5*mm),
+            "Layout study requires 2.4x2.4x0.5 mm SiPMs.");
+    require(equalLength(fSiPMLocalPosition.x(), 0.) &&
+            equalLength(fSiPMLocalPosition.y(), 0.) && equalLength(fSiPMLocalPosition.z(), 0.),
+            "Layout study uses fixed sensor centres; set sipm/localPosition to 0 0 0 mm.");
+    const G4bool side = fSiPMLayout == "edge-two" &&
+                       (fSiPMFace == "+X" || fSiPMFace == "right");
+    const G4bool back = (fSiPMLayout == "back-four" || fSiPMLayout == "back-two" ||
+                        fSiPMLayout == "back-center") &&
+                       (fSiPMFace == "-Z" || fSiPMFace == "bottom");
+    require(side || back, "Layout study requires edge-two on +X or back-four/back-two/back-center on -Z.");
+    require(0.5*GetStackLength() + 1.5*mm < fExpHall_z - safety,
+            "Layout study source at core_length/2 + 1.5 mm must fit inside World.");
+  }
+  else if (fSiPMLayout != "edge-two" ||
       (fSiPMFace != "+X" && fSiPMFace != "right")) {
     G4ExceptionDescription msg;
     msg << "The longitudinal stack requires edge-two on the +X face.";
@@ -1012,6 +1094,75 @@ void DetectorConstruction::ValidateStackConfiguration() const
                 FatalException,
                 msg);
   }
+}
+
+void DetectorConstruction::ValidateStackLayoutGeometry() const
+{
+  // All study volumes are unrotated boxes in World. Test their actual placed
+  // bounds deterministically, including thin SiPMs and exact touching faces.
+  // This adds no random draws to the constructor's existing overlap checks.
+  const G4double tolerance = 1.e-9 * mm;
+  std::vector<G4VPhysicalVolume*> volumes = fAbsorbers;
+  volumes.insert(volumes.end(), fTanks.begin(), fTanks.end());
+  volumes.insert(volumes.end(), fSiPMs.begin(), fSiPMs.end());
+  const auto fail = [](const G4String& message) {
+    G4Exception("DetectorConstruction::ValidateStackLayoutGeometry",
+                "OpNovice2_LayoutStudy_003", FatalException, message.c_str());
+  };
+  if (fAbsorbers.size() != 10 || fTanks.size() != 10 ||
+      fSiPMs.size() != static_cast<std::size_t>(10 * GetStackSensorsPerLayer())) {
+    fail("Constructed layout study has the wrong steel, tile, or active sensor count.");
+    return;
+  }
+  std::vector<G4ThreeVector> centers;
+  std::vector<G4ThreeVector> halves;
+  const G4ThreeVector worldHalf(fExpHall_x, fExpHall_y, fExpHall_z);
+  for (const auto* volume : volumes) {
+    const auto* box = dynamic_cast<const G4Box*>(volume->GetLogicalVolume()->GetSolid());
+    // The obsolete pointer accessor can return an identity matrix for an
+    // unrotated placement; validate the transformation value itself.
+    if (!box || !volume->GetObjectRotationValue().isIdentity() ||
+        volume->GetMotherLogical() != fWorld_LV) {
+      fail("Layout study expects unrotated boxes placed directly in World.");
+      return;
+    }
+    const auto center = volume->GetObjectTranslation();
+    const G4ThreeVector half(box->GetXHalfLength(), box->GetYHalfLength(), box->GetZHalfLength());
+    for (G4int axis = 0; axis < 3; ++axis) {
+      if (!std::isfinite(center[axis]) || !std::isfinite(half[axis]) || half[axis] <= 0. ||
+          std::abs(center[axis]) + half[axis] >= worldHalf[axis] - tolerance) {
+        fail("Non-finite, invalid, or outside-World box in layout study: " + volume->GetName());
+        return;
+      }
+    }
+    centers.push_back(center);
+    halves.push_back(half);
+  }
+  for (std::size_t a = 0; a < volumes.size(); ++a) {
+    for (std::size_t b = a + 1; b < volumes.size(); ++b) {
+      G4bool penetrates = true;
+      for (G4int axis = 0; axis < 3; ++axis) {
+        const auto overlap = halves[a][axis] + halves[b][axis]
+                             - std::abs(centers[a][axis] - centers[b][axis]);
+        penetrates = penetrates && overlap > tolerance;
+      }
+      if (penetrates) {
+        fail("Overlapping layout-study boxes: " + volumes[a]->GetName() + "[" +
+             std::to_string(volumes[a]->GetCopyNo()) + "] and " + volumes[b]->GetName() +
+             "[" + std::to_string(volumes[b]->GetCopyNo()) + "].");
+        return;
+      }
+    }
+  }
+  for (const auto* sensor : fSiPMs) {
+    if (GetSensorLayer(sensor->GetCopyNo()) < 0 || GetSensorLocalIndex(sensor->GetCopyNo()) < 0) {
+      fail("Inactive sensor copy was constructed in layout study.");
+      return;
+    }
+  }
+  G4cout << "Stack layout geometry: PASS, " << volumes.size()
+         << " placed boxes, no positive-volume overlap, all contained in World; "
+         << "9 internal gaps of 0.5 mm, final tile followed by World." << G4endl;
 }
 
 void DetectorConstruction::ValidateDimpleConfiguration() const
@@ -1435,6 +1586,10 @@ std::vector<G4ThreeVector> DetectorConstruction::GetSiPMLocalPositions() const
       G4ThreeVector(offset, offset, 0.)
     };
   }
+  if (fSiPMLayout == "back-two") {
+    return {G4ThreeVector(-25.*mm, -25.*mm, 0.), G4ThreeVector(25.*mm, 25.*mm, 0.)};
+  }
+  if (fSiPMLayout == "back-center") return {G4ThreeVector()};
   return {fSiPMLocalPosition};
 }
 
@@ -1480,10 +1635,14 @@ void DetectorConstruction::ValidateSiPMLayout() const
     }
     return;
   }
-  if (fSiPMLayout != "back-four") {
+  if ((fSiPMLayout == "back-two" || fSiPMLayout == "back-center") && !IsStackLayoutStudy()) {
+    G4Exception("DetectorConstruction::ValidateSiPMLayout", "OpNovice2_LayoutStudy_004",
+                FatalException, "back-two and back-center require stack/layoutStudy true.");
+  }
+  if (fSiPMLayout != "back-four" && fSiPMLayout != "back-two" && fSiPMLayout != "back-center") {
     G4ExceptionDescription msg;
     msg << "Unknown SiPM layout: " << fSiPMLayout
-        << ". Use single, edge-two, or back-four.";
+        << ". Use single, edge-two, back-four, back-two, or back-center.";
     G4Exception("DetectorConstruction::ValidateSiPMLayout",
                 "OpNovice2_SiPM_007",
                 FatalException,
@@ -1510,7 +1669,7 @@ void DetectorConstruction::ValidateSiPMLayout() const
                 msg);
   }
 
-  const G4double offset = 25. * mm;
+  const G4double offset = fSiPMLayout == "back-center" ? 0. : 25. * mm;
   const G4double safety = 1.e-6 * mm;
   if (offset + 0.5 * fSiPMActiveU >= fTank_x - safety ||
       offset + 0.5 * fSiPMActiveV >= fTank_y - safety) {
@@ -1529,10 +1688,11 @@ void DetectorConstruction::ValidateSiPMLayout() const
 
 void DetectorConstruction::SetSiPMLayout(const G4String& layout)
 {
-  if (layout != "single" && layout != "edge-two" && layout != "back-four") {
+  if (layout != "single" && layout != "edge-two" && layout != "back-four" &&
+      layout != "back-two" && layout != "back-center") {
     G4ExceptionDescription msg;
     msg << "Invalid SiPM layout: " << layout
-        << ". Use single, edge-two, or back-four.";
+        << ". Use single, edge-two, back-four, back-two, or back-center.";
     G4Exception("DetectorConstruction::SetSiPMLayout",
                 "OpNovice2_SiPM_011",
                 FatalException,

@@ -241,6 +241,38 @@ void HistoManager::Book()
   analysisMan->CreateNtupleIColumn("detected_photons");
   analysisMan->FinishNtuple();
 
+  // Variable-count readout uses separate tables. The two-sensor stack tables
+  // above retain their original schema and are not filled in layoutStudy mode.
+  analysisMan->CreateNtuple("layout_layers", "Per-event layout study layer response");
+  analysisMan->CreateNtupleIColumn("event_id");
+  analysisMan->CreateNtupleIColumn("layer");
+  analysisMan->CreateNtupleIColumn("generated_optical_photons");
+  analysisMan->CreateNtupleIColumn("scintillation_photons");
+  analysisMan->CreateNtupleIColumn("cerenkov_photons");
+  analysisMan->CreateNtupleIColumn("all_origin_detected_photons");
+  analysisMan->CreateNtupleIColumn("local_origin_detected_photons");
+  analysisMan->CreateNtupleDColumn("steel_edep_mev");
+  analysisMan->CreateNtupleDColumn("tile_edep_mev");
+  analysisMan->FinishNtuple();
+
+  analysisMan->CreateNtuple("layout_sensors", "Per-event active layout study sensors");
+  analysisMan->CreateNtupleIColumn("event_id");
+  analysisMan->CreateNtupleIColumn("layer");
+  analysisMan->CreateNtupleIColumn("local_sensor");
+  analysisMan->CreateNtupleIColumn("global_copy");
+  analysisMan->CreateNtupleIColumn("all_origin_detected_photons");
+  analysisMan->CreateNtupleIColumn("local_origin_detected_photons");
+  analysisMan->FinishNtuple();
+
+  analysisMan->CreateNtuple("layout_transfers", "Sparse layout study origin-to-SiPM transfers");
+  analysisMan->CreateNtupleIColumn("event_id");
+  analysisMan->CreateNtupleIColumn("origin_layer");
+  analysisMan->CreateNtupleIColumn("destination_layer");
+  analysisMan->CreateNtupleIColumn("local_sensor");
+  analysisMan->CreateNtupleIColumn("global_copy");
+  analysisMan->CreateNtupleIColumn("detected_photons");
+  analysisMan->FinishNtuple();
+
   for (G4int i = 0; i < analysisMan->GetNofH1s(); ++i) {
     analysisMan->SetH1Activation(i, false);
   }

@@ -1,5 +1,14 @@
 # Undergraduate Research Plan: Scintillator Light Uniformity Study with Geant4
 
+## Ten-layer SiPM layout study (baseline restart)
+
+The clean restart uses the July 22 `a2d05dfe` baseline. All four layouts
+(back-four, diagonal back-two, back-center and original same-face edge-two)
+use nine fixed 0.5 mm inter-module gaps. The scintillator remains one whole tile.
+Validation starts with 4 mm before extending to the other five thicknesses.
+See [the model and local validation record](docs/decisions/steel-layout-baseline-restart.md)
+and `tools/layout_study/prepare.py`. Existing stack-v1 remains the default.
+
 **Duration:** 4 Weeks  
 **Goal:** Study light collection uniformity in plastic scintillator tiles of varying sizes/thicknesses using Geant4 simulations.
 

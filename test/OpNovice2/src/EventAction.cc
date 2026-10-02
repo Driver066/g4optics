@@ -139,7 +139,7 @@ void EventAction::EndOfEventAction(const G4Event* event)
 
   const auto detector = static_cast<const DetectorConstruction*>(
     G4RunManager::GetRunManager()->GetUserDetectorConstruction());
-  if (detector && detector->IsStackEnabled()) {
+  if (detector && detector->IsStackEnabled() && !detector->IsStackLayoutStudy()) {
     for (G4int layer = 0; layer < Run::kStackLayerCount; ++layer) {
       const auto& record = run->GetEventStackLayer(layer);
       const G4bool entryValid = record.primaryNeutronTileEntryValid;
@@ -193,6 +193,54 @@ void EventAction::EndOfEventAction(const G4Event* event)
         analysisMan->FillNtupleIColumn(3, 5, detected);
         analysisMan->AddNtupleRow(3);
       }
+    }
+  }
+
+  if (detector && detector->IsStackEnabled() && detector->IsStackLayoutStudy()) {
+    const G4int sensorsPerLayer = detector->GetStackSensorsPerLayer();
+    const G4int sensorStride = detector->GetStackSensorStride();
+    for (G4int layer = 0; layer < Run::kStackLayerCount; ++layer) {
+      const auto& record = run->GetEventStackLayer(layer);
+      G4int allOrigin = 0;
+      G4int localOrigin = 0;
+      for (G4int localSensor = 0; localSensor < sensorsPerLayer; ++localSensor) {
+        allOrigin += record.sensorAllOrigin[localSensor];
+        localOrigin += record.sensorLocalOrigin[localSensor];
+        const G4int globalCopy = sensorStride * layer + localSensor;
+        // Include zero-response sensors; inactive slots are never observations.
+        analysisMan->FillNtupleIColumn(5, 0, event->GetEventID());
+        analysisMan->FillNtupleIColumn(5, 1, layer);
+        analysisMan->FillNtupleIColumn(5, 2, localSensor);
+        analysisMan->FillNtupleIColumn(5, 3, globalCopy);
+        analysisMan->FillNtupleIColumn(5, 4, record.sensorAllOrigin[localSensor]);
+        analysisMan->FillNtupleIColumn(5, 5, record.sensorLocalOrigin[localSensor]);
+        analysisMan->AddNtupleRow(5);
+
+        // Preserve the legacy origin convention: -1 is unassigned origin.
+        for (G4int origin = -1; origin < Run::kStackLayerCount; ++origin) {
+          const G4int detected = run->GetEventStackTransfer(origin, globalCopy);
+          if (detected <= 0) {
+            continue;
+          }
+          analysisMan->FillNtupleIColumn(6, 0, event->GetEventID());
+          analysisMan->FillNtupleIColumn(6, 1, origin);
+          analysisMan->FillNtupleIColumn(6, 2, layer);
+          analysisMan->FillNtupleIColumn(6, 3, localSensor);
+          analysisMan->FillNtupleIColumn(6, 4, globalCopy);
+          analysisMan->FillNtupleIColumn(6, 5, detected);
+          analysisMan->AddNtupleRow(6);
+        }
+      }
+      analysisMan->FillNtupleIColumn(4, 0, event->GetEventID());
+      analysisMan->FillNtupleIColumn(4, 1, layer);
+      analysisMan->FillNtupleIColumn(4, 2, record.generatedOptical);
+      analysisMan->FillNtupleIColumn(4, 3, record.scintillation);
+      analysisMan->FillNtupleIColumn(4, 4, record.cerenkov);
+      analysisMan->FillNtupleIColumn(4, 5, allOrigin);
+      analysisMan->FillNtupleIColumn(4, 6, localOrigin);
+      analysisMan->FillNtupleDColumn(4, 7, record.steelEnergyDeposit / MeV);
+      analysisMan->FillNtupleDColumn(4, 8, record.tileEnergyDeposit / MeV);
+      analysisMan->AddNtupleRow(4);
     }
   }
 
