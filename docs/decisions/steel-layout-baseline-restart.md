@@ -43,7 +43,7 @@ tile→上游 steel 和 tile→SiPM 的基线处理。
 - `layout_transfers`：非零的光子来源层→SiPM 转移计数。
 
 新模式下旧 `stack_layers/stack_transfers` 为空，防止旧两传感器分析器误用。
-审计要求进程正常退出、实际几何和输入一致、无重叠/未知来源/NoRINDEX，
+审计要求进程正常退出、实际几何和输入一致、无重叠/未知来源，且日志未报告 NoRINDEX，
 且逐层、逐传感器、转移、事件和汇总文件的计数一致。
 零分母事件明确输出 invalid/NaN；不把零响应事件删除。
 只接受原始基线同样出现的确切 Serial ntuple-merging 提示。
@@ -93,7 +93,9 @@ python3 tools/layout_study/audit.py result.root --layout back-four \
 四种布局共验证 **140 个工程事件**；包括初版和最终版本回归在内，实际本地
 中子执行总数为 155。首阶段完成后 **C++ 源码与可执行文件完全未变**，后续
 只参数化输入生成和审计工具；24 个配置使用同一候选程序。
-42 项输入/审计检查通过。所有样本无未知来源检测、无 NoRINDEX，进程均正常退出。
+42 项输入/审计检查通过。所有样本无未知来源检测，日志未报告 NoRINDEX，进程均正常退出。
+保留的基线边界计数仅覆盖每次开始或恢复跟踪后的首次几何边界；
+日志没有 NoRINDEX 报告不等于所有光子的完整轨迹都不存在该状态。
 这些有限检查不等于长期稳定性、完整光学账本或物理模型有效性证明。
 
 首阶段原始冻结记录保留在 `outputs/layout-study-t04/`；后续完整矩阵的汇总、
@@ -110,3 +112,7 @@ python3 tools/layout_study/prepare.py --output-dir outputs/new-t24-check \
 配对使用。默认参数仍为 4 mm。
 小样本运行检查仅证明本次输入下可以构建、运行、正常退出并一致记账，
 不构成布局优劣、统计精度或完整物理模型有效性的结论。
+
+
+后续 OSC 的构建、600 事件资源评估及独立复核已完成，见
+[OSC 验证与耗时记录](steel-layout-osc-benchmark.md)。
