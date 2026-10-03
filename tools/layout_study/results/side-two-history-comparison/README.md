@@ -47,7 +47,7 @@ At matched thicknesses, the absolute relative difference in collection,
 `abs(eta_current / eta_July − 1)`, is at most **0.641%**, below **0.7%**.
 This descriptive agreement is not a statistical equivalence result.
 
-## Scope and pending evidence
+## Scope and recovered evidence
 
 Historical sample sizes are **600** neutrons at 4/12/20 mm and **400** at
 8/16/24 mm; the current sample has **1,000 per thickness**. Displayed intervals
@@ -60,10 +60,13 @@ The current thickness-to-thickness contrasts retained in the JSON are
 **exploratory, unadjusted descriptive comparisons**. They are outside the
 18 preregistered layout contrasts of the formal current scan.
 
-**Historical raw-event evidence is pending.** The preserved JSON therefore keeps
-`historical_raw_ROOT_rechecked_here: false`. The historical ROOT audit and any
-explanation supported by it will be reported separately; this publication does
-not infer a result from evidence that has not yet been inspected.
+**The follow-up historical raw-event audit is now complete:**
+[recovered ROOT evidence and retrospective diagnostics](raw-event-audit/README.md).
+All 30 ROOT files match their original checksums and reproduce the six historical
+points. That follow-up also records dataset-version differences and exploratory
+contrast intervals. The original overlay JSON retains
+`historical_raw_ROOT_rechecked_here: false` because it was prepared before this
+audit; its values and original confidence intervals have not been rewritten.
 
 Source identities:
 

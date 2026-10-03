@@ -1,12 +1,13 @@
 {
   "files": {
-    "README.md": "d568a02640241bf98fb3d7c030946eb5ef48d0a02d6bcf0a16122140bb5c75e6",
+    "README.md": "fb00523134adb780df1bcd020b51c500e864aab83b2fd2bc39128b2ed9942812",
     "compare.py": "9b68028277610d70304589b5d087e8c768627b628b66fd7b21732d560b83cd42",
     "comparison.csv": "e35e1099deea91a03d6adaaedb6f14b7f70ea77b6009960942b9bd4baf3f5758",
     "comparison.json": "d680479db173030b96d4fb02d77ee489d20ff24f421e577031ae81e4938b1870",
     "side-two-comparison.pdf": "75cb6afcc96bda5fbeda4ca22c850344349e8ebc8465ec410a251e856d7eef53",
     "side-two-comparison.png": "6dac3e10d90b4067d9d8a9ecc43be0c660063309a43c198921c96dc1859e4e8e"
   },
+  "followup_raw_event_audit": "raw-event-audit/artifact-index.json",
   "historical_raw_ROOT_rechecked_here": false,
   "maximum_absolute_relative_collection_difference_percent": 0.6407585267886651,
   "original_preparation_program_sha256": "2666e82ed9be1158ff999bfe94a046e3769b53c81a29c177e0eb080166259213",
@@ -29,5 +30,5 @@
     }
   },
   "schema_version": "steel-layout-side-two-history-comparison-publication-v1",
-  "scope": "descriptive overlay; historical raw-event audit pending"
+  "scope": "initial descriptive overlay preserved; follow-up raw-event audit in raw-event-audit/"
 }
