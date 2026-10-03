@@ -59,10 +59,17 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     G4VPhysicalVolume* GetTank() const { return fTank; }
     G4double GetTankXSize() const { return fTank_x; }
     G4bool IsStackEnabled() const { return fStackEnabled; }
+    G4bool IsStackLayoutStudy() const { return fStackEnabled && fStackLayoutStudy; }
+    G4double GetStackReadoutGap() const { return IsStackLayoutStudy() ? 0.5 * CLHEP::mm : 0.; }
+    G4int GetStackSensorStride() const { return IsStackLayoutStudy() ? 4 : 2; }
+    G4int GetStackSensorsPerLayer() const;
+    const G4String& GetSiPMLayout() const { return fSiPMLayout; }
+    const G4String& GetSiPMFace() const { return fSiPMFace; }
     G4int GetStackLayerCount() const { return fStackEnabled ? fStackLayers : 1; }
     G4double GetStackLength() const
     {
-      return GetStackLayerCount() * (2. * fAbsorber_z + 2. * fTank_z);
+      return GetStackLayerCount() * (2. * fAbsorber_z + 2. * fTank_z)
+             + (GetStackLayerCount() - 1) * GetStackReadoutGap();
     }
     G4double GetStackSteelCenterZ(G4int layer) const;
     G4double GetStackTileCenterZ(G4int layer) const;
@@ -141,6 +148,7 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     void SetAbsorberEnabled(G4bool enabled);
     void SetAbsorberSize(const G4ThreeVector& fullSize);
     void SetStackEnabled(G4bool enabled);
+    void SetStackLayoutStudy(G4bool enabled);
     void SetStackLayers(G4int layers);
     void SetBottomCavityEnabled(G4bool enabled);
     void SetDimpleEnabled(G4bool enabled);
@@ -173,6 +181,7 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     G4double fAbsorber_y = 25. * CLHEP::cm;
     G4double fAbsorber_z = 2. * CLHEP::cm;
     G4bool fStackEnabled = false;
+    G4bool fStackLayoutStudy = false;
     G4int fStackLayers = 10;
     G4bool fBottomCavityEnabled = false;
     G4bool fDimpleEnabled = false;
@@ -220,7 +229,8 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     // General SiPM placement.
     // fSiPMLayout is "single" for the legacy one-SiPM geometry,
     // "edge-two" for two fixed +X placements, or "back-four" for the
-    // steel-module scan's four fixed -Z placements.
+    // steel-module scan's four fixed -Z placements. The opt-in stack layout
+    // study also supports diagonal "back-two" and fixed "back-center".
     G4String fSiPMLayout = "single";
 
     // fSiPMFace controls which tile face the SiPM is attached to.
@@ -272,6 +282,7 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     void ValidateGreaseConfiguration() const;
     void ValidateAbsorberConfiguration() const;
     void ValidateStackConfiguration() const;
+    void ValidateStackLayoutGeometry() const;
     void ResetSurfaceMaterialPropertiesTable();
 };
 

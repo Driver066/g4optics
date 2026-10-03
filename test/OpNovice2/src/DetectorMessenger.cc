@@ -165,6 +165,13 @@ DetectorMessenger::DetectorMessenger(DetectorConstruction* Det) : G4UImessenger(
   fStackEnabledCmd->AvailableForStates(G4State_PreInit);
   fStackEnabledCmd->SetToBeBroadcasted(false);
 
+  fStackLayoutStudyCmd = new G4UIcmdWithABool("/opnovice2/stack/layoutStudy", this);
+  fStackLayoutStudyCmd->SetGuidance(
+    "Enable four fixed SiPM layouts on ten layers, with nine 0.5 mm readout gaps for every layout.");
+  fStackLayoutStudyCmd->SetDefaultValue(false);
+  fStackLayoutStudyCmd->AvailableForStates(G4State_PreInit);
+  fStackLayoutStudyCmd->SetToBeBroadcasted(false);
+
   fStackLayersCmd =
     new G4UIcmdWithAnInteger("/opnovice2/stack/layers", this);
   fStackLayersCmd->SetGuidance(
@@ -217,7 +224,7 @@ DetectorMessenger::DetectorMessenger(DetectorConstruction* Det) : G4UImessenger(
   fSiPMLayoutCmd = new G4UIcmdWithAString("/opnovice2/sipm/layout", this);
   fSiPMLayoutCmd->SetGuidance(
     "Set SiPM layout: single, edge-two (two +X sensors at local u=+/-25 mm), "
-    "or back-four (four -Z sensors at x,y=+/-25 mm).");
+    "back-four (four -Z sensors at x,y=+/-25 mm), or layout-study back-two/back-center.");
   fSiPMLayoutCmd->AvailableForStates(G4State_PreInit);
   fSiPMLayoutCmd->SetToBeBroadcasted(false);
 
@@ -310,6 +317,7 @@ DetectorMessenger::~DetectorMessenger()
   delete fAbsorberEnabledCmd;
   delete fAbsorberSizeCmd;
   delete fStackEnabledCmd;
+  delete fStackLayoutStudyCmd;
   delete fStackLayersCmd;
   delete fDimpleEnabledCmd;
   delete fDimpleRadiusCmd;
@@ -675,6 +683,9 @@ void DetectorMessenger::SetNewValue(G4UIcommand* command, G4String newValue)
   }
   else if (command == fStackEnabledCmd) {
     fDetector->SetStackEnabled(fStackEnabledCmd->GetNewBoolValue(newValue));
+  }
+  else if (command == fStackLayoutStudyCmd) {
+    fDetector->SetStackLayoutStudy(fStackLayoutStudyCmd->GetNewBoolValue(newValue));
   }
   else if (command == fStackLayersCmd) {
     fDetector->SetStackLayers(fStackLayersCmd->GetNewIntValue(newValue));
