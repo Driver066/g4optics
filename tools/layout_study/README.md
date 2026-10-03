@@ -5,6 +5,8 @@ Start with the 4 mm tile and ten neutrons per layout. This is a small engineerin
 check of geometry, output, and counting; it does not rank layouts or establish
 scientific precision. No OSC account is needed for the Docker route.
 
+The [completed first 24,000-event sample](results/first-scan-d0defcdc/README.md) includes figures, exact tables, provenance and commands to reproduce the figures without running Geant4.
+
 The model has ten 500 × 500 × 40 mm steel plates, ten whole 100 × 100 mm tiles,
 and nine 0.5 mm gaps between a tile and the next steel plate. Each SiPM proxy is
 2.4 × 2.4 × 0.5 mm. The 1 GeV kinetic-energy neutron starts upstream and travels

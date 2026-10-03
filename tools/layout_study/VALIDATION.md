@@ -1,7 +1,7 @@
 # Reproducibility checks and current status
 
-This is a draft research implementation. The fixed first 24,000-event scan is
-specified in [FIRST_SCAN.md](FIRST_SCAN.md); scientific results are pending.
+This is a draft research implementation. The fixed first 24,000-event scan specified
+in [FIRST_SCAN.md](FIRST_SCAN.md) is complete; [results and reproduction evidence](results/first-scan-d0defcdc/README.md) are available for scientific review.
 
 ## Portable local check
 
@@ -34,11 +34,30 @@ re-audit checked 611 archived files and all 600 events. The measured 25-event
 runs took 56–311 seconds; the complete batch-step memory maximum was about
 252 MiB. Those samples are excluded from the scientific scan.
 
-The *exact final PR commit* must now be independently built and qualified on OSC
-before its first scientific events. The scan manifest will record that commit,
-not a moving main branch or an earlier executable. Environment, input, seed,
-source and output checksums accompany the run. Progress, plots and interpretation
-will be posted in the draft PR conversation.
+## Exact PR commit and first scientific sample
+
+Commit `d0defcdc3bc7513b4feccdaa64a4512ea621c797` was independently built on OSC
+using the pinned public Alma9/amd64 image. All 77 then-existing tests and four
+10-event layout qualifications passed; a separate 25-event back-four comparison
+matched the saved historical physics fields and summaries exactly. The new ELF
+checksum also matched the earlier qualified executable.
+
+Full data preflight found 12 old installation-receipt files in the existing data
+directory; all 43,526 physical data files matched the independent fresh-install
+reference. Those files were copied into a new directory and passed the unchanged
+strict preflight. The old directory and failed preflight were preserved, and no
+simulation events ran in that failed preflight.
+
+The registered 240-task, 24,000-event scan and collection/analysis completed
+normally. Independent raw-output, bootstrap, provenance and geometry checks
+passed. The [completed sample](results/first-scan-d0defcdc/README.md) records exact
+identities, figures, intervals, execution resources and interpretation limits.
+The simulation and statistical analysis remain bound to `d0defcdc`; subsequent
+plotting and documentation are separate from that frozen execution.
+
+The inherited run-header text prints the nominal gun energy of 1 MeV. The actual
+configured neutron source and audited event records contain 1,000 MeV kinetic
+energy; the frozen input and event record define this scan's source.
 
 ## Limits
 
