@@ -187,6 +187,8 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     G4bool fDimpleEnabled = false;
     G4double fDimpleRadius = 3. * CLHEP::mm;
     G4String fDimpleMode = "hemisphere";
+    // external keeps the active face at the original tile bottom plane;
+    // surface/opening retain the legacy in-cavity placements.
     G4String fDimpleSiPMMode = "surface";
     G4bool fDimpleSiPMModeExplicit = false;
 

@@ -200,7 +200,9 @@ DetectorMessenger::DetectorMessenger(DetectorConstruction* Det) : G4UImessenger(
   fDimpleModeCmd->SetToBeBroadcasted(false);
 
   fDimpleSiPMModeCmd = new G4UIcmdWithAString("/opnovice2/dimple/sipmMode", this);
-  fDimpleSiPMModeCmd->SetGuidance("Set dimple SiPM placement mode: surface or opening.");
+  fDimpleSiPMModeCmd->SetGuidance("Set dimple SiPM placement mode: surface, opening, or external.");
+  fDimpleSiPMModeCmd->SetGuidance(
+    "External places the sensor below the original tile bottom plane; grease is unsupported.");
   fDimpleSiPMModeCmd->AvailableForStates(G4State_PreInit);
   fDimpleSiPMModeCmd->SetToBeBroadcasted(false);
 

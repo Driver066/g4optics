@@ -211,6 +211,10 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
   }
   else if (fDimpleEnabled) {
     ValidateDimpleConfiguration();
+    G4cout << "Dimple geometry: shape=" << fDimpleMode
+           << ", radius=" << fDimpleRadius / mm
+           << " mm, sipm_mode=" << GetEffectiveDimpleSiPMMode()
+           << ", opening_z=" << -fTank_z / mm << " mm" << G4endl;
 
     auto dimpleSphere = new G4Sphere("Tank_DimpleSphere",
                                      0.,
@@ -373,6 +377,10 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
                           sipmPos);
 
   auto sipm_box = new G4Box("SiPM_Box", sipmHx, sipmHy, sipmHz);
+  const G4ThreeVector sipmFullSize(2. * sipm_box->GetXHalfLength(),
+                                 2. * sipm_box->GetYHalfLength(),
+                                 2. * sipm_box->GetZHalfLength());
+  G4cout << "SiPM geometry: full_size=" << sipmFullSize / mm << " mm" << G4endl;
 
   fSiPM_LV = new G4LogicalVolume(sipm_box, fSiPMMaterial, "SiPM");
 
@@ -903,9 +911,10 @@ void DetectorConstruction::SetDimpleMode(const G4String& mode)
 
 void DetectorConstruction::SetDimpleSiPMMode(const G4String& mode)
 {
-  if (mode != "surface" && mode != "opening") {
+  if (mode != "surface" && mode != "opening" && mode != "external") {
     G4ExceptionDescription msg;
-    msg << "Invalid dimple SiPM mode: " << mode << ". Use surface or opening.";
+    msg << "Invalid dimple SiPM mode: " << mode
+        << ". Use surface, opening, or external.";
     G4Exception("DetectorConstruction::SetDimpleSiPMMode",
                 "OpNovice2_Dimple_014",
                 FatalException,
@@ -1179,10 +1188,10 @@ void DetectorConstruction::ValidateDimpleConfiguration() const
                 msg);
   }
 
-  if (fDimpleRadius <= 0.) {
+  if (!std::isfinite(fDimpleRadius) || fDimpleRadius <= 0.) {
     G4ExceptionDescription msg;
     msg << "Invalid dimple radius: " << fDimpleRadius / mm
-        << " mm. Radius must be positive.";
+        << " mm. Radius must be finite and positive.";
     G4Exception("DetectorConstruction::ValidateDimpleConfiguration",
                 "OpNovice2_Dimple_004",
                 FatalException,
@@ -1212,7 +1221,10 @@ void DetectorConstruction::ValidateDimpleConfiguration() const
                 msg);
   }
 
-  if (std::abs(fSiPMLocalPosition.x()) > safety ||
+  if (!std::isfinite(fSiPMLocalPosition.x()) ||
+      !std::isfinite(fSiPMLocalPosition.y()) ||
+      !std::isfinite(fSiPMLocalPosition.z()) ||
+      std::abs(fSiPMLocalPosition.x()) > safety ||
       std::abs(fSiPMLocalPosition.y()) > safety ||
       std::abs(fSiPMLocalPosition.z()) > safety) {
     G4ExceptionDescription msg;
@@ -1225,8 +1237,61 @@ void DetectorConstruction::ValidateDimpleConfiguration() const
                 msg);
   }
 
+  const G4String sipmMode = GetEffectiveDimpleSiPMMode();
+  if (sipmMode != "surface" && sipmMode != "opening" && sipmMode != "external") {
+    G4ExceptionDescription msg;
+    msg << "Unknown dimple SiPM mode: " << sipmMode
+        << ". Use surface, opening, or external.";
+    G4Exception("DetectorConstruction::ValidateDimpleConfiguration",
+                "OpNovice2_Dimple_009",
+                FatalException,
+                msg);
+  }
+
   const G4double hu = 0.5 * fSiPMActiveU;
   const G4double hv = 0.5 * fSiPMActiveV;
+  if (sipmMode == "external") {
+    if (fGreaseEnabled) {
+      G4Exception("DetectorConstruction::ValidateDimpleConfiguration",
+                  "OpNovice2_Dimple_015", FatalException,
+                  "External dimple SiPM placement does not yet support grease coupling.");
+    }
+    if (!std::isfinite(fSiPMActiveU) || !std::isfinite(fSiPMActiveV) ||
+        !std::isfinite(fSiPMThickness) || fSiPMActiveU <= 0. ||
+        fSiPMActiveV <= 0. || fSiPMThickness <= 0.) {
+      G4Exception("DetectorConstruction::ValidateDimpleConfiguration",
+                  "OpNovice2_Dimple_016", FatalException,
+                  "External dimple SiPM dimensions must be finite and positive.");
+    }
+    if (!std::isfinite(fTank_x) || !std::isfinite(fTank_y) ||
+        !std::isfinite(fTank_z) || fTank_x <= 0. || fTank_y <= 0. || fTank_z <= 0.) {
+      G4Exception("DetectorConstruction::ValidateDimpleConfiguration",
+                  "OpNovice2_Dimple_018", FatalException,
+                  "External dimple placement requires finite, positive tile dimensions.");
+    }
+    if (std::abs(fSiPMLocalPosition.x()) + hu > fTank_x + safety ||
+        std::abs(fSiPMLocalPosition.y()) + hv > fTank_y + safety) {
+      G4Exception("DetectorConstruction::ValidateDimpleConfiguration",
+                  "OpNovice2_Dimple_017", FatalException,
+                  "External dimple SiPM footprint must fit on the tile bottom face.");
+    }
+    const auto* worldBox = fWorld_LV
+      ? dynamic_cast<const G4Box*>(fWorld_LV->GetSolid()) : nullptr;
+    if (!worldBox || !std::isfinite(worldBox->GetXHalfLength()) ||
+        !std::isfinite(worldBox->GetYHalfLength()) ||
+        !std::isfinite(worldBox->GetZHalfLength()) ||
+        std::abs(fSiPMLocalPosition.x()) + hu >= worldBox->GetXHalfLength() - safety ||
+        std::abs(fSiPMLocalPosition.y()) + hv >= worldBox->GetYHalfLength() - safety ||
+        fTank_z + fSiPMThickness >= worldBox->GetZHalfLength() - safety) {
+      G4Exception("DetectorConstruction::ValidateDimpleConfiguration",
+                  "OpNovice2_Dimple_018", FatalException,
+                  "External dimple SiPM must be fully contained inside the constructed World.");
+    }
+    // The sensor is entirely below the original bottom plane. Its rectangular
+    // face may cover the circular opening; its corners need not fit in the void.
+    return;
+  }
+
   const G4double rMax = GetSiPMFootprintCornerRadius(0., 0., hu, hv);
   if (rMax >= fDimpleRadius - safety) {
     G4ExceptionDescription msg;
@@ -1235,17 +1300,6 @@ void DetectorConstruction::ValidateDimpleConfiguration() const
         << " mm, dimple radius=" << fDimpleRadius / mm << " mm.";
     G4Exception("DetectorConstruction::ValidateDimpleConfiguration",
                 "OpNovice2_Dimple_008",
-                FatalException,
-                msg);
-  }
-
-  const G4String sipmMode = GetEffectiveDimpleSiPMMode();
-  if (sipmMode != "surface" && sipmMode != "opening") {
-    G4ExceptionDescription msg;
-    msg << "Unknown dimple SiPM mode: " << sipmMode
-        << ". Use surface or opening.";
-    G4Exception("DetectorConstruction::ValidateDimpleConfiguration",
-                "OpNovice2_Dimple_009",
                 FatalException,
                 msg);
   }
@@ -1471,13 +1525,17 @@ void DetectorConstruction::ComputeSiPMPlacementFor(
     hy = hv;
     hz = ht;
     if (fDimpleEnabled) {
-      const G4double safety = 1.e-6 * mm;
-      const G4double rMax = GetSiPMFootprintCornerRadius(u, v, hu, hv);
-      const G4double dimpleTopAtFootprint =
-        -fTank_z + std::sqrt(fDimpleRadius * fDimpleRadius - rMax * rMax);
       const G4String sipmMode = GetEffectiveDimpleSiPMMode();
 
-      if (sipmMode == "surface") {
+      if (sipmMode == "external") {
+        // Same receiving plane as the flat, grease-free control: z = -fTank_z.
+        pos = G4ThreeVector(u, v, -fTank_z - ht);
+      }
+      else if (sipmMode == "surface") {
+        const G4double safety = 1.e-6 * mm;
+        const G4double rMax = GetSiPMFootprintCornerRadius(u, v, hu, hv);
+        const G4double dimpleTopAtFootprint =
+          -fTank_z + std::sqrt(fDimpleRadius * fDimpleRadius - rMax * rMax);
         pos = G4ThreeVector(u, v, dimpleTopAtFootprint - ht - safety);
       }
       else if (sipmMode == "opening") {
@@ -1486,7 +1544,7 @@ void DetectorConstruction::ComputeSiPMPlacementFor(
       else {
         G4ExceptionDescription msg;
         msg << "Unknown dimple SiPM mode: " << sipmMode
-            << ". Use surface or opening.";
+            << ". Use surface, opening, or external.";
         G4Exception("DetectorConstruction::ComputeSiPMPlacement",
                     "OpNovice2_Dimple_011",
                     FatalException,

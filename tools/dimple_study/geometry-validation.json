@@ -1,0 +1,262 @@
+{
+  "architecture": "linux/arm64",
+  "base_commit": "404a11bcff4a2c3a4b7a83de8357cab3e37d1cb5",
+  "checker_sha256": "c5be8205deba453ee759731036a0f70c5c24c6da06918d8d9cd1b08294002e50",
+  "dataset_manifest_sha256": "a22fcbb989e4612cb49728242de9b15bff18f4e1ed3f55a6ed2549d46636d306",
+  "dataset_verification": "Full file checksum verification before geometry-v1; same data volume mounted read-only for both batches.",
+  "geant4_version": "11.4.2",
+  "image_id": "sha256:316f3970072d236f994a98f05b9702f7888c577c0b1971ce6e826689220b71ee",
+  "local_evidence_directory": "outputs/dimple-study/geometry-v2",
+  "run_manager": "Serial",
+  "schema": "dimple-preparation-validation-v1",
+  "scope": "Zero-event geometry only; no optical transport or scientific sample",
+  "source_sha256": {
+    "test/OpNovice2/CMakeLists.txt": "d485423443e56f8d54b471aa7f4a60c1ef1339e98799edb114f96517776b74a5",
+    "test/OpNovice2/OpNovice2.cc": "9782f4c78c50a2c3e55d8cdfbb1bd817b7662c9c9a8737842fc59327e53199e4",
+    "test/OpNovice2/include/ActionInitialization.hh": "80db837eaf4bada6b840a0bd5d3335c6cc36d7df28d13ceb83aad50e9bf3a91d",
+    "test/OpNovice2/include/DetectorConstruction.hh": "b328806b3aa4507a89ca42ec0759d5fdd42ba01ed68f9dd496cb0a421e571e9c",
+    "test/OpNovice2/include/DetectorMessenger.hh": "2ba3df9990522a4396ddfb81c8e1589de63f6638fbae5c86aec9a0d574594553",
+    "test/OpNovice2/include/EventAction.hh": "a4c9cd30aaa975827b07e9348a03ffcb081eb47e910876f9ceb98147b1f9fbe0",
+    "test/OpNovice2/include/HistoManager.hh": "257714f6c6431e0a81174d5378ac4f657ded113cad126be0a11268846a7657e0",
+    "test/OpNovice2/include/PrimaryGeneratorAction.hh": "e143509eced78b7b4dec9d39f73c5364ec6e052c45240d03a712d31c0db33ee4",
+    "test/OpNovice2/include/PrimaryGeneratorMessenger.hh": "0f17ee715d7b46ec69cd69fffdf6884675bb2cedc4ac7592522e8c72cacb7daf",
+    "test/OpNovice2/include/Run.hh": "fbe1ea56ef531944958f766b0e290e363a4060e78dafd25b5424bea5fa6d1f21",
+    "test/OpNovice2/include/RunAction.hh": "e833960e26d61a1a2314aad8596a0d4c2e9e485e7485eabd75d6dbba744226c2",
+    "test/OpNovice2/include/SteppingAction.hh": "d1b052109428d4f60fb9bc0e31c1a83b0b8efe3bdb1be226ebff10e26dc1d87b",
+    "test/OpNovice2/include/SteppingMessenger.hh": "c075c08413d80096e70ca4054d794ed67cffd4e6024d426bd6708a9d0685921c",
+    "test/OpNovice2/include/SteppingVerbose.hh": "60d7701b7eedb8db0fe109d706d6eeecc4499e5c38c6e72ea5b50e0a53df777d",
+    "test/OpNovice2/include/TrackInformation.hh": "2c03dd487c0bc4400de9cbf9b46c014b1cab6e73cbb44e1ff899d47eb7889144",
+    "test/OpNovice2/include/TrackingAction.hh": "f3e4c453d0a36a1bd632adecfd2c0ed1936f15cf2287fe11f1272dc4a255cf61",
+    "test/OpNovice2/src/ActionInitialization.cc": "75eb4076c09c8002df9f83c7b60026666c4ecfa8b0bdc6cc552e74b75d2da0be",
+    "test/OpNovice2/src/DetectorConstruction.cc": "c8a48eebbe95e7c836dad94550f1fb4fd253e7faad22e6c03b2b1e3b103bec10",
+    "test/OpNovice2/src/DetectorMessenger.cc": "58950b9bf0d8cacec9a6533bf1c012df8413fa94a8772200208c79365316b003",
+    "test/OpNovice2/src/EventAction.cc": "468c97f0538e74b38711b86634234145e5f0b990d6924b04526cad309a9a734c",
+    "test/OpNovice2/src/HistoManager.cc": "c88df09ad32bb8c18f9984b6108c8a4ab76b6549e1ad13a12ee8a3ef0fdb130c",
+    "test/OpNovice2/src/PrimaryGeneratorAction.cc": "81fc30e121ba1d1011424081ce96a524ed31123afbe44ea9625c5fc5ebc4bf29",
+    "test/OpNovice2/src/PrimaryGeneratorMessenger.cc": "0b7822a2e4fc65ab10caff0c239a47df3804d461a2684b963cf5ccbb3f57bf6f",
+    "test/OpNovice2/src/Run.cc": "ea2949739add6a07e7f41f9708eb5eb50ca950f999d15bcd5d033b4ea7c74c6d",
+    "test/OpNovice2/src/RunAction.cc": "b396b819a9e5026f7d376470e6366b2088990c1d099f12d0db2f68dce4412ea1",
+    "test/OpNovice2/src/SteppingAction.cc": "238ec22c5284600d34d385cbb84609e9720e0acaf56a02b9129aa096d5e70f44",
+    "test/OpNovice2/src/SteppingMessenger.cc": "67560a4f5c335eb5a52b4c085bd6ea4bddb143c00df65c4a91cb71b45a009329",
+    "test/OpNovice2/src/SteppingVerbose.cc": "f1af72d2c47127a9adb305026c061cf389e498b09adf54ab899ed410433b8a3b",
+    "test/OpNovice2/src/TrackInformation.cc": "68b5c7c76ebd3d35b381dba8717cf14d71017f22c04f83d0d6643e4b4d73a646",
+    "test/OpNovice2/src/TrackingAction.cc": "87f3c1cc821d62a7aeb50cc51766129997e489030c3721e925a0495bc5e809d5"
+  },
+  "verification": {
+    "cases": [
+      {
+        "checks": {
+          "completed": true,
+          "geometry_check_completed": true,
+          "macro_no_beam_on": true,
+          "no_command_error": true,
+          "no_exception": true,
+          "no_overlap": true,
+          "normal_exit": true,
+          "sensor_overlap_check": true,
+          "sensor_position": true,
+          "sensor_size": true,
+          "single_sensor": true,
+          "tank_overlap_check": true
+        },
+        "log_sha256": "261e88b875277597727610ccb33f26e994d1164a334747132e43372d41186898",
+        "macro_sha256": "082ce53cc760cb5d930ddc725cfb978ae65c9b0b04f67659f453f026178fb21f",
+        "name": "flat-small",
+        "passed": true,
+        "process_exit": 0
+      },
+      {
+        "checks": {
+          "completed": true,
+          "dimple_identity": true,
+          "geometry_check_completed": true,
+          "macro_no_beam_on": true,
+          "no_command_error": true,
+          "no_exception": true,
+          "no_overlap": true,
+          "normal_exit": true,
+          "sensor_overlap_check": true,
+          "sensor_position": true,
+          "sensor_size": true,
+          "single_sensor": true,
+          "tank_overlap_check": true
+        },
+        "log_sha256": "4b30cc5fb693a6e480e58552b8696b22193405c774527d3e074d6eb064c311b3",
+        "macro_sha256": "007f97b3035185b5a1e5d12d8433700749395a9ca26271763bb608d8079b07a0",
+        "name": "opening-small",
+        "passed": true,
+        "process_exit": 0
+      },
+      {
+        "checks": {
+          "completed": true,
+          "dimple_identity": true,
+          "geometry_check_completed": true,
+          "macro_no_beam_on": true,
+          "no_command_error": true,
+          "no_exception": true,
+          "no_overlap": true,
+          "normal_exit": true,
+          "sensor_overlap_check": true,
+          "sensor_position": true,
+          "sensor_size": true,
+          "single_sensor": true,
+          "tank_overlap_check": true
+        },
+        "log_sha256": "21877e23820ccb0f5ca3fce692f1db051fafd22c4b1e351b0bd400d3b294dbec",
+        "macro_sha256": "ff1127592d5190334b2d697bab8e6893b5d6ee2e733b6faceac7a300c1c320cb",
+        "name": "surface-small",
+        "passed": true,
+        "process_exit": 0
+      },
+      {
+        "checks": {
+          "completed": true,
+          "geometry_check_completed": true,
+          "macro_no_beam_on": true,
+          "no_command_error": true,
+          "no_exception": true,
+          "no_overlap": true,
+          "normal_exit": true,
+          "sensor_overlap_check": true,
+          "sensor_position": true,
+          "sensor_size": true,
+          "single_sensor": true,
+          "tank_overlap_check": true
+        },
+        "log_sha256": "296c5dd2716b36c54ed1be7affc54b26c632b8d5f4f8d1ea3896fb3383b32add",
+        "macro_sha256": "ee7a04a6c656b7f46ae927f87d1e4fb534574866f5facc14940fe5641b2e2b12",
+        "name": "flat-large",
+        "passed": true,
+        "process_exit": 0
+      },
+      {
+        "checks": {
+          "completed": true,
+          "dimple_identity": true,
+          "geometry_check_completed": true,
+          "macro_no_beam_on": true,
+          "no_command_error": true,
+          "no_exception": true,
+          "no_overlap": true,
+          "normal_exit": true,
+          "sensor_overlap_check": true,
+          "sensor_position": true,
+          "sensor_size": true,
+          "single_sensor": true,
+          "tank_overlap_check": true
+        },
+        "log_sha256": "6cc0ac9968d7429efe2d64dcc2f21ad95012a5d6b8763f70af5cfc3cd14a473c",
+        "macro_sha256": "0ccd03cdd29bd10a549f37a35e31594fa9c3689b1139c8a1abb9ea35c8b229d6",
+        "name": "external-large",
+        "passed": true,
+        "process_exit": 0
+      },
+      {
+        "checks": {
+          "completed": true,
+          "dimple_identity": true,
+          "geometry_check_completed": true,
+          "macro_no_beam_on": true,
+          "no_command_error": true,
+          "no_exception": true,
+          "no_overlap": true,
+          "normal_exit": true,
+          "sensor_overlap_check": true,
+          "sensor_position": true,
+          "sensor_size": true,
+          "single_sensor": true,
+          "tank_overlap_check": true
+        },
+        "log_sha256": "0ad99bd988ac916559565e27694270bfdace50ba07b759624eb24515f866c3b2",
+        "macro_sha256": "6524e7bf77e48752e37dd3ac0a512becb11225f0ae86b8c64c7582ca603f362c",
+        "name": "external-small",
+        "passed": true,
+        "process_exit": 0
+      },
+      {
+        "checks": {
+          "expected_error": true,
+          "macro_no_beam_on": true,
+          "rejected": true,
+          "stopped_before_completion": true
+        },
+        "log_sha256": "539a97dbd37f6337b8c07da0323ff9bdc1cca923d7d0bb0a33032c461dec6fe3",
+        "macro_sha256": "82559293fa46e4ea3b7f6a5f873ab1b937d880caecbb18a112eeac9eabb69e52",
+        "name": "reject-opening-large",
+        "passed": true,
+        "process_exit": -6
+      },
+      {
+        "checks": {
+          "expected_error": true,
+          "macro_no_beam_on": true,
+          "rejected": true,
+          "stopped_before_completion": true
+        },
+        "log_sha256": "d4a26eb9b7447a883317431696cb2bfebfc930e15d4bd6ee429a706de56ee2f3",
+        "macro_sha256": "3879f81a905b078824f87a16278d27da5abcd979b5ca1e3e79b60ac0d160b084",
+        "name": "reject-surface-large",
+        "passed": true,
+        "process_exit": -6
+      },
+      {
+        "checks": {
+          "expected_error": true,
+          "macro_no_beam_on": true,
+          "rejected": true,
+          "stopped_before_completion": true
+        },
+        "log_sha256": "1dc93b75aed5d9e27b87a486343d613c7b5f382f9e52bc77ade6ca847221300f",
+        "macro_sha256": "d6aba03c46dbd8cc5b718f3ac5b234f5b0bd7f7ea20fe70ec7bbf77c2a72efef",
+        "name": "reject-external-grease",
+        "passed": true,
+        "process_exit": -6
+      },
+      {
+        "checks": {
+          "expected_error": true,
+          "macro_no_beam_on": true,
+          "rejected": true,
+          "stopped_before_completion": true
+        },
+        "log_sha256": "6bd8cce38b22b74d20f850c40efdbcf5540180e124bca6f2e41c91c5c205eca6",
+        "macro_sha256": "8648ce27d5090c6d1f82002d4042306d9eb80fcad8a73dc88eff8a894015e22a",
+        "name": "reject-external-wide",
+        "passed": true,
+        "process_exit": -6
+      },
+      {
+        "checks": {
+          "expected_error": true,
+          "macro_no_beam_on": true,
+          "rejected": true,
+          "stopped_before_completion": true
+        },
+        "log_sha256": "55d0d400235f5c00d385060c01e77f6d6879be88964775882afa606e3634d0e4",
+        "macro_sha256": "4e320520cb4472391a6675afd1295274bab2e385b76c4530826897c4d00b58d0",
+        "name": "reject-external-zero",
+        "passed": true,
+        "process_exit": -6
+      },
+      {
+        "checks": {
+          "expected_error": true,
+          "macro_no_beam_on": true,
+          "rejected": true,
+          "stopped_before_completion": true
+        },
+        "log_sha256": "355d67b4f65b52673cf437326410ec4e6f051746866036ce0d0d654770bcd7e5",
+        "macro_sha256": "1be137ca97bd0a9e0b56d492cd69eef245887e43fd59b9e9fad0a63461d0fd5a",
+        "name": "reject-external-thick",
+        "passed": true,
+        "process_exit": -6
+      }
+    ],
+    "events": 0,
+    "executable_sha256": "cdde0f8e24bd132dc35cc8d4f31333c72be3c8a07d0966c99bc98dce378df596",
+    "manifest_sha256": "729684d516a705e512982a2aea7312ed10477ad4fec64e0ee4b6f78a98cc8225",
+    "scope": "Zero-event geometry only; no optical transport or scientific sample",
+    "status": "passed"
+  }
+}
