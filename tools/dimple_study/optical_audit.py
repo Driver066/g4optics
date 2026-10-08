@@ -87,6 +87,7 @@ def audit_scan(scan: dict, config: dict) -> dict:
     require(all(np.all(scan[name] == 0) for name in SENSORS[1:]), "inactive sensor has detections")
     require(np.all(scan["steel_edep_mev"] == 0), "steel energy present in single-tile sample")
     valid = generated > 0
+    require(np.all(detected[~valid] == 0), "detected photons without generated photons")
     require(np.issubdtype(scan["collection_efficiency_valid"].dtype, np.integer),
             "noninteger efficiency validity")
     require(np.array_equal(scan["collection_efficiency_valid"], valid.astype(np.int32)),
@@ -95,10 +96,13 @@ def audit_scan(scan: dict, config: dict) -> dict:
     np.divide(detected, generated, out=expected_ratio, where=valid)
     close(scan["collection_efficiency"], expected_ratio, "collection efficiency != D/G")
     total_g, total_d = int(generated.sum()), int(detected.sum())
-    require(total_g > 0 and total_d > 0, "sample did not exercise optical response")
+    require_response = config.get("require_response", True)
+    if require_response:
+        require(total_g > 0 and total_d > 0, "sample did not exercise optical response")
     return {"events": events, "generated_photons": total_g, "detected_photons": total_d,
             "scintillation_photons": int(scint.sum()), "cerenkov_photons": int(cerenkov.sum()),
-            "collection_efficiency": total_d / total_g,
+            "collection_efficiency": total_d / total_g if total_g > 0 else None,
+            "require_response": bool(require_response),
             "tile_edep_sum_mev": float(scan["tile_edep_mev"].sum())}
 
 
@@ -112,7 +116,9 @@ def audit_summary(path: Path, scan: dict, report: dict) -> None:
         "primary_energy_events": events, "generated_optical_photons": report["generated_photons"],
         "scintillation_photons": report["scintillation_photons"],
         "cerenkov_photons": 0, "sipm_detected_photons": report["detected_photons"],
-        "collection_efficiency_valid": 1, "collection_efficiency": report["collection_efficiency"],
+        "collection_efficiency_valid": int(report["generated_photons"] > 0),
+        "collection_efficiency": (report["collection_efficiency"]
+                                  if report["collection_efficiency"] is not None else np.nan),
         "production_scint_photons_per_event": report["scintillation_photons"] / events,
         "net_sipm_photons_per_event": report["detected_photons"] / events,
         "steel_edep_sum_mev": 0., "tile_edep_sum_mev": report["tile_edep_sum_mev"],

@@ -107,5 +107,9 @@ does not establish G equals all optical tracks or prove full photon closure.
 The new passive observer confirmed that optical-parent births account for the
 difference between legacy G and all optical starts in this small sample.
 
+The user has accepted the rendered geometry and authorized the
+[5,200-event local line scan](LINE_SCAN.md). Its execution state and outputs
+remain separate from the completed engineering checks.
+
 Groups 1 and 2 remain later work. For group 1, the intended compensating
 hemisphere is above the tile, preserving material thickness along z.

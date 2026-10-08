@@ -91,7 +91,37 @@ def fixture_summary():
     return summary
 
 
-def write_fixture(directory, scan=None, diag=None, log=LOG, histogram_flow=1., histogram_variance=1.):
+def zero_response_fixture(light_created):
+    scan, diag, summary = fixture_scan(), fixture_diag(), fixture_summary()
+    for name in ("sipm_detected_photons", "sipm_sensor_0_detected_photons"):
+        scan[name][:] = 0
+    for name in ("legacy_detected", "sipm_detection_calls", "sipm_unique_detected_tracks"):
+        diag[name][:] = 0
+    scan["collection_efficiency"][0] = 0.
+    summary.update(sipm_detected_photons=0, collection_efficiency=0.,
+                   net_sipm_photons_per_event=0., sipm_detected_mean=0.,
+                   sipm_detected_rms=0., sipm_detected_se=0.,
+                   sipm_detected_zero_events=2, sipm_detected_zero_fraction=1.)
+    if not light_created:
+        for name in ("generated_optical_photons", "scintillation_photons", "collection_efficiency_valid"):
+            scan[name][:] = 0
+        scan["collection_efficiency"][:] = np.nan
+        scan["tile_edep_mev"][:] = 0.
+        for name in ("legacy_generated", "nonoptical_parent_scintillation_births",
+                     "optical_parent_scintillation_births", "all_optical_births",
+                     "optical_tracks_started", "optical_tracking_resumes"):
+            diag[name][:] = 0
+        summary.update(generated_optical_photons=0, scintillation_photons=0,
+                       collection_efficiency_valid=0, collection_efficiency=float("nan"),
+                       production_scint_photons_per_event=0., tile_edep_sum_mev=0.)
+        for prefix in ("generated_optical", "scintillation"):
+            summary.update({f"{prefix}_mean": 0., f"{prefix}_rms": 0., f"{prefix}_se": 0.,
+                            f"{prefix}_zero_events": 2, f"{prefix}_zero_fraction": 1.})
+    return scan, diag, summary
+
+
+def write_fixture(directory, scan=None, diag=None, log=LOG, histogram_flow=1., histogram_variance=1.,
+                  summary=None):
     directory.mkdir(parents=True, exist_ok=True)
     scan = fixture_scan() if scan is None else scan
     with uproot.recreate(directory / "result.root") as root:
@@ -107,7 +137,7 @@ def write_fixture(directory, scan=None, diag=None, log=LOG, histogram_flow=1., h
             10., 10., 10., 13., 19., np.array([histogram_variance, 2., 3., 4.]),
             to_TAxis("xaxis", "", 2, 0., 2.))
     with (directory / "result_summary.csv").open("w", newline="") as handle:
-        summary = fixture_summary()
+        summary = fixture_summary() if summary is None else summary
         writer = csv.DictWriter(handle, fieldnames=summary)
         writer.writeheader()
         writer.writerow(summary)
@@ -116,6 +146,37 @@ def write_fixture(directory, scan=None, diag=None, log=LOG, histogram_flow=1., h
 
 
 class OpticalAuditTests(unittest.TestCase):
+    def test_line_scan_keeps_zero_response_while_smoke_still_requires_response(self):
+        for light_created in (True, False):
+            with self.subTest(light_created=light_created), tempfile.TemporaryDirectory() as tmp:
+                scan, diag, summary = zero_response_fixture(light_created)
+                write_fixture(Path(tmp), scan=scan, diag=diag, summary=summary)
+                report = audit.audit_case(Path(tmp),
+                    {**CONFIG, "diagnostics": True, "require_response": False}, 0)
+                self.assertEqual(report["events"], 2)
+                self.assertEqual(report["detected_photons"], 0)
+                self.assertEqual(report["generated_photons"], 10 if light_created else 0)
+                self.assertEqual(report["collection_efficiency"], 0. if light_created else None)
+                with self.assertRaisesRegex(ValueError, "did not exercise optical response"):
+                    audit.audit_case(Path(tmp), {**CONFIG, "diagnostics": True}, 0)
+
+    def test_line_scan_rejects_invalid_zero_denominator_csv_and_counts(self):
+        config = {**CONFIG, "diagnostics": True, "require_response": False}
+        for field, wrong in (("collection_efficiency", 0.), ("collection_efficiency_valid", 1)):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as tmp:
+                scan, diag, summary = zero_response_fixture(False)
+                summary[field] = wrong
+                write_fixture(Path(tmp), scan=scan, diag=diag, summary=summary)
+                with self.assertRaisesRegex(ValueError, "summary collection_efficiency"):
+                    audit.audit_case(Path(tmp), config, 0)
+        with tempfile.TemporaryDirectory() as tmp:
+            scan, diag, summary = zero_response_fixture(False)
+            scan["sipm_detected_photons"][0] = 1
+            scan["sipm_sensor_0_detected_photons"][0] = 1
+            write_fixture(Path(tmp), scan=scan, diag=diag, summary=summary)
+            with self.assertRaisesRegex(ValueError, "without generated photons"):
+                audit.audit_case(Path(tmp), config, 0)
+
     def test_valid_off_and_on_including_zero_light_and_resumed_track(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
