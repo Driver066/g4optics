@@ -1,0 +1,3328 @@
+{
+  "analysis_script_sha256": "327f37e278200589bc37fe95bbdffc8b00f1b8b67d07b1605af99423ec9f60e5",
+  "bootstrap_sha256": "6a7e52aa6709e557578c7664b9021276ecbaf41b3c00dbee97e2ed0fac2de4de",
+  "configurations": [
+    {
+      "block_difference_D": {
+        "estimate": 3.5,
+        "hi95": 26.530749999999905,
+        "invalid_bootstrap": 0,
+        "lo95": -18.33024999999993
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.13944975644385849,
+          "mean_D": 1320.03,
+          "mean_G": 9465.99,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.13903779830469126,
+          "mean_D": 1323.53,
+          "mean_G": 9519.21,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 1429.0,
+        "D_median": 1331.0,
+        "D_p90": 1377.0,
+        "D_p99": 1417.04,
+        "D_sd": 80.5030140825914,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.5,
+          2.5
+        ],
+        "largest_event_fraction_of_sum_D": 0.005405589432432023,
+        "mean_event_legacy_scint_centroid_z_mm": 0.7268871220483908,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.010780916642709075,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "flat",
+      "key": "flat_p00",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.1384976476628561,
+          "hi95": 0.13894299507735847,
+          "invalid_bootstrap": 0,
+          "lo95": 0.13804585717066095
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.13924319996628953,
+          "hi95": 0.13968782640289457,
+          "invalid_bootstrap": 0,
+          "lo95": 0.13879260560810985
+        },
+        "mean_D": {
+          "estimate": 1321.78,
+          "hi95": 1331.805125,
+          "invalid_bootstrap": 0,
+          "lo95": 1309.755
+        },
+        "mean_G": {
+          "estimate": 9492.6,
+          "hi95": 9559.880249999998,
+          "invalid_bootstrap": 0,
+          "lo95": 9407.759750000001
+        },
+        "mean_all_births": {
+          "estimate": 9543.7,
+          "hi95": 9611.365,
+          "invalid_bootstrap": 0,
+          "lo95": 9458.404750000002
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.9906513983687781,
+          "hi95": 0.9976104156402773,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9817688060976478
+        },
+        "mean_optical_parent_births": {
+          "estimate": 51.1,
+          "hi95": 52.22,
+          "invalid_bootstrap": 0,
+          "lo95": 49.985
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.9959963288173516,
+          "hi95": 1.0029911642126645,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9870682569577602
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.005354317507884783,
+          "hi95": 0.0054627177498707625,
+          "invalid_bootstrap": 0,
+          "lo95": 0.005247288995907812
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 5.0,
+      "x_mm": -40
+    },
+    {
+      "block_difference_D": {
+        "estimate": 5.25,
+        "hi95": 30.890249999999856,
+        "invalid_bootstrap": 0,
+        "lo95": -18.869999999999898
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.15136706004201803,
+          "mean_D": 1438.09,
+          "mean_G": 9500.68,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.15216646442325837,
+          "mean_D": 1443.34,
+          "mean_G": 9485.27,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 1577.0,
+        "D_median": 1449.0,
+        "D_p90": 1509.1,
+        "D_p99": 1550.1699999999998,
+        "D_sd": 89.47464633449755,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.4999999999999996,
+          2.5
+        ],
+        "largest_event_fraction_of_sum_D": 0.005472976959356986,
+        "mean_event_legacy_scint_centroid_z_mm": 0.715870602996882,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.010911248928483427,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "flat",
+      "key": "flat_p01",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.1509552875449825,
+          "hi95": 0.15153208719814149,
+          "invalid_bootstrap": 0,
+          "lo95": 0.150380329123837
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.15176643781322502,
+          "hi95": 0.15234901889007976,
+          "invalid_bootstrap": 0,
+          "lo95": 0.15118607385485086
+        },
+        "mean_D": {
+          "estimate": 1440.715,
+          "hi95": 1451.925,
+          "invalid_bootstrap": 0,
+          "lo95": 1427.0998749999999
+        },
+        "mean_G": {
+          "estimate": 9492.975,
+          "hi95": 9556.185,
+          "invalid_bootstrap": 0,
+          "lo95": 9410.665
+        },
+        "mean_all_births": {
+          "estimate": 9543.985,
+          "hi95": 9607.495,
+          "invalid_bootstrap": 0,
+          "lo95": 9461.119875
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.9920246893522456,
+          "hi95": 0.9983284579579823,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9835036599201702
+        },
+        "mean_optical_parent_births": {
+          "estimate": 51.01,
+          "hi95": 52.06,
+          "invalid_bootstrap": 0,
+          "lo95": 49.955
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.9973767997014612,
+          "hi95": 1.0037141078877807,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9888124309394725
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.005344727595443622,
+          "hi95": 0.0054460043707060994,
+          "invalid_bootstrap": 0,
+          "lo95": 0.005244893907802696
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 5.0,
+      "x_mm": -10
+    },
+    {
+      "block_difference_D": {
+        "estimate": 2.1299999999998818,
+        "hi95": 55.54099999999988,
+        "invalid_bootstrap": 0,
+        "lo95": -47.230750000000015
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.1829001988644796,
+          "mean_D": 1725.4,
+          "mean_G": 9433.56,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.18293865863550782,
+          "mean_D": 1727.53,
+          "mean_G": 9443.22,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 2081.0,
+        "D_median": 1730.0,
+        "D_p90": 1908.8999999999999,
+        "D_p99": 2009.5199999999995,
+        "D_sd": 184.32015181969163,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.5,
+          2.5
+        ],
+        "largest_event_fraction_of_sum_D": 0.006026765674369303,
+        "mean_event_legacy_scint_centroid_z_mm": 0.7645979071513587,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.011995609525822997,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "flat",
+      "key": "flat_p02",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.18201029251381182,
+          "hi95": 0.18360582573805212,
+          "invalid_bootstrap": 0,
+          "lo95": 0.18044179874816724
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.18291943859069185,
+          "hi95": 0.18451850075739362,
+          "invalid_bootstrap": 0,
+          "lo95": 0.1813471243122476
+        },
+        "mean_D": {
+          "estimate": 1726.465,
+          "hi95": 1749.905,
+          "invalid_bootstrap": 0,
+          "lo95": 1699.05
+        },
+        "mean_G": {
+          "estimate": 9438.39,
+          "hi95": 9534.195,
+          "invalid_bootstrap": 0,
+          "lo95": 9310.644375
+        },
+        "mean_all_births": {
+          "estimate": 9485.535,
+          "hi95": 9581.870125000001,
+          "invalid_bootstrap": 0,
+          "lo95": 9357.12475
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.9868546487261889,
+          "hi95": 0.9964279510699741,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9737683532288536
+        },
+        "mean_optical_parent_births": {
+          "estimate": 47.145,
+          "hi95": 48.28012499999997,
+          "invalid_bootstrap": 0,
+          "lo95": 45.98
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.9918587566045677,
+          "hi95": 1.0014808457655464,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9787043293361547
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.004970199361448774,
+          "hi95": 0.005073928060984506,
+          "invalid_bootstrap": 0,
+          "lo95": 0.004868112883241399
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 5.0,
+      "x_mm": -5
+    },
+    {
+      "block_difference_D": {
+        "estimate": -9.159999999999854,
+        "hi95": 62.16024999999984,
+        "invalid_bootstrap": 0,
+        "lo95": -79.7702500000002
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.21747987635696123,
+          "mean_D": 2061.47,
+          "mean_G": 9478.9,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.21678911147847488,
+          "mean_D": 2052.31,
+          "mean_G": 9466.85,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 2773.0,
+        "D_median": 2029.0,
+        "D_p90": 2396.5,
+        "D_p99": 2671.869999999999,
+        "D_sd": 256.03344218595345,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.5,
+          2.5
+        ],
+        "largest_event_fraction_of_sum_D": 0.006740759107195815,
+        "mean_event_legacy_scint_centroid_z_mm": 0.7095501034687735,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.013445055399170593,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "flat",
+      "key": "flat_p03",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.21608143669798982,
+          "hi95": 0.21926962822565313,
+          "invalid_bootstrap": 0,
+          "lo95": 0.2129643157468146
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.21713471359011915,
+          "hi95": 0.22033629084608727,
+          "invalid_bootstrap": 0,
+          "lo95": 0.21400332889446555
+        },
+        "mean_D": {
+          "estimate": 2056.89,
+          "hi95": 2092.055,
+          "invalid_bootstrap": 0,
+          "lo95": 2021.239875
+        },
+        "mean_G": {
+          "estimate": 9472.875,
+          "hi95": 9538.805,
+          "invalid_bootstrap": 0,
+          "lo95": 9389.845
+        },
+        "mean_all_births": {
+          "estimate": 9519.05,
+          "hi95": 9585.23525,
+          "invalid_bootstrap": 0,
+          "lo95": 9435.69475
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.9910249378887867,
+          "hi95": 0.9975237036521348,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9823185730285316
+        },
+        "mean_optical_parent_births": {
+          "estimate": 46.175,
+          "hi95": 47.165,
+          "invalid_bootstrap": 0,
+          "lo95": 45.185
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.9959578283814612,
+          "hi95": 1.0024855110107864,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9872065417556702
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.00485079918689365,
+          "hi95": 0.004949040125879182,
+          "invalid_bootstrap": 0,
+          "lo95": 0.0047531682061683345
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 5.0,
+      "x_mm": -3.2
+    },
+    {
+      "block_difference_D": {
+        "estimate": -22.1899999999996,
+        "hi95": 45.01100000000012,
+        "invalid_bootstrap": 0,
+        "lo95": -87.8524999999999
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.2303427092422064,
+          "mean_D": 2201.74,
+          "mean_G": 9558.54,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.22835688444327568,
+          "mean_D": 2179.55,
+          "mean_G": 9544.49,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 2918.0,
+        "D_median": 2190.5,
+        "D_p90": 2514.3,
+        "D_p99": 2724.17,
+        "D_sd": 243.09302761571934,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.4999999999999996,
+          2.5
+        ],
+        "largest_event_fraction_of_sum_D": 0.006660138908860176,
+        "mean_event_legacy_scint_centroid_z_mm": 0.7136328959668596,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.012916287212213754,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "flat",
+      "key": "flat_p04",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.2282317714478605,
+          "hi95": 0.23155445574687564,
+          "invalid_bootstrap": 0,
+          "lo95": 0.22493930228998935
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.22935052711533196,
+          "hi95": 0.23268350929976223,
+          "invalid_bootstrap": 0,
+          "lo95": 0.2260482864836576
+        },
+        "mean_D": {
+          "estimate": 2190.645,
+          "hi95": 2224.46,
+          "invalid_bootstrap": 0,
+          "lo95": 2157.139875
+        },
+        "mean_G": {
+          "estimate": 9551.515,
+          "hi95": 9581.445125,
+          "invalid_bootstrap": 0,
+          "lo95": 9510.775
+        },
+        "mean_all_births": {
+          "estimate": 9598.335,
+          "hi95": 9628.435,
+          "invalid_bootstrap": 0,
+          "lo95": 9557.42
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.9978404447665328,
+          "hi95": 0.9997274493379885,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9943045151242782
+        },
+        "mean_optical_parent_births": {
+          "estimate": 46.82,
+          "hi95": 47.9,
+          "invalid_bootstrap": 0,
+          "lo95": 45.745
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 1.002792249715397,
+          "hi95": 1.0046851819275555,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9992465605570439
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.0048779293492048365,
+          "hi95": 0.004988887529993265,
+          "invalid_bootstrap": 0,
+          "lo95": 0.004767421166584449
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 5.0,
+      "x_mm": -2.8
+    },
+    {
+      "block_difference_D": {
+        "estimate": -51.73999999999978,
+        "hi95": 33.96124999999992,
+        "invalid_bootstrap": 0,
+        "lo95": -140.2002499999998
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.25564990765787554,
+          "mean_D": 2430.75,
+          "mean_G": 9508.12,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.25218554587499753,
+          "mean_D": 2379.01,
+          "mean_G": 9433.57,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 3194.0,
+        "D_median": 2432.5,
+        "D_p90": 2769.1,
+        "D_p99": 2997.49,
+        "D_sd": 313.5302724758711,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.5,
+          2.5
+        ],
+        "largest_event_fraction_of_sum_D": 0.00664066398323409,
+        "mean_event_legacy_scint_centroid_z_mm": 0.6935857454287161,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.012973620305379062,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "flat",
+      "key": "flat_p05",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.25268418102336426,
+          "hi95": 0.2563548061766999,
+          "invalid_bootstrap": 0,
+          "lo95": 0.24903211013784252
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.2539245442196552,
+          "hi95": 0.2576034435924234,
+          "invalid_bootstrap": 0,
+          "lo95": 0.25026457533151897
+        },
+        "mean_D": {
+          "estimate": 2404.88,
+          "hi95": 2447.3002500000002,
+          "invalid_bootstrap": 0,
+          "lo95": 2360.914875
+        },
+        "mean_G": {
+          "estimate": 9470.845,
+          "hi95": 9544.800249999998,
+          "invalid_bootstrap": 0,
+          "lo95": 9377.0695
+        },
+        "mean_all_births": {
+          "estimate": 9517.335,
+          "hi95": 9591.57525,
+          "invalid_bootstrap": 0,
+          "lo95": 9423.274625
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.9900182819050549,
+          "hi95": 0.9974305183425677,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9802983493010884
+        },
+        "mean_optical_parent_births": {
+          "estimate": 46.49,
+          "hi95": 47.605,
+          "invalid_bootstrap": 0,
+          "lo95": 45.39
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.9949010581618576,
+          "hi95": 1.002348253953433,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9851356760508085
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.0048847707893018375,
+          "hi95": 0.004997370110783766,
+          "invalid_bootstrap": 0,
+          "lo95": 0.004774398703297384
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 5.0,
+      "x_mm": -1.5
+    },
+    {
+      "block_difference_D": {
+        "estimate": 7.989999999999782,
+        "hi95": 90.53999999999996,
+        "invalid_bootstrap": 0,
+        "lo95": -77.6305000000001
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.26286059224408653,
+          "mean_D": 2495.17,
+          "mean_G": 9492.37,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.26448778446732835,
+          "mean_D": 2503.16,
+          "mean_G": 9464.18,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 3295.0,
+        "D_median": 2507.5,
+        "D_p90": 2828.4,
+        "D_p99": 3179.4999999999995,
+        "D_sd": 305.8076838020291,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.5,
+          2.5
+        ],
+        "largest_event_fraction_of_sum_D": 0.0065922017953996635,
+        "mean_event_legacy_scint_centroid_z_mm": 0.7607092785404151,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.013052359488069015,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "flat",
+      "key": "flat_p06",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.2624023930694223,
+          "hi95": 0.26582548393233146,
+          "invalid_bootstrap": 0,
+          "lo95": 0.25904404248865026
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.26367297846918347,
+          "hi95": 0.26710384025674677,
+          "invalid_bootstrap": 0,
+          "lo95": 0.26030661677244266
+        },
+        "mean_D": {
+          "estimate": 2499.165,
+          "hi95": 2540.485,
+          "invalid_bootstrap": 0,
+          "lo95": 2455.465
+        },
+        "mean_G": {
+          "estimate": 9478.275,
+          "hi95": 9551.475,
+          "invalid_bootstrap": 0,
+          "lo95": 9372.914875
+        },
+        "mean_all_births": {
+          "estimate": 9524.17,
+          "hi95": 9597.645125000001,
+          "invalid_bootstrap": 0,
+          "lo95": 9418.259750000001
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.9905918358462731,
+          "hi95": 0.9980600512091369,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9795504497005867
+        },
+        "mean_optical_parent_births": {
+          "estimate": 45.895,
+          "hi95": 46.9,
+          "invalid_bootstrap": 0,
+          "lo95": 44.86
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.9954907228513623,
+          "hi95": 1.0029891759441654,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9844000303144124
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.004818792608699761,
+          "hi95": 0.004917590059128491,
+          "invalid_bootstrap": 0,
+          "lo95": 0.004719390834566016
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 5.0,
+      "x_mm": 0
+    },
+    {
+      "block_difference_D": {
+        "estimate": -29.359999999999673,
+        "hi95": 55.940749999999994,
+        "invalid_bootstrap": 0,
+        "lo95": -115.1307500000001
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.256419167983149,
+          "mean_D": 2434.7,
+          "mean_G": 9495.0,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.2530338733431517,
+          "mean_D": 2405.34,
+          "mean_G": 9506.0,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 3126.0,
+        "D_median": 2417.5,
+        "D_p90": 2778.0,
+        "D_p99": 3026.16,
+        "D_sd": 310.7254594586335,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.5,
+          2.5
+        ],
+        "largest_event_fraction_of_sum_D": 0.0064586243088900095,
+        "mean_event_legacy_scint_centroid_z_mm": 0.7038726764178801,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.012743696333088157,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "flat",
+      "key": "flat_p07",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.2534884488258711,
+          "hi95": 0.25710093959938757,
+          "invalid_bootstrap": 0,
+          "lo95": 0.24988703899462497
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.25472554076101256,
+          "hi95": 0.25834913645315466,
+          "invalid_bootstrap": 0,
+          "lo95": 0.25111545979200933
+        },
+        "mean_D": {
+          "estimate": 2420.02,
+          "hi95": 2462.045,
+          "invalid_bootstrap": 0,
+          "lo95": 2375.595
+        },
+        "mean_G": {
+          "estimate": 9500.5,
+          "hi95": 9574.3,
+          "invalid_bootstrap": 0,
+          "lo95": 9398.584874999999
+        },
+        "mean_all_births": {
+          "estimate": 9546.865,
+          "hi95": 9620.915,
+          "invalid_bootstrap": 0,
+          "lo95": 9444.624625
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.9912369975847883,
+          "hi95": 0.998590302309617,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9807985171915381
+        },
+        "mean_optical_parent_births": {
+          "estimate": 46.365,
+          "hi95": 47.395,
+          "invalid_bootstrap": 0,
+          "lo95": 45.325
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.9961331000971485,
+          "hi95": 1.0035190813906418,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9856467115737572
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.00485656809853287,
+          "hi95": 0.004959450994263125,
+          "invalid_bootstrap": 0,
+          "lo95": 0.004753888515301267
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 5.0,
+      "x_mm": 1.5
+    },
+    {
+      "block_difference_D": {
+        "estimate": 27.88000000000011,
+        "hi95": 115.15075000000003,
+        "invalid_bootstrap": 0,
+        "lo95": -55.461000000000034
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.22969304634205723,
+          "mean_D": 2150.91,
+          "mean_G": 9364.28,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.22800397240247677,
+          "mean_D": 2178.79,
+          "mean_G": 9555.93,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 2903.0,
+        "D_median": 2161.5,
+        "D_p90": 2574.1,
+        "D_p99": 2842.37,
+        "D_sd": 307.41151033007384,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.4999999999999996,
+          2.5
+        ],
+        "largest_event_fraction_of_sum_D": 0.006704852530198397,
+        "mean_event_legacy_scint_centroid_z_mm": 0.7279482390052311,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.013354273968173314,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "flat",
+      "key": "flat_p08",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.22773751038828516,
+          "hi95": 0.23122432432046522,
+          "invalid_bootstrap": 0,
+          "lo95": 0.22429924137727966
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.22883995473623178,
+          "hi95": 0.23234204454590385,
+          "invalid_bootstrap": 0,
+          "lo95": 0.22538747607664048
+        },
+        "mean_D": {
+          "estimate": 2164.85,
+          "hi95": 2206.7,
+          "invalid_bootstrap": 0,
+          "lo95": 2121.279875
+        },
+        "mean_G": {
+          "estimate": 9460.105,
+          "hi95": 9547.540375,
+          "invalid_bootstrap": 0,
+          "lo95": 9349.349250000001
+        },
+        "mean_all_births": {
+          "estimate": 9505.9,
+          "hi95": 9593.845625,
+          "invalid_bootstrap": 0,
+          "lo95": 9394.654375
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.9881593702550119,
+          "hi95": 0.9968061661143507,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9767494551443082
+        },
+        "mean_optical_parent_births": {
+          "estimate": 45.795,
+          "hi95": 46.925,
+          "invalid_bootstrap": 0,
+          "lo95": 44.655
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.9930645806291445,
+          "hi95": 1.0017542152997834,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9815964575456004
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.004817534373389159,
+          "hi95": 0.004924464092389536,
+          "invalid_bootstrap": 0,
+          "lo95": 0.004712013032716406
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 5.0,
+      "x_mm": 2.8
+    },
+    {
+      "block_difference_D": {
+        "estimate": -2.240000000000009,
+        "hi95": 72.10149999999979,
+        "invalid_bootstrap": 0,
+        "lo95": -75.6102499999999
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.21763628845235655,
+          "mean_D": 2042.09,
+          "mean_G": 9383.04,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.21533532497967886,
+          "mean_D": 2039.85,
+          "mean_G": 9472.9,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 2678.0,
+        "D_median": 2030.0,
+        "D_p90": 2366.0,
+        "D_p99": 2608.5899999999992,
+        "D_sd": 269.85992849073597,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.5,
+          2.5000000000000004
+        ],
+        "largest_event_fraction_of_sum_D": 0.0065606059863692265,
+        "mean_event_legacy_scint_centroid_z_mm": 0.7562543134647154,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.013094264001920656,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "flat",
+      "key": "flat_p09",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.21540648677515603,
+          "hi95": 0.2185853767220854,
+          "invalid_bootstrap": 0,
+          "lo95": 0.2122954055824873
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.21648032397218067,
+          "hi95": 0.21967399569398477,
+          "invalid_bootstrap": 0,
+          "lo95": 0.21335129987330342
+        },
+        "mean_D": {
+          "estimate": 2040.97,
+          "hi95": 2077.755,
+          "invalid_bootstrap": 0,
+          "lo95": 2003.1098749999999
+        },
+        "mean_G": {
+          "estimate": 9427.97,
+          "hi95": 9510.735125000001,
+          "invalid_bootstrap": 0,
+          "lo95": 9324.544375
+        },
+        "mean_all_births": {
+          "estimate": 9474.97,
+          "hi95": 9558.205125,
+          "invalid_bootstrap": 0,
+          "lo95": 9370.924874999999
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.9859523815318041,
+          "hi95": 0.9944575764170814,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9751604086082933
+        },
+        "mean_optical_parent_births": {
+          "estimate": 47.0,
+          "hi95": 48.075,
+          "invalid_bootstrap": 0,
+          "lo95": 45.9
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.990859107266065,
+          "hi95": 0.9994046922730605,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9800144632679647
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.004960437869460273,
+          "hi95": 0.005062023966474291,
+          "invalid_bootstrap": 0,
+          "lo95": 0.00485864700747479
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 5.0,
+      "x_mm": 3.2
+    },
+    {
+      "block_difference_D": {
+        "estimate": -8.860000000000127,
+        "hi95": 33.61024999999989,
+        "invalid_bootstrap": 0,
+        "lo95": -55.07024999999994
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.183362952735469,
+          "mean_D": 1734.41,
+          "mean_G": 9458.89,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.18209745282013345,
+          "mean_D": 1725.55,
+          "mean_G": 9475.97,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 2075.0,
+        "D_median": 1729.5,
+        "D_p90": 1908.2,
+        "D_p99": 2042.2399999999998,
+        "D_sd": 158.6830208482547,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.5,
+          2.5000000000000004
+        ],
+        "largest_event_fraction_of_sum_D": 0.005997179158140556,
+        "mean_event_legacy_scint_centroid_z_mm": 0.7700795656269789,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.011968346454872311,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "flat",
+      "key": "flat_p10",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.181822194755893,
+          "hi95": 0.18341923960994264,
+          "invalid_bootstrap": 0,
+          "lo95": 0.18025955474910477
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.18272963201206663,
+          "hi95": 0.18433327383303286,
+          "invalid_bootstrap": 0,
+          "lo95": 0.18115945229440286
+        },
+        "mean_D": {
+          "estimate": 1729.98,
+          "hi95": 1750.855,
+          "invalid_bootstrap": 0,
+          "lo95": 1706.959875
+        },
+        "mean_G": {
+          "estimate": 9467.43,
+          "hi95": 9544.025,
+          "invalid_bootstrap": 0,
+          "lo95": 9366.615
+        },
+        "mean_all_births": {
+          "estimate": 9514.68,
+          "hi95": 9591.645,
+          "invalid_bootstrap": 0,
+          "lo95": 9413.3245
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.9891465790565711,
+          "hi95": 0.9966096035560045,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9789397850154942
+        },
+        "mean_optical_parent_births": {
+          "estimate": 47.25,
+          "hi95": 48.295,
+          "invalid_bootstrap": 0,
+          "lo95": 46.2
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.994153130724118,
+          "hi95": 1.0016579599947293,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9838826201363946
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.004966010417586298,
+          "hi95": 0.005066793838372208,
+          "invalid_bootstrap": 0,
+          "lo95": 0.004866306058365836
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 5.0,
+      "x_mm": 5
+    },
+    {
+      "block_difference_D": {
+        "estimate": 11.069999999999936,
+        "hi95": 37.170499999999805,
+        "invalid_bootstrap": 0,
+        "lo95": -13.490250000000009
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.1521367812253389,
+          "mean_D": 1430.46,
+          "mean_G": 9402.46,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.15187604896596846,
+          "mean_D": 1441.53,
+          "mean_G": 9491.49,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 1586.0,
+        "D_median": 1447.0,
+        "D_p90": 1506.0,
+        "D_p99": 1554.03,
+        "D_sd": 91.1741663964659,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.5,
+          2.5
+        ],
+        "largest_event_fraction_of_sum_D": 0.005522303350638407,
+        "mean_event_legacy_scint_centroid_z_mm": 0.7034472859071531,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.010943631419329454,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "flat",
+      "key": "flat_p11",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.15119954513627484,
+          "hi95": 0.15179987255288968,
+          "invalid_bootstrap": 0,
+          "lo95": 0.1506034386251253
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.15200580079866835,
+          "hi95": 0.1526072400635913,
+          "invalid_bootstrap": 0,
+          "lo95": 0.15140927330118725
+        },
+        "mean_D": {
+          "estimate": 1435.995,
+          "hi95": 1447.59,
+          "invalid_bootstrap": 0,
+          "lo95": 1422.535
+        },
+        "mean_G": {
+          "estimate": 9446.975,
+          "hi95": 9519.3405,
+          "invalid_bootstrap": 0,
+          "lo95": 9358.685
+        },
+        "mean_all_births": {
+          "estimate": 9497.35,
+          "hi95": 9570.16,
+          "invalid_bootstrap": 0,
+          "lo95": 9408.579875
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.9866027920874484,
+          "hi95": 0.9940312721032697,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9773965497439325
+        },
+        "mean_optical_parent_births": {
+          "estimate": 50.375,
+          "hi95": 51.5,
+          "invalid_bootstrap": 0,
+          "lo95": 49.24
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.9919238844076026,
+          "hi95": 0.9993907767701445,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9826618392241108
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.005304111146793579,
+          "hi95": 0.005409917523668754,
+          "invalid_bootstrap": 0,
+          "lo95": 0.005198438024485667
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 5.0,
+      "x_mm": 10
+    },
+    {
+      "block_difference_D": {
+        "estimate": 1.7300000000000182,
+        "hi95": 16.06024999999992,
+        "invalid_bootstrap": 0,
+        "lo95": -12.990250000000009
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.1388981090666167,
+          "mean_D": 1326.52,
+          "mean_G": 9550.31,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.13949451158804774,
+          "mean_D": 1328.25,
+          "mean_G": 9521.88,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 1440.0,
+        "D_median": 1331.0,
+        "D_p90": 1379.2,
+        "D_p99": 1431.02,
+        "D_sd": 52.63075867583489,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.5,
+          2.5
+        ],
+        "largest_event_fraction_of_sum_D": 0.00542419870647928,
+        "mean_event_legacy_scint_centroid_z_mm": 0.6220843416731532,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.010822029780357621,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "flat",
+      "key": "flat_p12",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.13844889385134568,
+          "hi95": 0.13891006270637754,
+          "invalid_bootstrap": 0,
+          "lo95": 0.1379881819195412
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.1391958658129979,
+          "hi95": 0.13965818951388032,
+          "invalid_bootstrap": 0,
+          "lo95": 0.13873365731006262
+        },
+        "mean_D": {
+          "estimate": 1327.385,
+          "hi95": 1334.35,
+          "invalid_bootstrap": 0,
+          "lo95": 1319.88
+        },
+        "mean_G": {
+          "estimate": 9536.095,
+          "hi95": 9575.155125000001,
+          "invalid_bootstrap": 0,
+          "lo95": 9488.71
+        },
+        "mean_all_births": {
+          "estimate": 9587.545,
+          "hi95": 9626.945,
+          "invalid_bootstrap": 0,
+          "lo95": 9539.769750000001
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.9958051377136274,
+          "hi95": 0.9988316451363454,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9915788097458799
+        },
+        "mean_optical_parent_births": {
+          "estimate": 51.45,
+          "hi95": 52.42,
+          "invalid_bootstrap": 0,
+          "lo95": 50.485
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 1.001164328487746,
+          "hi95": 1.0042052859323298,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9969172328656477
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.005366337263606065,
+          "hi95": 0.005461381233851756,
+          "invalid_bootstrap": 0,
+          "lo95": 0.005272424744544963
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 5.0,
+      "x_mm": 40
+    },
+    {
+      "block_difference_D": {
+        "estimate": 1.7699999999999818,
+        "hi95": 15.890249999999964,
+        "invalid_bootstrap": 0,
+        "lo95": -12.120000000000005
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.06790216952664008,
+          "mean_D": 641.08,
+          "mean_G": 9441.23,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.06797322731406095,
+          "mean_D": 642.85,
+          "mean_G": 9457.4,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 707.0,
+        "D_median": 648.5,
+        "D_p90": 679.1,
+        "D_p99": 696.01,
+        "D_sd": 50.11447974789332,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.4999999999999996,
+          2.5
+        ],
+        "largest_event_fraction_of_sum_D": 0.005506530729868451,
+        "mean_event_legacy_scint_centroid_z_mm": 0.6759465959622242,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.010935175593685014,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "dimple",
+      "key": "dimple_p00",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.06760903209023876,
+          "hi95": 0.06793267789188409,
+          "invalid_bootstrap": 0,
+          "lo95": 0.06728398430290713
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.06793772881949645,
+          "hi95": 0.06826248769738812,
+          "invalid_bootstrap": 0,
+          "lo95": 0.06761138019692627
+        },
+        "mean_D": {
+          "estimate": 641.965,
+          "hi95": 648.375,
+          "invalid_bootstrap": 0,
+          "lo95": 634.545
+        },
+        "mean_G": {
+          "estimate": 9449.315,
+          "hi95": 9531.51,
+          "invalid_bootstrap": 0,
+          "lo95": 9348.959499999999
+        },
+        "mean_all_births": {
+          "estimate": 9495.255,
+          "hi95": 9577.870125000001,
+          "invalid_bootstrap": 0,
+          "lo95": 9394.254874999999
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.987103223265879,
+          "hi95": 0.9954860501251875,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9767280785024843
+        },
+        "mean_optical_parent_births": {
+          "estimate": 45.94,
+          "hi95": 47.03,
+          "invalid_bootstrap": 0,
+          "lo95": 44.835
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.9919246813202264,
+          "hi95": 1.0003470435566542,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9815018064073635
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.004838206030275122,
+          "hi95": 0.0049403245957371535,
+          "invalid_bootstrap": 0,
+          "lo95": 0.004735609603335741
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 5.0,
+      "x_mm": -40
+    },
+    {
+      "block_difference_D": {
+        "estimate": -12.170000000000073,
+        "hi95": 3.070250000000025,
+        "invalid_bootstrap": 0,
+        "lo95": -28.870000000000005
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.07588502021055156,
+          "mean_D": 721.47,
+          "mean_G": 9507.41,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.07599572289685881,
+          "mean_D": 709.3,
+          "mean_G": 9333.42,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 812.0,
+        "D_median": 722.0,
+        "D_p90": 764.0,
+        "D_p99": 790.03,
+        "D_sd": 58.462518809298984,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.5,
+          2.5000000000000004
+        ],
+        "largest_event_fraction_of_sum_D": 0.005675265765986147,
+        "mean_event_legacy_scint_centroid_z_mm": 0.7584838050199582,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.011217735904443062,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "dimple",
+      "key": "dimple_p01",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.07556613733699306,
+          "hi95": 0.07597982104428272,
+          "invalid_bootstrap": 0,
+          "lo95": 0.07514975256514636
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.07593986039893146,
+          "hi95": 0.07635503751961835,
+          "invalid_bootstrap": 0,
+          "lo95": 0.07552254195809166
+        },
+        "mean_D": {
+          "estimate": 715.385,
+          "hi95": 722.885,
+          "invalid_bootstrap": 0,
+          "lo95": 706.71
+        },
+        "mean_G": {
+          "estimate": 9420.415,
+          "hi95": 9508.035125,
+          "invalid_bootstrap": 0,
+          "lo95": 9313.829625
+        },
+        "mean_all_births": {
+          "estimate": 9467.005,
+          "hi95": 9554.9805,
+          "invalid_bootstrap": 0,
+          "lo95": 9360.054375
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.9845963181036929,
+          "hi95": 0.9934684385302751,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9736297975456204
+        },
+        "mean_optical_parent_births": {
+          "estimate": 46.59,
+          "hi95": 47.635,
+          "invalid_bootstrap": 0,
+          "lo95": 45.535
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.9894642286984682,
+          "hi95": 0.9983805732236303,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9784423248254438
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.004921302988643188,
+          "hi95": 0.0050231232342061154,
+          "invalid_bootstrap": 0,
+          "lo95": 0.004820103571849961
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 5.0,
+      "x_mm": -10
+    },
+    {
+      "block_difference_D": {
+        "estimate": 6.8799999999999955,
+        "hi95": 30.639999999999986,
+        "invalid_bootstrap": 0,
+        "lo95": -16.049999999999955
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.09359182251181745,
+          "mean_D": 883.65,
+          "mean_G": 9441.53,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.0933702537949719,
+          "mean_D": 890.53,
+          "mean_G": 9537.62,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 1089.0,
+        "D_median": 889.5,
+        "D_p90": 980.0,
+        "D_p99": 1054.2199999999998,
+        "D_sd": 85.02173473226962,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.5,
+          2.5
+        ],
+        "largest_event_fraction_of_sum_D": 0.0061380468723579345,
+        "mean_event_legacy_scint_centroid_z_mm": 0.6875663400543072,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.012202820457901678,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "dimple",
+      "key": "dimple_p02",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.09303640217433483,
+          "hi95": 0.09397770340055474,
+          "invalid_bootstrap": 0,
+          "lo95": 0.092111621787444
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.09348047726057278,
+          "hi95": 0.09442665795568012,
+          "invalid_bootstrap": 0,
+          "lo95": 0.09255069271904524
+        },
+        "mean_D": {
+          "estimate": 887.09,
+          "hi95": 898.545,
+          "invalid_bootstrap": 0,
+          "lo95": 875.065
+        },
+        "mean_G": {
+          "estimate": 9489.575,
+          "hi95": 9555.890249999999,
+          "invalid_bootstrap": 0,
+          "lo95": 9406.744875
+        },
+        "mean_all_births": {
+          "estimate": 9534.87,
+          "hi95": 9601.475125,
+          "invalid_bootstrap": 0,
+          "lo95": 9451.605
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.9904373981969239,
+          "hi95": 0.996821623174276,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9821828289946745
+        },
+        "mean_optical_parent_births": {
+          "estimate": 45.295,
+          "hi95": 46.31,
+          "invalid_bootstrap": 0,
+          "lo95": 44.27
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.9951935300062622,
+          "hi95": 1.0016075907296893,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9868933553100459
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.0047504580555372015,
+          "hi95": 0.004849917630633927,
+          "invalid_bootstrap": 0,
+          "lo95": 0.00465069018526101
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 5.0,
+      "x_mm": -5
+    },
+    {
+      "block_difference_D": {
+        "estimate": -1.75,
+        "hi95": 32.70099999999996,
+        "invalid_bootstrap": 0,
+        "lo95": -36.610500000000016
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.09929982258766584,
+          "mean_D": 933.04,
+          "mean_G": 9396.19,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.10127340742512887,
+          "mean_D": 931.29,
+          "mean_G": 9195.8,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 1176.0,
+        "D_median": 941.0,
+        "D_p90": 1082.1,
+        "D_p99": 1131.05,
+        "D_sd": 125.53106394464828,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.5,
+          2.5
+        ],
+        "largest_event_fraction_of_sum_D": 0.006307896134268074,
+        "mean_event_legacy_scint_centroid_z_mm": 0.7586850425891956,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.012401237978254922,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "dimple",
+      "key": "dimple_p03",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.09979824409734173,
+          "hi95": 0.10096509786057169,
+          "invalid_bootstrap": 0,
+          "lo95": 0.09864406155618835
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.10027597906410232,
+          "hi95": 0.10144855521654839,
+          "invalid_bootstrap": 0,
+          "lo95": 0.09911612457277157
+        },
+        "mean_D": {
+          "estimate": 932.165,
+          "hi95": 948.995125,
+          "invalid_bootstrap": 0,
+          "lo95": 914.359875
+        },
+        "mean_G": {
+          "estimate": 9295.995,
+          "hi95": 9407.155,
+          "invalid_bootstrap": 0,
+          "lo95": 9169.345
+        },
+        "mean_all_births": {
+          "estimate": 9340.495,
+          "hi95": 9452.185,
+          "invalid_bootstrap": 0,
+          "lo95": 9213.1245
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.9713599382521444,
+          "hi95": 0.9831257079278306,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9579116844771085
+        },
+        "mean_optical_parent_births": {
+          "estimate": 44.5,
+          "hi95": 45.495,
+          "invalid_bootstrap": 0,
+          "lo95": 43.48
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.9760391080916119,
+          "hi95": 0.9878636293877827,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9625258069407331
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.0047642014689799625,
+          "hi95": 0.004852970462036854,
+          "invalid_bootstrap": 0,
+          "lo95": 0.004674438234561631
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 5.0,
+      "x_mm": -3.2
+    },
+    {
+      "block_difference_D": {
+        "estimate": -20.410000000000082,
+        "hi95": 22.700250000000022,
+        "invalid_bootstrap": 0,
+        "lo95": -64.63074999999999
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.10085242437416422,
+          "mean_D": 916.33,
+          "mean_G": 9085.85,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.10027903790684632,
+          "mean_D": 895.92,
+          "mean_G": 8934.27,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 1541.0,
+        "D_median": 925.5,
+        "D_p90": 1046.1,
+        "D_p99": 1312.2799999999997,
+        "D_sd": 158.1770186250377,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.5,
+          2.5
+        ],
+        "largest_event_fraction_of_sum_D": 0.008503241826458821,
+        "mean_event_legacy_scint_centroid_z_mm": 0.7938968714272977,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.01589736515381432,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "dimple",
+      "key": "dimple_p04",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.1000975982652143,
+          "hi95": 0.10158805239831527,
+          "invalid_bootstrap": 0,
+          "lo95": 0.09870126034338343
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.10056814272047024,
+          "hi95": 0.10206494042156215,
+          "invalid_bootstrap": 0,
+          "lo95": 0.09916589299889822
+        },
+        "mean_D": {
+          "estimate": 906.125,
+          "hi95": 927.810125,
+          "invalid_bootstrap": 0,
+          "lo95": 884.09
+        },
+        "mean_G": {
+          "estimate": 9010.06,
+          "hi95": 9174.175,
+          "invalid_bootstrap": 0,
+          "lo95": 8833.07975
+        },
+        "mean_all_births": {
+          "estimate": 9052.415,
+          "hi95": 9217.305125,
+          "invalid_bootstrap": 0,
+          "lo95": 8874.709499999999
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.9432804821530734,
+          "hi95": 0.9608678653276645,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9242101344940085
+        },
+        "mean_optical_parent_births": {
+          "estimate": 42.355,
+          "hi95": 43.53,
+          "invalid_bootstrap": 0,
+          "lo95": 41.169875000000005
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.9478262619058978,
+          "hi95": 0.9654955643572252,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9286634298497429
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.004678861939051622,
+          "hi95": 0.0047763586727740375,
+          "invalid_bootstrap": 0,
+          "lo95": 0.004582311652482484
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 3.922967038573099,
+      "x_mm": -2.8
+    },
+    {
+      "block_difference_D": {
+        "estimate": 49.64999999999998,
+        "hi95": 124.07149999999992,
+        "invalid_bootstrap": 0,
+        "lo95": -25.73025000000002
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.10165109071292837,
+          "mean_D": 769.76,
+          "mean_G": 7572.57,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.10231817642614988,
+          "mean_D": 819.41,
+          "mean_G": 8008.45,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 1552.0,
+        "D_median": 868.0,
+        "D_p90": 1044.4,
+        "D_p99": 1465.1599999999999,
+        "D_sd": 268.8569565595286,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.4999999999999996,
+          2.5
+        ],
+        "largest_event_fraction_of_sum_D": 0.009766104318606568,
+        "mean_event_legacy_scint_centroid_z_mm": 0.9262219957988752,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.01908543453500884,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "dimple",
+      "key": "dimple_p05",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.1014921388728872,
+          "hi95": 0.10391983521594932,
+          "invalid_bootstrap": 0,
+          "lo95": 0.09925474316758673
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.10199396445162127,
+          "hi95": 0.10443250789186465,
+          "invalid_bootstrap": 0,
+          "lo95": 0.09974648751611066
+        },
+        "mean_D": {
+          "estimate": 794.585,
+          "hi95": 831.66,
+          "invalid_bootstrap": 0,
+          "lo95": 757.1848749999999
+        },
+        "mean_G": {
+          "estimate": 7790.51,
+          "hi95": 8089.49,
+          "invalid_bootstrap": 0,
+          "lo95": 7481.833625
+        },
+        "mean_all_births": {
+          "estimate": 7829.03,
+          "hi95": 8129.3805,
+          "invalid_bootstrap": 0,
+          "lo95": 7518.82475
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.8152011050392461,
+          "hi95": 0.847012915675485,
+          "invalid_bootstrap": 0,
+          "lo95": 0.7823534956559488
+        },
+        "mean_optical_parent_births": {
+          "estimate": 38.52,
+          "hi95": 40.165,
+          "invalid_bootstrap": 0,
+          "lo95": 36.855
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.819174863661228,
+          "hi95": 0.8511349774505441,
+          "invalid_bootstrap": 0,
+          "lo95": 0.7861664150726781
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.004920149750352216,
+          "hi95": 0.005030258529584703,
+          "invalid_bootstrap": 0,
+          "lo95": 0.004809778910365726
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 2.401923788646684,
+      "x_mm": -1.5
+    },
+    {
+      "block_difference_D": {
+        "estimate": 11.57000000000005,
+        "hi95": 103.34124999999982,
+        "invalid_bootstrap": 0,
+        "lo95": -81.61175000000001
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.10298062693848867,
+          "mean_D": 762.0,
+          "mean_G": 7399.45,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.10580891012322512,
+          "mean_D": 773.57,
+          "mean_G": 7311.01,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 2001.0,
+        "D_median": 868.5,
+        "D_p90": 1109.3,
+        "D_p99": 1744.269999999998,
+        "D_sd": 336.7982841345542,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.5,
+          2.5
+        ],
+        "largest_event_fraction_of_sum_D": 0.013030991748992232,
+        "mean_event_legacy_scint_centroid_z_mm": 0.9915283830465346,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.02585359182583666,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "dimple",
+      "key": "dimple_p06",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.10387200684015532,
+          "hi95": 0.10735209643374514,
+          "invalid_bootstrap": 0,
+          "lo95": 0.10070634232069076
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.10438626664291939,
+          "hi95": 0.10788085765948606,
+          "invalid_bootstrap": 0,
+          "lo95": 0.10120894484341075
+        },
+        "mean_D": {
+          "estimate": 767.785,
+          "hi95": 814.4303749999999,
+          "invalid_bootstrap": 0,
+          "lo95": 721.71
+        },
+        "mean_G": {
+          "estimate": 7355.23,
+          "hi95": 7696.03525,
+          "invalid_bootstrap": 0,
+          "lo95": 7006.18975
+        },
+        "mean_all_births": {
+          "estimate": 7391.645,
+          "hi95": 7734.006375,
+          "invalid_bootstrap": 0,
+          "lo95": 7040.884875000001
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.7696946952645031,
+          "hi95": 0.8058855547265708,
+          "invalid_bootstrap": 0,
+          "lo95": 0.732597692636841
+        },
+        "mean_optical_parent_births": {
+          "estimate": 36.415,
+          "hi95": 38.225,
+          "invalid_bootstrap": 0,
+          "lo95": 34.59
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.7734768006890799,
+          "hi95": 0.8098373438684277,
+          "invalid_bootstrap": 0,
+          "lo95": 0.7362047602271726
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.004926508240046701,
+          "hi95": 0.005047223193493851,
+          "invalid_bootstrap": 0,
+          "lo95": 0.004807832167850996
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 2.0,
+      "x_mm": 0
+    },
+    {
+      "block_difference_D": {
+        "estimate": -1.0899999999999181,
+        "hi95": 69.46124999999982,
+        "invalid_bootstrap": 0,
+        "lo95": -72.84324999999991
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.09989859945258953,
+          "mean_D": 786.18,
+          "mean_G": 7869.78,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.1002557825631124,
+          "mean_D": 785.09,
+          "mean_G": 7830.87,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 1750.0,
+        "D_median": 872.0,
+        "D_p90": 1036.1,
+        "D_p99": 1250.7699999999993,
+        "D_sd": 258.332829950339,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.5,
+          2.5000000000000004
+        ],
+        "largest_event_fraction_of_sum_D": 0.011137487510103293,
+        "mean_event_legacy_scint_centroid_z_mm": 1.0097390329361102,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.01958288518205019,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "dimple",
+      "key": "dimple_p07",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.0995975580922897,
+          "hi95": 0.10166810707783663,
+          "invalid_bootstrap": 0,
+          "lo95": 0.09771544656653412
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.10007674841487454,
+          "hi95": 0.10215576739479615,
+          "invalid_bootstrap": 0,
+          "lo95": 0.09818569507558501
+        },
+        "mean_D": {
+          "estimate": 785.635,
+          "hi95": 821.20025,
+          "invalid_bootstrap": 0,
+          "lo95": 749.5448749999999
+        },
+        "mean_G": {
+          "estimate": 7850.325,
+          "hi95": 8156.04025,
+          "invalid_bootstrap": 0,
+          "lo95": 7537.06475
+        },
+        "mean_all_births": {
+          "estimate": 7888.095,
+          "hi95": 8195.241375,
+          "invalid_bootstrap": 0,
+          "lo95": 7573.254
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.8226454911991022,
+          "hi95": 0.8551917527347019,
+          "invalid_bootstrap": 0,
+          "lo95": 0.7892183557512948
+        },
+        "mean_optical_parent_births": {
+          "estimate": 37.77,
+          "hi95": 39.53,
+          "invalid_bootstrap": 0,
+          "lo95": 35.985
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.8266625567216848,
+          "hi95": 0.8593709470578428,
+          "invalid_bootstrap": 0,
+          "lo95": 0.7930828484476146
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.004788228336499497,
+          "hi95": 0.004893065881163191,
+          "invalid_bootstrap": 0,
+          "lo95": 0.00468383915593981
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 2.401923788646684,
+      "x_mm": 1.5
+    },
+    {
+      "block_difference_D": {
+        "estimate": 0.10000000000002274,
+        "hi95": 43.58024999999991,
+        "invalid_bootstrap": 0,
+        "lo95": -43.789999999999964
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.10092065562174649,
+          "mean_D": 913.12,
+          "mean_G": 9047.9,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.1010077324747348,
+          "mean_D": 913.22,
+          "mean_G": 9041.09,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 1500.0,
+        "D_median": 937.5,
+        "D_p90": 1065.4,
+        "D_p99": 1283.4599999999996,
+        "D_sd": 157.34161247132107,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.5,
+          2.5
+        ],
+        "largest_event_fraction_of_sum_D": 0.008213147606688788,
+        "mean_event_legacy_scint_centroid_z_mm": 0.8088096361560884,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.015489996386215054,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "dimple",
+      "key": "dimple_p08",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.1004789743149611,
+          "hi95": 0.10188203279057576,
+          "invalid_bootstrap": 0,
+          "lo95": 0.099155932077374
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.10096417765723789,
+          "hi95": 0.10237265013198786,
+          "invalid_bootstrap": 0,
+          "lo95": 0.09963630941495037
+        },
+        "mean_D": {
+          "estimate": 913.17,
+          "hi95": 934.725,
+          "invalid_bootstrap": 0,
+          "lo95": 891.23
+        },
+        "mean_G": {
+          "estimate": 9044.495,
+          "hi95": 9204.380374999999,
+          "invalid_bootstrap": 0,
+          "lo95": 8872.164875
+        },
+        "mean_all_births": {
+          "estimate": 9088.17,
+          "hi95": 9248.900249999999,
+          "invalid_bootstrap": 0,
+          "lo95": 8914.884750000001
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.9462328700644016,
+          "hi95": 0.9633310038450098,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9276909542071335
+        },
+        "mean_optical_parent_births": {
+          "estimate": 43.675,
+          "hi95": 44.9,
+          "invalid_bootstrap": 0,
+          "lo95": 42.425
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.950802441288735,
+          "hi95": 0.967981174461475,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9321754577434852
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.004805697956794382,
+          "hi95": 0.004907049534282784,
+          "invalid_bootstrap": 0,
+          "lo95": 0.004705080057173017
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 3.922967038573099,
+      "x_mm": 2.8
+    },
+    {
+      "block_difference_D": {
+        "estimate": 19.75999999999999,
+        "hi95": 62.43099999999986,
+        "invalid_bootstrap": 0,
+        "lo95": -22.400499999999976
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.10075828320063288,
+          "mean_D": 924.69,
+          "mean_G": 9177.31,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.10283555892370276,
+          "mean_D": 944.45,
+          "mean_G": 9184.08,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 1464.0,
+        "D_median": 934.0,
+        "D_p90": 1082.0,
+        "D_p99": 1433.2399999999998,
+        "D_sd": 153.81841771433193,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.5,
+          2.5
+        ],
+        "largest_event_fraction_of_sum_D": 0.00783247910803899,
+        "mean_event_legacy_scint_centroid_z_mm": 0.7442303631348621,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.015627507837829163,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "dimple",
+      "key": "dimple_p09",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.10130263589335026,
+          "hi95": 0.10290766638253586,
+          "invalid_bootstrap": 0,
+          "lo95": 0.09979979954100543
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.10179730401674383,
+          "hi95": 0.10340829816727332,
+          "invalid_bootstrap": 0,
+          "lo95": 0.10028671930013
+        },
+        "mean_D": {
+          "estimate": 934.57,
+          "hi95": 955.550125,
+          "invalid_bootstrap": 0,
+          "lo95": 913.125
+        },
+        "mean_G": {
+          "estimate": 9180.695,
+          "hi95": 9318.325125000001,
+          "invalid_bootstrap": 0,
+          "lo95": 9028.104625
+        },
+        "mean_all_births": {
+          "estimate": 9225.525,
+          "hi95": 9363.885,
+          "invalid_bootstrap": 0,
+          "lo95": 9072.189875
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.9606100553809387,
+          "hi95": 0.9751995576852818,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9442546457913489
+        },
+        "mean_optical_parent_births": {
+          "estimate": 44.83,
+          "hi95": 45.98,
+          "invalid_bootstrap": 0,
+          "lo95": 43.665
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.9652257339066498,
+          "hi95": 0.9798848802620714,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9487967087325391
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.004859344048170701,
+          "hi95": 0.004956649741816317,
+          "invalid_bootstrap": 0,
+          "lo95": 0.004762713506870566
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 5.0,
+      "x_mm": 3.2
+    },
+    {
+      "block_difference_D": {
+        "estimate": -7.689999999999941,
+        "hi95": 15.660499999999924,
+        "invalid_bootstrap": 0,
+        "lo95": -31.800249999999956
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.09345022061857851,
+          "mean_D": 883.17,
+          "mean_G": 9450.7,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.09252687092444435,
+          "mean_D": 875.48,
+          "mean_G": 9461.9,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 1090.0,
+        "D_median": 880.0,
+        "D_p90": 971.5,
+        "D_p99": 1042.01,
+        "D_sd": 85.80631089814868,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.4999999999999996,
+          2.5
+        ],
+        "largest_event_fraction_of_sum_D": 0.006197935916754329,
+        "mean_event_legacy_scint_centroid_z_mm": 0.7285348594178654,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.012128621385722002,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "dimple",
+      "key": "dimple_p10",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.09254318664502861,
+          "hi95": 0.09343746831773724,
+          "invalid_bootstrap": 0,
+          "lo95": 0.09166362647978644
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.09298827236868544,
+          "hi95": 0.09388516396687935,
+          "invalid_bootstrap": 0,
+          "lo95": 0.09210634173917283
+        },
+        "mean_D": {
+          "estimate": 879.325,
+          "hi95": 890.69,
+          "invalid_bootstrap": 0,
+          "lo95": 866.99
+        },
+        "mean_G": {
+          "estimate": 9456.3,
+          "hi95": 9528.145,
+          "invalid_bootstrap": 0,
+          "lo95": 9362.2745
+        },
+        "mean_all_births": {
+          "estimate": 9501.78,
+          "hi95": 9574.005249999998,
+          "invalid_bootstrap": 0,
+          "lo95": 9407.219874999999
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.9904085098254967,
+          "hi95": 0.9976309055478563,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9806419952316289
+        },
+        "mean_optical_parent_births": {
+          "estimate": 45.48,
+          "hi95": 46.545,
+          "invalid_bootstrap": 0,
+          "lo95": 44.389875
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.9951473553704282,
+          "hi95": 1.0024008397201138,
+          "invalid_bootstrap": 0,
+          "lo95": 0.985336478435826
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.004786471587428881,
+          "hi95": 0.004889854124927137,
+          "invalid_bootstrap": 0,
+          "lo95": 0.004682874363181926
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 5.0,
+      "x_mm": 5
+    },
+    {
+      "block_difference_D": {
+        "estimate": -7.459999999999923,
+        "hi95": 6.959999999999925,
+        "invalid_bootstrap": 0,
+        "lo95": -22.519999999999982
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.07599921161773524,
+          "mean_D": 724.92,
+          "mean_G": 9538.52,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.07602619897615877,
+          "mean_D": 717.46,
+          "mean_G": 9437.01,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 806.0,
+        "D_median": 728.5,
+        "D_p90": 762.2,
+        "D_p99": 795.01,
+        "D_sd": 53.56641395051183,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.4999999999999996,
+          2.5
+        ],
+        "largest_event_fraction_of_sum_D": 0.005587986522275683,
+        "mean_event_legacy_scint_centroid_z_mm": 0.7168602826675613,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.011106643186954894,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "dimple",
+      "key": "dimple_p11",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.07564218610207642,
+          "hi95": 0.07604637724563906,
+          "invalid_bootstrap": 0,
+          "lo95": 0.07523574677863154
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.07601263311222402,
+          "hi95": 0.07641834991589277,
+          "invalid_bootstrap": 0,
+          "lo95": 0.07560408099166951
+        },
+        "mean_D": {
+          "estimate": 721.19,
+          "hi95": 727.935,
+          "invalid_bootstrap": 0,
+          "lo95": 713.22
+        },
+        "mean_G": {
+          "estimate": 9487.765,
+          "hi95": 9560.905375,
+          "invalid_bootstrap": 0,
+          "lo95": 9394.24975
+        },
+        "mean_all_births": {
+          "estimate": 9534.23,
+          "hi95": 9607.775249999999,
+          "invalid_bootstrap": 0,
+          "lo95": 9440.319875
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.9895095658302655,
+          "hi95": 0.9969352078325914,
+          "invalid_bootstrap": 0,
+          "lo95": 0.979881712252557
+        },
+        "mean_optical_parent_births": {
+          "estimate": 46.465,
+          "hi95": 47.45,
+          "invalid_bootstrap": 0,
+          "lo95": 45.475
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.9944096632571403,
+          "hi95": 1.0018719416490312,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9847369237706678
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.004873492667997311,
+          "hi95": 0.004970256309047949,
+          "invalid_bootstrap": 0,
+          "lo95": 0.004776682191293524
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 5.0,
+      "x_mm": 10
+    },
+    {
+      "block_difference_D": {
+        "estimate": 2.3999999999999773,
+        "hi95": 14.260249999999969,
+        "invalid_bootstrap": 0,
+        "lo95": -10.340250000000028
+      },
+      "blocks": [
+        {
+          "block": 0,
+          "legacy_D_over_G": 0.06762375287088937,
+          "mean_D": 640.99,
+          "mean_G": 9478.77,
+          "n": 100
+        },
+        {
+          "block": 1,
+          "legacy_D_over_G": 0.06779055616725582,
+          "mean_D": 643.39,
+          "mean_G": 9490.85,
+          "n": 100
+        }
+      ],
+      "diagnostics": {
+        "D_max": 736.0,
+        "D_median": 647.0,
+        "D_p90": 677.2,
+        "D_p99": 699.2099999999998,
+        "D_sd": 44.43677570634349,
+        "hit_valid_events": 200,
+        "hit_z_range_mm": [
+          2.5,
+          2.5
+        ],
+        "largest_event_fraction_of_sum_D": 0.005730391317211417,
+        "mean_event_legacy_scint_centroid_z_mm": 0.747543097223875,
+        "scint_centroid_valid_events": 200,
+        "top_one_percent_fraction_of_sum_D": 0.01133620891013563,
+        "zero_D_fraction": 0.0,
+        "zero_G_fraction": 0.0
+      },
+      "geometry": "dimple",
+      "key": "dimple_p12",
+      "metrics": {
+        "entry_per_all_births": {
+          "estimate": 0.0673811643524797,
+          "hi95": 0.06772701129681787,
+          "invalid_bootstrap": 0,
+          "lo95": 0.06703537018611344
+        },
+        "legacy_D_over_G": {
+          "estimate": 0.067707207629884,
+          "hi95": 0.06805406261028675,
+          "invalid_bootstrap": 0,
+          "lo95": 0.06736054255047075
+        },
+        "mean_D": {
+          "estimate": 642.19,
+          "hi95": 647.785,
+          "invalid_bootstrap": 0,
+          "lo95": 635.58
+        },
+        "mean_G": {
+          "estimate": 9484.81,
+          "hi95": 9552.71525,
+          "invalid_bootstrap": 0,
+          "lo95": 9394.63
+        },
+        "mean_all_births": {
+          "estimate": 9530.705,
+          "hi95": 9598.920125,
+          "invalid_bootstrap": 0,
+          "lo95": 9440.09
+        },
+        "mean_electron_edep_mev": {
+          "estimate": 0.9920631702909517,
+          "hi95": 0.9986387252839692,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9828781699688562
+        },
+        "mean_optical_parent_births": {
+          "estimate": 45.895,
+          "hi95": 46.79,
+          "invalid_bootstrap": 0,
+          "lo95": 44.985
+        },
+        "mean_tile_edep_mev": {
+          "estimate": 0.9968958732776854,
+          "hi95": 1.0035052555548198,
+          "invalid_bootstrap": 0,
+          "lo95": 0.9876646576172209
+        },
+        "optical_parent_fraction": {
+          "estimate": 0.004815488465963432,
+          "hi95": 0.004902518017153774,
+          "invalid_bootstrap": 0,
+          "lo95": 0.004728919318596983
+        }
+      },
+      "n": 200,
+      "straight_incident_material_thickness_mm": 5.0,
+      "x_mm": 40
+    }
+  ],
+  "contrasts": [
+    {
+      "metrics": {
+        "delta_D": {
+          "estimate": -679.8149999999999,
+          "hi95": -666.1550000000001,
+          "hi_adjusted": -658.9815288461538,
+          "invalid_bootstrap": 0,
+          "lo95": -692.3149999999999,
+          "lo_adjusted": -697.7908269230769
+        },
+        "relative_D": {
+          "estimate": -0.5143178138570714,
+          "hi95": -0.5077020220387697,
+          "invalid_bootstrap": 0,
+          "lo95": -0.5210417434974752
+        },
+        "relative_G": {
+          "estimate": -0.00455986768640837,
+          "hi95": 0.007993422051968091,
+          "invalid_bootstrap": 0,
+          "lo95": -0.01726977578445625
+        },
+        "relative_electron_edep": {
+          "estimate": -0.0035816586023516006,
+          "hi95": 0.00886720489363378,
+          "invalid_bootstrap": 0,
+          "lo95": -0.016258217737317667
+        },
+        "relative_legacy_ratio": {
+          "estimate": -0.5120930225968376,
+          "hi95": -0.50927863422551,
+          "invalid_bootstrap": 0,
+          "lo95": -0.5148932153933797
+        }
+      },
+      "x_mm": -40
+    },
+    {
+      "metrics": {
+        "delta_D": {
+          "estimate": -725.3299999999999,
+          "hi95": -709.9198749999999,
+          "hi_adjusted": -701.5330576923077,
+          "invalid_bootstrap": 0,
+          "lo95": -739.45,
+          "lo_adjusted": -745.8900000000001
+        },
+        "relative_D": {
+          "estimate": -0.5034514112784276,
+          "hi95": -0.49648273896526013,
+          "invalid_bootstrap": 0,
+          "lo95": -0.5105469770629666
+        },
+        "relative_G": {
+          "estimate": -0.007643546938657209,
+          "hi95": 0.0049815632120021845,
+          "invalid_bootstrap": 0,
+          "lo95": -0.02069655180839932
+        },
+        "relative_electron_edep": {
+          "estimate": -0.007488091101243932,
+          "hi95": 0.004908746115680738,
+          "invalid_bootstrap": 0,
+          "lo95": -0.020385832323686116
+        },
+        "relative_legacy_ratio": {
+          "estimate": -0.49962678512367376,
+          "hi95": -0.49626680581540306,
+          "invalid_bootstrap": 0,
+          "lo95": -0.5029520524611568
+        }
+      },
+      "x_mm": -10
+    },
+    {
+      "metrics": {
+        "delta_D": {
+          "estimate": -839.3749999999999,
+          "hi95": -809.7548750000001,
+          "hi_adjusted": -793.6979326923072,
+          "invalid_bootstrap": 0,
+          "lo95": -865.85,
+          "lo_adjusted": -877.2277692307691
+        },
+        "relative_D": {
+          "estimate": -0.48618130109790814,
+          "hi95": -0.47564493949020903,
+          "invalid_bootstrap": 0,
+          "lo95": -0.4960114015175308
+        },
+        "relative_G": {
+          "estimate": 0.005423064738795613,
+          "hi95": 0.02103693167291276,
+          "invalid_bootstrap": 0,
+          "lo95": -0.008142343940941451
+        },
+        "relative_electron_edep": {
+          "estimate": 0.0036304733177874304,
+          "hi95": 0.018749599218667253,
+          "invalid_bootstrap": 0,
+          "lo95": -0.00928703338745027
+        },
+        "relative_legacy_ratio": {
+          "estimate": -0.48895274345473705,
+          "hi95": -0.4821141973587612,
+          "invalid_bootstrap": 0,
+          "lo95": -0.4956839672773378
+        }
+      },
+      "x_mm": -5
+    },
+    {
+      "metrics": {
+        "delta_D": {
+          "estimate": -1124.725,
+          "hi95": -1085.57475,
+          "hi_adjusted": -1066.7457019230767,
+          "invalid_bootstrap": 0,
+          "lo95": -1164.170125,
+          "lo_adjusted": -1182.7947115384616
+        },
+        "relative_D": {
+          "estimate": -0.5468085313264199,
+          "hi95": -0.535398461742539,
+          "invalid_bootstrap": 0,
+          "lo95": -0.5582933586190905
+        },
+        "relative_G": {
+          "estimate": -0.018672261589010697,
+          "hi95": -0.0040937221595762465,
+          "invalid_bootstrap": 0,
+          "lo95": -0.03375470367494143
+        },
+        "relative_electron_edep": {
+          "estimate": -0.019843092625434045,
+          "hi95": -0.00521893451612722,
+          "invalid_bootstrap": 0,
+          "lo95": -0.03502006243075921
+        },
+        "relative_legacy_ratio": {
+          "estimate": -0.5381854084677069,
+          "hi95": -0.5295137899424364,
+          "invalid_bootstrap": 0,
+          "lo95": -0.5467186117092645
+        }
+      },
+      "x_mm": -3.2
+    },
+    {
+      "metrics": {
+        "delta_D": {
+          "estimate": -1284.52,
+          "hi95": -1244.4698750000002,
+          "hi_adjusted": -1225.575288461538,
+          "invalid_bootstrap": 0,
+          "lo95": -1324.7199999999998,
+          "lo_adjusted": -1343.2392980769232
+        },
+        "relative_D": {
+          "estimate": -0.5863661159156321,
+          "hi95": -0.5745376304166026,
+          "invalid_bootstrap": 0,
+          "lo95": -0.598136504775039
+        },
+        "relative_G": {
+          "estimate": -0.05668786574695217,
+          "hi95": -0.039030585850029484,
+          "invalid_bootstrap": 0,
+          "lo95": -0.07551894128312481
+        },
+        "relative_electron_edep": {
+          "estimate": -0.05467804286708877,
+          "hi95": -0.0367397134825265,
+          "invalid_bootstrap": 0,
+          "lo95": -0.07394206833379505
+        },
+        "relative_legacy_ratio": {
+          "estimate": -0.5615089967946827,
+          "hi95": -0.5523609206811478,
+          "invalid_bootstrap": 0,
+          "lo95": -0.5702685232996539
+        }
+      },
+      "x_mm": -2.8
+    },
+    {
+      "metrics": {
+        "delta_D": {
+          "estimate": -1610.295,
+          "hi95": -1553.04,
+          "hi_adjusted": -1524.6132211538456,
+          "invalid_bootstrap": 0,
+          "lo95": -1666.7852500000001,
+          "lo_adjusted": -1692.6747115384615
+        },
+        "relative_D": {
+          "estimate": -0.6695947406939223,
+          "hi95": -0.6529456067170768,
+          "invalid_bootstrap": 0,
+          "lo95": -0.6860600007181292
+        },
+        "relative_G": {
+          "estimate": -0.17742186679224492,
+          "hi95": -0.1449567137622909,
+          "invalid_bootstrap": 0,
+          "lo95": -0.2106804569860363
+        },
+        "relative_electron_edep": {
+          "estimate": -0.1765797461127836,
+          "hi95": -0.1435271620038355,
+          "invalid_bootstrap": 0,
+          "lo95": -0.21034760160569646
+        },
+        "relative_legacy_ratio": {
+          "estimate": -0.5983296346359008,
+          "hi95": -0.5870331010004558,
+          "invalid_bootstrap": 0,
+          "lo95": -0.6088888791002194
+        }
+      },
+      "x_mm": -1.5
+    },
+    {
+      "metrics": {
+        "delta_D": {
+          "estimate": -1731.38,
+          "hi95": -1667.854875,
+          "hi_adjusted": -1636.5314038461534,
+          "invalid_bootstrap": 0,
+          "lo95": -1793.6752500000002,
+          "lo_adjusted": -1822.0992980769229
+        },
+        "relative_D": {
+          "estimate": -0.6927833896521438,
+          "hi95": -0.6733394053967373,
+          "invalid_bootstrap": 0,
+          "lo95": -0.7119502217093606
+        },
+        "relative_G": {
+          "estimate": -0.2239906523075138,
+          "hi95": -0.18719919375349775,
+          "invalid_bootstrap": 0,
+          "lo95": -0.26149453622663404
+        },
+        "relative_electron_edep": {
+          "estimate": -0.22299511523134574,
+          "hi95": -0.1856762226985848,
+          "invalid_bootstrap": 0,
+          "lo95": -0.2610696771664488
+        },
+        "relative_legacy_ratio": {
+          "estimate": -0.6041070751771425,
+          "hi95": -0.5899048325918468,
+          "invalid_bootstrap": 0,
+          "lo95": -0.6171741899931718
+        }
+      },
+      "x_mm": 0
+    },
+    {
+      "metrics": {
+        "delta_D": {
+          "estimate": -1634.385,
+          "hi95": -1577.4250000000002,
+          "hi_adjusted": -1549.5141730769228,
+          "invalid_bootstrap": 0,
+          "lo95": -1689.870125,
+          "lo_adjusted": -1715.6998365384616
+        },
+        "relative_D": {
+          "estimate": -0.6753601209907356,
+          "hi95": -0.659390669557293,
+          "invalid_bootstrap": 0,
+          "lo95": -0.6912397149991947
+        },
+        "relative_G": {
+          "estimate": -0.17369348981632549,
+          "hi95": -0.14044356250158757,
+          "invalid_bootstrap": 0,
+          "lo95": -0.20745034244812108
+        },
+        "relative_electron_edep": {
+          "estimate": -0.17008193479104383,
+          "hi95": -0.1362475088014905,
+          "invalid_bootstrap": 0,
+          "lo95": -0.20449920351729164
+        },
+        "relative_legacy_ratio": {
+          "estimate": -0.6071193013629987,
+          "hi95": -0.5971601307287432,
+          "invalid_bootstrap": 0,
+          "lo95": -0.616400904939725
+        }
+      },
+      "x_mm": 1.5
+    },
+    {
+      "metrics": {
+        "delta_D": {
+          "estimate": -1251.6799999999998,
+          "hi95": -1203.2648749999998,
+          "hi_adjusted": -1180.547644230769,
+          "invalid_bootstrap": 0,
+          "lo95": -1299.085125,
+          "lo_adjusted": -1321.0540096153845
+        },
+        "relative_D": {
+          "estimate": -0.5781832459523755,
+          "hi95": -0.5649897973697627,
+          "invalid_bootstrap": 0,
+          "lo95": -0.5910537078037644
+        },
+        "relative_G": {
+          "estimate": -0.043932916177991554,
+          "hi95": -0.023797423108671896,
+          "invalid_bootstrap": 0,
+          "lo95": -0.06435142067678036
+        },
+        "relative_electron_edep": {
+          "estimate": -0.04242888490729024,
+          "hi95": -0.022048031077173444,
+          "invalid_bootstrap": 0,
+          "lo95": -0.0632233184254846
+        },
+        "relative_legacy_ratio": {
+          "estimate": -0.5588000453259466,
+          "hi95": -0.5496375969908079,
+          "invalid_bootstrap": 0,
+          "lo95": -0.5676409969891489
+        }
+      },
+      "x_mm": 2.8
+    },
+    {
+      "metrics": {
+        "delta_D": {
+          "estimate": -1106.4,
+          "hi95": -1062.954875,
+          "hi_adjusted": -1041.9722307692305,
+          "invalid_bootstrap": 0,
+          "lo95": -1148.8199999999997,
+          "lo_adjusted": -1168.8462403846154
+        },
+        "relative_D": {
+          "estimate": -0.5420951802329285,
+          "hi95": -0.5285932294571707,
+          "invalid_bootstrap": 0,
+          "lo95": -0.5552742938068385
+        },
+        "relative_G": {
+          "estimate": -0.02622780937996194,
+          "hi95": -0.00816263618889256,
+          "invalid_bootstrap": 0,
+          "lo95": -0.044703266902788745
+        },
+        "relative_electron_edep": {
+          "estimate": -0.025703397674736395,
+          "hi95": -0.007440513334035124,
+          "invalid_bootstrap": 0,
+          "lo95": -0.0444365758817912
+        },
+        "relative_legacy_ratio": {
+          "estimate": -0.5297618640397751,
+          "hi95": -0.5196741477447531,
+          "invalid_bootstrap": 0,
+          "lo95": -0.5394970905905254
+        }
+      },
+      "x_mm": 3.2
+    },
+    {
+      "metrics": {
+        "delta_D": {
+          "estimate": -850.655,
+          "hi95": -824.9549999999999,
+          "hi_adjusted": -811.9111153846153,
+          "invalid_bootstrap": 0,
+          "lo95": -874.7950000000001,
+          "lo_adjusted": -885.7123557692308
+        },
+        "relative_D": {
+          "estimate": -0.49171377703788477,
+          "hi95": -0.48216734150600965,
+          "invalid_bootstrap": 0,
+          "lo95": -0.5010541445026463
+        },
+        "relative_G": {
+          "estimate": -0.0011756094314930854,
+          "hi95": 0.012147304205444324,
+          "invalid_bootstrap": 0,
+          "lo95": -0.014111322570378202
+        },
+        "relative_electron_edep": {
+          "estimate": 0.0012757773171789832,
+          "hi95": 0.014231331788462259,
+          "invalid_bootstrap": 0,
+          "lo95": -0.011311825736840952
+        },
+        "relative_legacy_ratio": {
+          "estimate": -0.4911155276526529,
+          "hi95": -0.48450336425471974,
+          "invalid_bootstrap": 0,
+          "lo95": -0.49766389846398656
+        }
+      },
+      "x_mm": 5
+    },
+    {
+      "metrics": {
+        "delta_D": {
+          "estimate": -714.8049999999998,
+          "hi95": -699.58,
+          "hi_adjusted": -691.594173076923,
+          "invalid_bootstrap": 0,
+          "lo95": -728.8501250000002,
+          "lo_adjusted": -735.1584711538461
+        },
+        "relative_D": {
+          "estimate": -0.4977768028440209,
+          "hi95": -0.49102294743015645,
+          "invalid_bootstrap": 0,
+          "lo95": -0.5046426963809142
+        },
+        "relative_G": {
+          "estimate": 0.004317784264274982,
+          "hi95": 0.016776993539078456,
+          "invalid_bootstrap": 0,
+          "lo95": -0.008201585367203364
+        },
+        "relative_electron_edep": {
+          "estimate": 0.002946245202354314,
+          "hi95": 0.01518827028195386,
+          "invalid_bootstrap": 0,
+          "lo95": -0.009345038583220297
+        },
+        "relative_legacy_ratio": {
+          "estimate": -0.4999359714376773,
+          "hi95": -0.49661727420213747,
+          "invalid_bootstrap": 0,
+          "lo95": -0.5032812514815983
+        }
+      },
+      "x_mm": 10
+    },
+    {
+      "metrics": {
+        "delta_D": {
+          "estimate": -685.1949999999999,
+          "hi95": -675.71,
+          "hi_adjusted": -671.0299999999999,
+          "invalid_bootstrap": 0,
+          "lo95": -694.8351250000002,
+          "lo_adjusted": -699.5569423076922
+        },
+        "relative_D": {
+          "estimate": -0.5161991434286208,
+          "hi95": -0.511111445174955,
+          "invalid_bootstrap": 0,
+          "lo95": -0.5217654622865238
+        },
+        "relative_G": {
+          "estimate": -0.005377987530535311,
+          "hi95": 0.003367808904632108,
+          "invalid_bootstrap": 0,
+          "lo95": -0.015687953742606477
+        },
+        "relative_electron_edep": {
+          "estimate": -0.003757730584989072,
+          "hi95": 0.004257040312293741,
+          "invalid_bootstrap": 0,
+          "lo95": -0.013539976219650673
+        },
+        "relative_legacy_ratio": {
+          "estimate": -0.513583199943273,
+          "hi95": -0.5105888152588631,
+          "invalid_bootstrap": 0,
+          "lo95": -0.5165617293527648
+        }
+      },
+      "x_mm": 40
+    }
+  ],
+  "input_inventory_sha256": "46c61626a89bc3b3ce057f5a09dec85f611dcd6d177eefc77db7b8b1f3052826",
+  "method": {
+    "adjusted_confidence": 0.9961538461538462,
+    "adjusted_family": "13 delta_D comparisons only; nominal 95% Bonferroni family-wise target",
+    "adjusted_quantiles": [
+      0.0019230769230769232,
+      0.9980769230769231
+    ],
+    "block_bootstrap_replicates": 20000,
+    "bootstrap_replicates": 100000,
+    "bootstrap_seed": 2026100801,
+    "caveat": "Bootstrap coverage is approximate. Relative, auxiliary, block and symmetry intervals are descriptive pointwise 95% only.",
+    "cell_order": "flat then dimple; increasing x",
+    "confidence": 0.95,
+    "geometry_comparison": "independent samples; no matched event or seed pairing",
+    "interval_method": "whole-event nonparametric percentile bootstrap; pooled 200 events/cell",
+    "invalid_ratio_policy": "undefined point estimates become null; any invalid replicate makes interval null; no dropping/retry",
+    "joint_resampling": "D, G, all births, optical-parent births and energy use identical event indices within each cell",
+    "observation": "one incident electron; unique identity (task,event_id)",
+    "rng": "NumPy default_rng(SeedSequence(seed).spawn(52)); first 26 children for cells, last 26 for block diagnostics",
+    "timing": "Exploratory analysis specified after scan; not preregistered confirmatory inference"
+  },
+  "schema": "dimple-line-analysis-v1",
+  "software": {
+    "numpy": "2.4.6",
+    "python": "3.14.4",
+    "uproot": "5.7.5"
+  },
+  "source": {
+    "batch": "/Users/edison/.codex/worktrees/dimple-study/g4optics/outputs/dimple-study/line-v1",
+    "geometries": 2,
+    "input_events": 5200,
+    "input_tasks": 52,
+    "manifest_sha256": "f1c2b13566103515ca569764de34142a5c5ca74802fc936f0ff38947f8206405",
+    "positions": 13,
+    "simulation_commit": "5d6c50d37e33178e27710df5cc13e0127593acbe",
+    "tool_commit": "192b9a09e007c5fa5453a6390d369732a9be0082",
+    "verification_sha256": "2d818248ead5625252a78a64117f5c88aa64e39736d73bd725c989863b17a917"
+  },
+  "symmetry": [
+    {
+      "abs_x_mm": 1.5,
+      "geometry": "flat",
+      "positive_minus_negative_D": {
+        "estimate": 15.139999999999873,
+        "hi95": 75.48500000000013,
+        "invalid_bootstrap": 0,
+        "lo95": -46.11537500000023
+      }
+    },
+    {
+      "abs_x_mm": 2.8,
+      "geometry": "flat",
+      "positive_minus_negative_D": {
+        "estimate": -25.795000000000073,
+        "hi95": 28.0949999999998,
+        "invalid_bootstrap": 0,
+        "lo95": -80.34525000000025
+      }
+    },
+    {
+      "abs_x_mm": 3.2,
+      "geometry": "flat",
+      "positive_minus_negative_D": {
+        "estimate": -15.919999999999845,
+        "hi95": 35.710250000000194,
+        "invalid_bootstrap": 0,
+        "lo95": -67.42012500000007
+      }
+    },
+    {
+      "abs_x_mm": 5,
+      "geometry": "flat",
+      "positive_minus_negative_D": {
+        "estimate": 3.5150000000001,
+        "hi95": 37.91000000000008,
+        "invalid_bootstrap": 0,
+        "lo95": -29.77512500000009
+      }
+    },
+    {
+      "abs_x_mm": 10,
+      "geometry": "flat",
+      "positive_minus_negative_D": {
+        "estimate": -4.720000000000027,
+        "hi95": 12.975124999999883,
+        "invalid_bootstrap": 0,
+        "lo95": -22.38499999999999
+      }
+    },
+    {
+      "abs_x_mm": 40,
+      "geometry": "flat",
+      "positive_minus_negative_D": {
+        "estimate": 5.605000000000018,
+        "hi95": 19.485125000000096,
+        "invalid_bootstrap": 0,
+        "lo95": -7.0349999999998545
+      }
+    },
+    {
+      "abs_x_mm": 1.5,
+      "geometry": "dimple",
+      "positive_minus_negative_D": {
+        "estimate": -8.950000000000045,
+        "hi95": 42.67512500000004,
+        "invalid_bootstrap": 0,
+        "lo95": -60.514999999999986
+      }
+    },
+    {
+      "abs_x_mm": 2.8,
+      "geometry": "dimple",
+      "positive_minus_negative_D": {
+        "estimate": 7.044999999999959,
+        "hi95": 37.58499999999992,
+        "invalid_bootstrap": 0,
+        "lo95": -23.900124999999974
+      }
+    },
+    {
+      "abs_x_mm": 3.2,
+      "geometry": "dimple",
+      "positive_minus_negative_D": {
+        "estimate": 2.4050000000000864,
+        "hi95": 29.610124999999986,
+        "invalid_bootstrap": 0,
+        "lo95": -24.825000000000045
+      }
+    },
+    {
+      "abs_x_mm": 5,
+      "geometry": "dimple",
+      "positive_minus_negative_D": {
+        "estimate": -7.764999999999986,
+        "hi95": 8.725000000000023,
+        "invalid_bootstrap": 0,
+        "lo95": -24.505124999999992
+      }
+    },
+    {
+      "abs_x_mm": 10,
+      "geometry": "dimple",
+      "positive_minus_negative_D": {
+        "estimate": 5.805000000000064,
+        "hi95": 16.809999999999945,
+        "invalid_bootstrap": 0,
+        "lo95": -5.150125000000086
+      }
+    },
+    {
+      "abs_x_mm": 40,
+      "geometry": "dimple",
+      "positive_minus_negative_D": {
+        "estimate": 0.22500000000002274,
+        "hi95": 9.559999999999945,
+        "invalid_bootstrap": 0,
+        "lo95": -9.004999999999999
+      }
+    }
+  ]
+}

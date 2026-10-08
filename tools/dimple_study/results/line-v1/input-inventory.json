@@ -1,0 +1,577 @@
+{
+  "manifest_sha256": "f1c2b13566103515ca569764de34142a5c5ca74802fc936f0ff38947f8206405",
+  "tasks": [
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "beace246695b176e6fbdbc4b4e1c671ffa65d2f65e783f3033d7f012c7beb424",
+        "result.root": "f1ee6dc9a131b4c92bafb86f926690844934cdd803f4e1c22ee73801201a7754",
+        "result_summary.csv": "7c305b7fd7f9348b3b63cd0d683668904619e4c3b67a0cf5fbb71e59d8aba664",
+        "run.mac": "c595fa12636be34c34564c62504324ed38b60385a95636fa9bb1115bea0f3630",
+        "simulation.log": "a5298ab23f610d5491a418988ba8fa0d0d1c3657d1b97023426df8ec08ba64e3"
+      },
+      "task": "b0-p00-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "1448dea330ea146366f551851af95618fd6739db483c46fb1234d5da904e2e77",
+        "result.root": "04c31b88f7dea370c2c80ce488911fa3730486d5309d3f07c8c0743088cbb84b",
+        "result_summary.csv": "415fc7a2986d73bf59a881c421f4ddbdafe5d25ade61faf73507bb0c3123547c",
+        "run.mac": "ec925e0b3196eb037fd33746e512e6f0eda3f94f6529da4ac8aa1eeb73038019",
+        "simulation.log": "4cb40c2477e6353d81dd0f3bfaad5883487f039b9cc26b32252235b0067f35bd"
+      },
+      "task": "b0-p00-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "7ea8e8aa4c244f1a446b41bc452052608697f51029f62abc75eaaa1c5ca895f1",
+        "result.root": "3b30d3c71b4091512f89f6b592fd3ac0b211eb6aeece628f45a1990c42c1d5f7",
+        "result_summary.csv": "bdcbca816cc70200150676f4c10fba926c90907a49132c344084505e2a190a00",
+        "run.mac": "9fd182d279b7dab947605e7e3ba6a2749f7325f346bbe25426510bfe17bab672",
+        "simulation.log": "59b3a2749f1186099ff8f4cf2387c537ed00e81acc7ccc9bcc437d64fcbda26b"
+      },
+      "task": "b0-p01-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "81a20e2e75ed4a369a986b470f74459a40db72c3981dbe302638cd3ed4432ade",
+        "result.root": "5fd3e2cf9347fd135c765090d14be5c53b19240d98bdb7ff9b35b17567b4b815",
+        "result_summary.csv": "0bdc3b05b10007d28993ec49a6a10cd18a7d58706fa1551a7efd751f73f0e537",
+        "run.mac": "50dcabded3b22cb0f64410ef54d3519a1715fa31b02706d2c277c0abea8a1361",
+        "simulation.log": "a07e480a5bc1ed83329beed123b71ee323e9773aa880574fd0fbd7a7e6226346"
+      },
+      "task": "b0-p01-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "b2320d63d61ff021708b032521d64a3e5968775669189bd6e6c7800beaa88254",
+        "result.root": "af9d126468433b68de9aa19a3c21c5e189d0b6bae7944f81ee5a9daac5050da1",
+        "result_summary.csv": "3a06018b27670e2565d86761b714455429183c508bc8070d2db266798ae809ca",
+        "run.mac": "de611416fc0d26a378e74d73947aebcb64f54cdb4ee83b5923ad4e0a995393a7",
+        "simulation.log": "3860f1bdee9567ee8616b34aecb216ac0c1dfed53f422d4dbb7141a79a906db5"
+      },
+      "task": "b0-p02-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "7eb9c9891a6bf7b9115854a5528c2a105db01b0ff36304874adfca9ea4f4881a",
+        "result.root": "3105bbc84d643339c6dcf0b1505b5fa8b698fdbe7886b993d00d6ca6fe5bfc7a",
+        "result_summary.csv": "6d9d60a50252875d450331f136de4a4b72e003a86c79228853779b0bcac25f7d",
+        "run.mac": "56c512608d8cd6e93ea9ffcec9f10b545b9b0a9293ca669cf8d5674978f4bcdd",
+        "simulation.log": "676eb72a4694287cc25edb3af1545188de9fec53b4e15f7fb9d09e504693ec6a"
+      },
+      "task": "b0-p02-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "96c933689e1487b1b76093e79866248e3b88af3ca7efae2965db5b1e47d4da82",
+        "result.root": "37aabe39670d9f56331c0b8e7f342d8c9e24fbb76d0715f03a75ccb69b9d5eed",
+        "result_summary.csv": "020daf2eebc9b1ef25689552e033cff6be38a9a25b140de4982eb6b455c494e0",
+        "run.mac": "345d4fce346e7c4fdc437fce793b2946f34ee21c822c9fb36839740e865cd739",
+        "simulation.log": "abb6c0d1d80cf8aa5c7518bdd79ff8d56b84c7bc0c00d024382cb541064cccbd"
+      },
+      "task": "b0-p03-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "89237952815c6343d53626ee4a97f91cd2bf040990336949d29859778ef5f3da",
+        "result.root": "91ac76beca09eb597f13d1f4fa5ad371c29995b2a6609bdd88a67f96614c67a2",
+        "result_summary.csv": "c0853ab5dc17285cf7fdb3767e2c8c675a4cf90ab721cec3d6da3b8092ce59d5",
+        "run.mac": "d528563f656f72f951225c95a19427cf25f572a62177962c43966478dd856995",
+        "simulation.log": "75198db0a21a040360332d4498fbe9d2a9cd4d623aae47c45dbd49784a0719e5"
+      },
+      "task": "b0-p03-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "fb3e611b6f5995b1c6b6f014776e4d33016fcbdb03d92f66cca5954eeda290bf",
+        "result.root": "d264da458614146e9cac793a83589f33ce9c29ea97221ed6695fc5a284bc929f",
+        "result_summary.csv": "7d8d7a4fc6bb6aed8c6f26636e9f8255acc725152db94eb4adc2d9a2ceec7200",
+        "run.mac": "a552e8c9adc45d5ff68918df9a1bd95000bd53b121b5a1b0c6adfd5c87b3a507",
+        "simulation.log": "b7d2ebb03246a1fc178bd572057e7da8dedf4db205a01f8e064b7c07553d946b"
+      },
+      "task": "b0-p04-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "a5cb58582b354e74066178c6d33e096834bdbd4445bb1aa93ffac43d2084ea76",
+        "result.root": "251310bb5cf316172bd7b738e081c929b2f55ca912f56025fac725b16103849a",
+        "result_summary.csv": "c1e93a345c3c7a01c8d79667859524259e734a03a6bb2d8c0a8489dcad53fc97",
+        "run.mac": "f36401df94fb1ea471c4afdaf3f5835d0572269aed6f1b113fa52028cd03d5cb",
+        "simulation.log": "c015d17e91ba27e459d5b1ea1e36bf2a9a3233b5daa1846a3aa7f700577ffa93"
+      },
+      "task": "b0-p04-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "c3250f87da476c8405bde760d831fd87117c54ef1e45a6b848ce625099164d55",
+        "result.root": "6b10cae2274053bd0c01ecedccedd4ba407696ef315b2f8c6d4943dc35a32e18",
+        "result_summary.csv": "e7515c332ebf8347b62863d1d5f52c1caa320e70be1239ee7cf70671fb009630",
+        "run.mac": "650816ca1f846507bd46bfde63453ca748b0dc0aaaac13586cced59b5f2b1be9",
+        "simulation.log": "83faaf03b6fc3effa9c36abea27b772f2020d0dd31742bab6659072c776be4c5"
+      },
+      "task": "b0-p05-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "fb6c0ff09370fad148bd6e22e0b498aeb0eb0b56d2435a551abd5d279b67c6f5",
+        "result.root": "6a34cec5721d0a26958257d88a041b87db1243769732f5cca5b52c725399a261",
+        "result_summary.csv": "af158ede8541a632950a2e47e2b54aaa2cc6a100b1dca984678aed0e33d3a28a",
+        "run.mac": "9b4d1f8ee7ded8fbb72fa953f543089a7b502aaa2c3cdefd5e3a45a39d461b43",
+        "simulation.log": "9c3d302b26e9335dba0c7074b9e8c96ef032842db1412d11a1fea4ae12661e59"
+      },
+      "task": "b0-p05-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "5015f87937f411a7682d6bb5e338139f46e0c852155237679424dc77d335e797",
+        "result.root": "d266353a3b823148f11f434bfe89b676af64df4a3a05964f5a337784c11ff9c2",
+        "result_summary.csv": "282b8eb8bc323fd2adf4b35ed486bfc8c7774119de82533b870d06ceb2ece8b2",
+        "run.mac": "7901873f0e2a21c788dc79339b35eb7f72c4aab83ea82f83cff77558f1ec587e",
+        "simulation.log": "a2fcc82b5dc416c623175c1a7fc554000158bb1eddde1bbf921671c7be1f8301"
+      },
+      "task": "b0-p06-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "2e287a54abcef2bb8c2d186bae107beb778a47a98dd02ba5530c8d59faa1cde0",
+        "result.root": "6bc3100ec3f542f330582a2ee29e3a45a165750f31962a4c3fc29bfdf637616a",
+        "result_summary.csv": "57956d2cb6863ee33829d48ef3a48f758cfe397819cee2c8b3930f9c1eb414ee",
+        "run.mac": "ef36e2df6f51b421042bbb28c15d7edd0d06a82f755556168ff314ece6f2551c",
+        "simulation.log": "5444f06ffebcb4bdf9c182adbb05e27844b0e00f2d3012bf949ae757cacfa367"
+      },
+      "task": "b0-p06-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "ad28d091d07d9890f5da72e77ac58fecc6b386b62d2b9c7cba01a6abfa7a3950",
+        "result.root": "3f024346e88665c18d5cb2e2ba3639462fac110d0afeec1de5aa6ccde60c061a",
+        "result_summary.csv": "4442ee3fadf5ecb7f9383bef663f6e577eaa076cec06fb90c4827b86017ef00d",
+        "run.mac": "7216a01a4eb587a10011661e448221f829dd0a0cb15cc8951477c178205f65c5",
+        "simulation.log": "07410a928b8ac4266ded76d4bf61bbfae5c3164c10cfae3135cd61f8b1b82f36"
+      },
+      "task": "b0-p07-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "f83c2c6bdbbfb7b87235ad1858153cd996acf73a57f9afbddef304ac3c921314",
+        "result.root": "00894b7dad2840c1331abae2a159df2f3a6a912fcb94757de8dee4d57c41776d",
+        "result_summary.csv": "bc50511c46985c1057abdade914d105dec2ca09b9286dfdfb6c4244633ad9ba1",
+        "run.mac": "2571a38b7e975b3d82309597fd20ce47d6c0df2d3359c43ea312d3f390943d16",
+        "simulation.log": "96e6d3115ba8fa80d1ce7fee513561723d16e872e1516800d45f73bf9a8c6a17"
+      },
+      "task": "b0-p07-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "de159ed519d1be6a552b65d7caecd942eb0104c0ab6aa3953cd3ec746fccfe47",
+        "result.root": "eb2ad5256e396eca85387df9950ef14c6fa61e2c52b8c6ea43d54e6d8e96c0a5",
+        "result_summary.csv": "41f8532c655be6514863f8827969223fe3aee9c080a1de80061d60e53e561ba5",
+        "run.mac": "0124e0f8f18e8246b5f269774a5224b38d14f90eb76e437ee58f539d7d9d1032",
+        "simulation.log": "a499c58ba4cdd7492af8da946841bcd70130e60f5a30f65152a7b8950bddaab9"
+      },
+      "task": "b0-p08-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "00d45440a5e896b64a3e4879e827a753ca3dd2adbe2aaef081b54d625a8e37d7",
+        "result.root": "28f9a884f1411a8d2dd7d83f4a0d4a2836164ca592bf6c7556a910a7cfdb082b",
+        "result_summary.csv": "cd4ab70800420929c4008cd16b1ceab9f41f152e6381c354346e744938fee7cb",
+        "run.mac": "14d545ad8894cdfc5c21e39feb66e36964335e2af26c8b959d0192573abe1ebd",
+        "simulation.log": "350cbd53110fa671e3dce931c9b6d4a18b3907d0c3653b18a378d081656f6636"
+      },
+      "task": "b0-p08-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "15ea856601249801b46bcf08f8778b2aa5b139b6af22d68ca52818f06bff0371",
+        "result.root": "873b9d6ea55f5c3c0b06fc3d691a17adaddc02cb4059240a0b85da0013fe96df",
+        "result_summary.csv": "0019c26627d4c95f9f945831851a8a635300409111223369f8aba1293aa9d3e4",
+        "run.mac": "d4e358bdb6c9f3dfded81e2f5ba2504305ae8eb01d0c5efb09377f3806c31e4c",
+        "simulation.log": "00bafd87de4860c7f55ba873995d4c4460c72e7f79d5905154a3413427f4493c"
+      },
+      "task": "b0-p09-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "f870b3b45cfb1604441b48384aacc8801aadb05eaff39c95783bd3b6be083364",
+        "result.root": "b5289cceecac029b297118b38c784b55501c04dec160643ce5a5f5120f3db9b3",
+        "result_summary.csv": "6a1eeadef805a9969d10ade47b7075a34f440f1587e8602ec28ba51a937f5b71",
+        "run.mac": "6993c264c7ed08bdc2d9da6db56290a583c8c025969c14fbdb6142a56a7a8ae0",
+        "simulation.log": "e534db278a779e2dd57a4f5ed88076f3572344f16ae8924f43e353cfeabaaf23"
+      },
+      "task": "b0-p09-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "85bebbe2e2d05677d3b311bf4c30ead33557a0c5e0dcb48fa0b56865825a72d2",
+        "result.root": "3be485af7e3068f705a0dea4e2a8f1ad20d058296c5b516a36672f4568c60426",
+        "result_summary.csv": "2b195c152d85bdc04c1ce6b8a0c485e2af8348d4f379671dcf08ef290aceb8c5",
+        "run.mac": "9b443502b44bb6061a09fa08eb9c8a2322349e62fc1bafeb724e7d25187e7e21",
+        "simulation.log": "c4a9f4c6739b85a6935b21bf9997a6a623acf91a5ca2f04ef87762b6c6bdbb3c"
+      },
+      "task": "b0-p10-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "c1f9b00f3eb626d7457320d4ef369df1bc59831140491a629c43d65b29d6688b",
+        "result.root": "89d695126ca2d4dbe4889db9c341ba0918ff2344a4d7a51123e70045b51d9ce7",
+        "result_summary.csv": "2e37db39d3b0fbe50f4b203ca5d79de674138205caa58e0c0020d963fdcdb4a6",
+        "run.mac": "e65e08f0f1bb496018b38c4720c029892d78e87ecd552b5f7c40c52d0033443e",
+        "simulation.log": "0ed0d77923f60b2049046199f47a7a2832b428295131fe6bcfa4685754a7d268"
+      },
+      "task": "b0-p10-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "5ae9218bfeda0d132e733118eee2488c077b911cb637510953f401305143f233",
+        "result.root": "615e1b29029c29f2793108476660b2288e327a01896c205d9888372db6aa1a87",
+        "result_summary.csv": "087675ad271342b809121e34e0de34b145826c5d9165a072ebb533a4842ac66a",
+        "run.mac": "3f5f34ac9f6ecb740aad07272c8495d129ac2c7af27891b0c38d1c79dd8fc296",
+        "simulation.log": "33c9b34600e59a007a0b1c5b3722c1eff53ac8c96130cd83b6d3862ffbcad255"
+      },
+      "task": "b0-p11-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "45f0b8a61b2efebf4c86976af434ca71031c1d9ea6d53b312b84c9feabf59f89",
+        "result.root": "cfe6659c10424f7a6268969f0cf1d92a2c96d32c0246f17fd76b80b61d592aa6",
+        "result_summary.csv": "fc903ac835546dd547e895b9b3f9ee3aa27c2d6b3fd0e5e56045552699baea64",
+        "run.mac": "b58c0428aaab57cc5301a632580f40e4c2b31e7223eb75072ecbae3ce6f6fa79",
+        "simulation.log": "5c6509bef9520231c3840579a99c1f7a11b6a8552880365e1642ee4bc079efc9"
+      },
+      "task": "b0-p11-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "a3dba1b8f15faebd228a72c1ff10243970ab8cab44e10bb1cb13478aadf226bb",
+        "result.root": "8d3867435c2952bcd30ef8ab347aed099c1b0199b79362c3027a2612e6cf1b74",
+        "result_summary.csv": "79d1f0c70ace928e3eea136a6451811efe610684240480f046a772f2b155949a",
+        "run.mac": "2249e408a888bddc3cbb29b398b544039f42574fbe355c533f58b635deef2f1a",
+        "simulation.log": "50c79a72d1c4ebe16c47c05551650f0d6dddff56abeb41f88d6aabf443eaa698"
+      },
+      "task": "b0-p12-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "4ddd90ce63f16d5d92add8a413d0a1d39c3c39ca49437b7bab27d02222208ad4",
+        "result.root": "727eef8df6eb6166a1b2a35388d8731fb6d3340305bbd551dd04545dc780ab85",
+        "result_summary.csv": "f95641c6faf804d226ed5921df79e28eb7f4ab5cceecbf7648a21c4f21e60064",
+        "run.mac": "7e89d39b10c94d120511707909ccd04a62952b05c99b556464fef3b4758f9a94",
+        "simulation.log": "5328b4f020993effc8bb18f5c1ee17e34ca585f6afd06935c73b9c93d9900f00"
+      },
+      "task": "b0-p12-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "c5c460ae708db49e7b45e935653b44d968295436f5ad9a7893aea16ce00e9d18",
+        "result.root": "52e23c014b7297141923f6462a0eb62433b38ff9fa3e3febd2faf7640a0dbb41",
+        "result_summary.csv": "11793bd219873ea4771940f68bd22345ca70e1f58cfc7743e544fad130093ae2",
+        "run.mac": "ba12a392d4febc0d4d0ed3e35c742a8c9057996623c479041eb1cf10e07baddb",
+        "simulation.log": "aa12c0fcc642c1dc8d1cff1f8ac5ccfbae61d9ecb1c5c13fc4dec28f4c849f7a"
+      },
+      "task": "b1-p00-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "a1f653951c5d78963d40b9ea0ef726e3ceefd9f46d90a93fe58f06e99fdb7443",
+        "result.root": "623e92bf441df3bf912fcd11c99d77bab941a24bc3403f6b7b1f4581f4e71a7d",
+        "result_summary.csv": "5ef198319c0714cfacddcc474e7ffa4094c2d3742218e847a30b170de33c7108",
+        "run.mac": "c50b56b42e71cde8180a836aa04580e23d7efcfcebdeef332555ee2a833f9f8c",
+        "simulation.log": "17d91be752329a4a30a451b016d3862d2c3808f3915c404d9428ee9af20457d7"
+      },
+      "task": "b1-p00-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "178aa0d4e54cedfa791b91cc222b8ca7a03a4a0494bcdf683472f4f29b7b98b3",
+        "result.root": "a626f5ad3907a6afd5bf0bc80520504cab7d15da870b3a405e46981815c88779",
+        "result_summary.csv": "9187ae351c4ea742ab0bbf9b63d186a14b2e7c6efd8483eb69320d1b4ccf5410",
+        "run.mac": "eb17f630c6f9f291d44cd1766573b212387bbcd72fa4ea83429e31efeb652958",
+        "simulation.log": "6d80e166658fcd26e0886590494d6b2e30790c833d7afada52fdab99894a6654"
+      },
+      "task": "b1-p01-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "240220dacf55fa1994ce9e632efe09aea2ed527b4819557813aa0b2a9ae147b8",
+        "result.root": "9780c225c3b13929af178a5ee8980d72ae2df93eebb5ff41e554a7831f6e4acd",
+        "result_summary.csv": "2596e8caa61bb0a8513b0d94eb59abf72cd54eee6d38d194b0391a2774056531",
+        "run.mac": "4a2e4bf5a8232fe458c17e64c61588468196aed4cae676113168db876258fa94",
+        "simulation.log": "4ed3d5cd300291725a0a38599d809859f551a013ac2b840dcee8bdbcc0e5d317"
+      },
+      "task": "b1-p01-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "394c0a385d9e29779d910f72d926e6c4babbbf8a76782d16c121c9e4367fcc6d",
+        "result.root": "f87b92c214ab3e131d1e4b2da62b1457a204fc1baa836ccfcfb5de826310690f",
+        "result_summary.csv": "3c910e26540390ca25498722a22520e4ddde844cd1f9ac2ab0b979208773d937",
+        "run.mac": "3e80334b422c124a06d433cb0036388774c5d329fb6ad5b5c6757636567ce0b9",
+        "simulation.log": "f5aac99157655f6ea96b45aad0dcee9ca90ef58f7de7bb76f4b410bed3482088"
+      },
+      "task": "b1-p02-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "9f8d682e6de40b755d13912b53386c554c267144ed1362ef0e8b04f213e8f724",
+        "result.root": "3ef226710f86b865668bf4e9c826d08a49aebfeecb487a1ce0ba03bfb7a1bebb",
+        "result_summary.csv": "2b93ef37e8b7250db6bb3aba3f95412e48611862249d240bf8d957e603a70563",
+        "run.mac": "84a05265b9c36b5a6497098458a42c199c33863137c8b7c91557a0e3e9052171",
+        "simulation.log": "6371e3fa4bb05216ba0e23fdc8c2ece03f62693a419015ea1d059b5cada6111f"
+      },
+      "task": "b1-p02-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "06235c0977076a9638d6ee967432c7e870f06f804ec426ec9ade07beb7f9bd2c",
+        "result.root": "9e5b592885af01936a49fed6abc0b55e978ebfb6d6940cffc17e7efab27fedd5",
+        "result_summary.csv": "47956006a4f33a17fdc9ade194a06af795d42938feda1c941ae8e8e9a4bf7f06",
+        "run.mac": "3d52a69f6cf60c7707e37da18ed41656ccaf9024fcc7a008d93230cf8744765e",
+        "simulation.log": "6cfec1cbd4077ab3aa38efc3b013640918f3d6fa4b6c7756ee11c33c400b1a48"
+      },
+      "task": "b1-p03-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "ab8dd4029c154206a59e41e702cf336c5c2b6f842a2723a19a5abdea484bc6c4",
+        "result.root": "9291a802181379ca278db9ef467a26ea68ffc9d6f6779df19959ea9438046c3b",
+        "result_summary.csv": "e4aec08a93853889624db29de17b8369370c6859f7f9cfa08d57a03755726cb7",
+        "run.mac": "83d807a5883c866ae26fc4f5487756e32955df3f34fd6e07b0b163931902f5db",
+        "simulation.log": "f54eb98a576a489aae86938f4924ffb60edeb51d663dc25156f928591e27bbe7"
+      },
+      "task": "b1-p03-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "4fbc8856c0cbc1cda0d3b93bf511c4867edf1f45253138e794f01d0fb966cfca",
+        "result.root": "b47a35239864ee4ad9b5ccd5c6dbbea3f1e0017793ed2c263c3de427b0bfacca",
+        "result_summary.csv": "e53f242d7caf84d41b8f012ec9ae4eb39ec50a18abdbfd1932f70fee5605447c",
+        "run.mac": "e6b0189735cd4a828236999ba9ee2e149290302e406a4e47fa86203817464733",
+        "simulation.log": "6404b579438a30eb82852bee8e7aae1137500962378789dfb4bd0be533c6465a"
+      },
+      "task": "b1-p04-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "dbea8bced5ac94fb6e0322104d82bcd7687838b62cac8a1eb45453261b2d5c79",
+        "result.root": "b2350ef77e6da4b2fa3b938bea1ffa469b3ebfb12ad6200e2a474fdf7e6c6112",
+        "result_summary.csv": "a390c05e01dfad49a6a7c5d20c8e5ac073686dc346025629c24cd602a3415c3f",
+        "run.mac": "a67f93e15ba09af67532c57bed3b42f377a11dbd86867c6a9f8d9bcf69e178f9",
+        "simulation.log": "70188e4d2cf6579f1294b91e7301ac2cc63a1c711c863d46e91d46f86ba90ff8"
+      },
+      "task": "b1-p04-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "e4282b737088fb794b3e474a7d5c29356ad3d7918afd389615668e82ccb0baea",
+        "result.root": "449c4133caed11311dd61b5f8d5352f8ec20fb23bb6b36ed74723f10a2fd3552",
+        "result_summary.csv": "e5dbc11132f5449bb0db92f5ce31412f1ac8bee35cbd8c1f3c8bd2d95c2532fd",
+        "run.mac": "12ebad9b666f7b139261eb7c465886fc28ad1f9f79012329159c6a2cfa496910",
+        "simulation.log": "e250cbe00ba4fe4fe02e6e0f5b0472430e2f954f3152443ab1b2614015050bf5"
+      },
+      "task": "b1-p05-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "f82f72c20b4df6ec4deb78b301899d5febb0494ffedc36d04d6c1ce07a55515f",
+        "result.root": "379752c13ec98a81d2939bf767514ca68637299260dcaffdbde324be375b303d",
+        "result_summary.csv": "f80ca40c21da7e50f629006937f66e827d3c58b6390e6bd17f67ed45e03abc35",
+        "run.mac": "6f142496e570ac1051418d175ecf78930ceb2cc966e1c90e8fa69b2be1829f68",
+        "simulation.log": "a683e12738a4a0ba766a702df5908fb2d119c7666f57f5bedeff70113fe5ebb4"
+      },
+      "task": "b1-p05-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "6a1e65f0ded3a27b261d96acc6b518ea3f35cad7f966bb5f3663bfa5ea1bb01c",
+        "result.root": "06883cf28329aa64dabbf7d7ba7335d049ee6aec8ec2bfbbc520ba8867838442",
+        "result_summary.csv": "1ffee223ed537be4015f08bc489f5b6f63a2643549f65b49dccbcaca0631e441",
+        "run.mac": "3e358876feca20683a40346b940369a8eb2f6db35e007d990c1d1c4f48aa5b1d",
+        "simulation.log": "0796ccac4c76dcda343c772dabc94a4781802e380075cde136dd29e593649208"
+      },
+      "task": "b1-p06-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "78bbb4026ae8c5301d0c85c4b45fe5a280c12431a92673e085d4ec384fa46201",
+        "result.root": "46aaea4159ee546bf3856ebd72a1905fefe4afe37c4e77553bf4c7e66d319485",
+        "result_summary.csv": "55f942f9fc6a4a671157e9323c956c8ef4dbdf952a263623d6247fe0f1cf3161",
+        "run.mac": "77a0b1167e6b922b45d6750ae2f00975ed9ca0d7231e2df7766b48c21f159dc7",
+        "simulation.log": "236040d3e4e1122858c8d9795438afb064be982a7181c1c005e2d1fe09ec2721"
+      },
+      "task": "b1-p06-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "81213538279008c1b1dbbbc1f4f9f2d8fa31eadd2d24eaf3ac3e700a34e76189",
+        "result.root": "1f98e4f0048684ec334356b4cb35d53047b15f1e0f37a3761aa47595ce985a9d",
+        "result_summary.csv": "ae55485497150747a20601fc0b3ecc4fc9533ee0c36beb31a0c1992520fa089d",
+        "run.mac": "8ac9ba6c9cf27c78709f924e9174ba71ad34cc9f92c21b0e03297be44349033d",
+        "simulation.log": "e9b90461e1eb9de4841be01dffbfd6e2402e9b4f051c60b6f3822491361a45f1"
+      },
+      "task": "b1-p07-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "b008cac8a964e78c8f54c0f07bc5e75f0a0b517f903c7d8dc68452df425ded1a",
+        "result.root": "1b6e218880b0674881a6e65dc8aa94275ed21b1b6966f4303cd11946659341f5",
+        "result_summary.csv": "bcf3f2af8a6ed577c7c780a3d171a795e2ef74ecf25e5e4278a85341e5d078c3",
+        "run.mac": "78e7e19e08809624d2d9843a45ce6b21b61d5e31d6d1f9f7ff1b66f75df2da8d",
+        "simulation.log": "afde3f1f9f1fd68806a10d195c4eefae629e06cf94caf86201ef37e75ffcfb1f"
+      },
+      "task": "b1-p07-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "9728d27b5c6c9ea2ea4e220d8b5f0c6e7e892ffb5916fdf73df3a5a158795088",
+        "result.root": "607a0e86d66ede275c7e58b3d90f364d5c65975ed03be73c7eb996ac2d3ac99c",
+        "result_summary.csv": "a7664cc589ffc2dcb226b44aa372c87202b7a668e320f2b3832275683f32787a",
+        "run.mac": "3ff47373d210507c6d4b6fedbd68fc403a77c2c31690de06b37a08458fc47d82",
+        "simulation.log": "a7f784a23593d102e5dea06cb63f16d02e35d0c2f4d40c3c9e17e8f9c3f5689b"
+      },
+      "task": "b1-p08-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "90ca986f67109e2526eb7c9e06e88d638a47ed603b5d512dca9ab6402edd16a7",
+        "result.root": "f80a1ed43ccaff67317f5ec75bc5ec05e746fb7d12f1ac613e54dfaa45f32285",
+        "result_summary.csv": "f48b72f7a66c32de42b5fc07c711b4824ccf794202c5537a2bf5e7618dedb5c6",
+        "run.mac": "f67dc4491f27d2f20ee9a70f0b6c2b01c8e7f3c6c1a86ddb57b8d2aa82c48221",
+        "simulation.log": "4dc9d234b6979e2aebdc77e3949a5dea8ed0d058b8116bc078e4a654f2664b08"
+      },
+      "task": "b1-p08-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "5d5c1e63646b3628292b22f208f235ef04b759d6bf01c702983ba4f227946b8b",
+        "result.root": "92db2d6348c1943010b67852afcdfff4581a29a246306460fd048709649ea2ae",
+        "result_summary.csv": "2739967958027fb8ed89e3fe176d56aac9fcc54830d4d09111ffa2ddd6f909b8",
+        "run.mac": "eed7684bd1c7e80557db1138e708509d1ce9a33787d954791970fbed5aa2056d",
+        "simulation.log": "9c4bfc737bec5f1239b8605a1f9c260b734d8f71c6fc18358cd540915f25c881"
+      },
+      "task": "b1-p09-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "89f858e779eade39deaa616f8ca1256db84e84cfe545bc6bc3b6ced4d22eb0d5",
+        "result.root": "8d432602ceef70ac091e16bd7ce102640badc63c47305568f422efcac7b80578",
+        "result_summary.csv": "7417ee24ca12582a08f4965741be9cd8a0624b56d81fa81992f4081b275ccdcc",
+        "run.mac": "67959b69c12ed071b28c06efac5a1271f5d693842562754f2de81840d86ad1fd",
+        "simulation.log": "70db7ee812e0f326fd6efee8318175460a5d9a930903ab2ae6b87aba56231a40"
+      },
+      "task": "b1-p09-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "ae59a2df239a58be31be2ce80ff673bdd9ac5c731293e6a119e3c1440a75030c",
+        "result.root": "a36a0516b61ab93842d13e5e23ecae1e315db2aec1d838ae1e401baf0fe2e74a",
+        "result_summary.csv": "8dcaffa7ae62971bb1f70b443f56e9de7e5cacbfad6098a5e635c63c4a6b4efa",
+        "run.mac": "b5ed75e1538135ff2ca2c257af32ece61ba85f77f6f1083a7876f0a6d70474b0",
+        "simulation.log": "b3d170872625a90482a8af714f593399d027db18399d664fc98a0e926be56a2f"
+      },
+      "task": "b1-p10-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "281968f3d5cc9d6ebc42d40dbbf9e3ff47a90e7fa5a510374609665f3aaf1a48",
+        "result.root": "9ebc9b04b213d04187575ee54829383827b78e516eeb512273bf1bee33c46d0a",
+        "result_summary.csv": "dcb84365366db52c05c9bad4eee1c74b3bdc486d6b68737d5a8fa8888db7a3bf",
+        "run.mac": "50ce2235e996536b64887521a71f3a81114dee407a0fdbc837fa48eb1c443974",
+        "simulation.log": "cc078905acec24a3c853599dfadf7d72e186a66fe7f82658d651b23ff0e7e8eb"
+      },
+      "task": "b1-p10-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "3b9e126ee9883f3d955ee9f771c9ad246f23d0663e99a737c534413d3dccd653",
+        "result.root": "872b04a1fff819792d4c937abdd8ef1c9fca6009492c11bc3acc3dc3cbe4d2fd",
+        "result_summary.csv": "843e1affada415b607ad8f2eeb08de52056a878b90249ba0964dd976bab13065",
+        "run.mac": "4df84a4c1ad555191d3bcc99bd67bae79a9c3896e7b7f0659dd16accf6ef8363",
+        "simulation.log": "56f390d88a362e8e80c59b321b68bd1862b5856c4fbb89cf72c92dbf3653ea0d"
+      },
+      "task": "b1-p11-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "7fb03dc75aab5d1c4acd16435cb6ffceecd234b24f66d29be041b9e9100fc1c4",
+        "result.root": "5551b324fb5b7eb1058bff00defe511a85125f33d841bfdf3c15f59b6e373129",
+        "result_summary.csv": "3fd0b1a0fb21b91b3954d6e07ef5b34e08015c4117444f8cb9033f5f2905f4f3",
+        "run.mac": "90e9b27066c0ca43f0aa686e88559265e08fac0955bb0f4eefa9ee14a33e3279",
+        "simulation.log": "277ea01e5ebf30f31576acaea496a5ad4bda0d31ac4f648c9cdb36ce2ee93c86"
+      },
+      "task": "b1-p11-dimple"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "3d28279bad76c37513282e7b9a144aca32c1ad0624e7967493368c619fc4eb75",
+        "result.root": "0e54817aad474b60e8a1226078aa3e65958c99f8725f93c93b9eb9b3d685128f",
+        "result_summary.csv": "9be679ef1dbe5ebc745dd0b7aeb2e2fa79f1e482d483675318f97e092d8ef752",
+        "run.mac": "f08b7119486f9003fcd004ae19b57a46da4455f51b67c1e9badb41ffbb88cb87",
+        "simulation.log": "87d5f31252e8e573345b7a200c2aab2e86bcac7a97bc8b3a69fab8a3e89e65a3"
+      },
+      "task": "b1-p12-flat"
+    },
+    {
+      "events": 100,
+      "hashes": {
+        "result.rng": "f66e27281ffab07db542df4cb2962af7d364188886ea3befe2e17850c9b4e604",
+        "result.root": "32ae636d516af04d6bb65a5c20497f52c8fea1249408207588841b78866d3b7b",
+        "result_summary.csv": "258e12d70bd2fd9d7f10e36b5519375dba09315b7b6a62a3340065cdee1b11d7",
+        "run.mac": "e2130861fef60c95109a59ef61496c5f18e34f1a4873c79af52ee828e229b95c",
+        "simulation.log": "a637a8879e92957e261e9d52057979e970e6af71fa3147284edd69fc2b0e5847"
+      },
+      "task": "b1-p12-dimple"
+    }
+  ]
+}

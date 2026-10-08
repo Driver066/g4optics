@@ -1,0 +1,57 @@
+{
+  "schema": "dimple-line-plot-v1",
+  "status": "final",
+  "result": "result.json",
+  "result_sha256": "168af0b10e98ecc99cffea42408c031cbafb9589bc6d26b877471ab5d9d08bfd",
+  "plot_program_sha256": "9a14b0bebc6bfa4a08d6f91d122c0a0446cd7f3a6be007a0096a1ea093471305",
+  "runtime": {
+    "python": "3.14.4",
+    "numpy": "2.4.6",
+    "matplotlib": "3.11.0"
+  },
+  "png_dpi": 220,
+  "statistics_recomputed": false,
+  "visual_qa": {
+    "all_three_pngs_viewed": true,
+    "header_spacing_repaired": true,
+    "no_visible_clipping_or_text_overlap": true,
+    "axis_units_and_ci_labels_checked": true,
+    "scope": "Scientific static figures from supplied estimates; no terminal-physics or causal validation."
+  },
+  "files": {
+    "response.png": {
+      "sha256": "efcdfaf9fa69f588f1f9b8ab75bef96c7abc837a35d7c94b32ef690cd92a6d95",
+      "bytes": 420430,
+      "width": 2881,
+      "height": 2401
+    },
+    "response.svg": {
+      "sha256": "958ec57c4c26ecd3bb7cf7f97b38c35359707490c23f7ffeee6c08159155f222",
+      "bytes": 151653,
+      "svg_root": "{http://www.w3.org/2000/svg}svg"
+    },
+    "contrasts.png": {
+      "sha256": "b81f6a67a7fd8decf62cf17ba88e3163b4a98ab954adfe259927814359e01bc3",
+      "bytes": 302555,
+      "width": 2857,
+      "height": 1992
+    },
+    "contrasts.svg": {
+      "sha256": "ed1daebc5941180a35619f73e3e5e957e1c0c6085aa8caca6ba07f6c275ef496",
+      "bytes": 58750,
+      "svg_root": "{http://www.w3.org/2000/svg}svg"
+    },
+    "diagnostics.png": {
+      "sha256": "de4443c0c51baf0b240a43ebfa21fa7d747ad9691561320663c68cd30ccda502",
+      "bytes": 336962,
+      "width": 2861,
+      "height": 2033
+    },
+    "diagnostics.svg": {
+      "sha256": "1533b443ecfd6666c798cf033bc869bb61a577ea787ddb9e613630bb1905128b",
+      "bytes": 59130,
+      "svg_root": "{http://www.w3.org/2000/svg}svg"
+    }
+  },
+  "original_plot_manifest_sha256": "d7e0f620a0e092bf1c042e13f6705c0a945048e3fcf79d3ff5e2cb838e9a5afd"
+}

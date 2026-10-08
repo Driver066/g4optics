@@ -111,5 +111,9 @@ The user has accepted the rendered geometry and authorized the
 [5,200-event local line scan](LINE_SCAN.md). Its execution state and outputs
 remain separate from the completed engineering checks.
 
+The scan and its exploratory uncertainty analysis are complete. See the
+[line-scan results and figures](results/line-v1/README.md) and
+[analysis definitions](ANALYSIS.md).
+
 Groups 1 and 2 remain later work. For group 1, the intended compensating
 hemisphere is above the tile, preserving material thickness along z.
