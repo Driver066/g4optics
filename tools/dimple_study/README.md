@@ -1,5 +1,9 @@
 # Dimple study preparation
 
+For a fresh checkout, start with the [reproduction guide](REPRODUCE.md) and
+[English results](results/line-v1/README.en.md). They cover figure replay,
+public-event/ROOT reanalysis, and a new source build without private local files.
+
 Source baseline: `404a11bcff4a2c3a4b7a83de8357cab3e37d1cb5`.
 Branch: `codex/dimple-study`.
 

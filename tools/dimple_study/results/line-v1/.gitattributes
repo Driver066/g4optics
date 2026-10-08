@@ -2,3 +2,4 @@
 *.csv -text whitespace=cr-at-eol
 # Matplotlib emits trailing spaces in SVG path descriptions.
 *.svg -text whitespace=-blank-at-eol
+*.tar.gz -text -diff

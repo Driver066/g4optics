@@ -1,0 +1,10 @@
+{
+  "schema": "dimple-raw-campaign-archive-v1",
+  "file": "raw-campaign.tar.gz",
+  "sha256": "c00ab31ac475846a508d0f6e8e00ac2b849355d9a5c2ce2c9bc9a06f5154f7dc",
+  "bytes": 2842388,
+  "files": 406,
+  "events": 5200,
+  "contains": "Original 52 ROOT files, macros, CSVs, logs, RNG states, receipts/audits and required source/runtime identity records; no datasets or bootstrap arrays.",
+  "normalization": "Archive uid/gid/names/time normalized; member content bytes unchanged."
+}

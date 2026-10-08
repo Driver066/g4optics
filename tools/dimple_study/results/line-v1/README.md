@@ -1,5 +1,7 @@
 # 局部线扫分析：6×6 mm 外置 SiPM
 
+[English results](README.en.md) · [从干净环境复现](../../REPRODUCE.md)
+
 2026-10-08，固定模型下的探索性结果。
 
 **在 y=0 线的全部 13 个采样位置，dimple 的平均收光都低于 flat，点估计降幅为
@@ -82,7 +84,8 @@ G 保留 legacy 口径，不包含光学父粒子新产生的闪烁光子。后�
 - [扫描清单](campaign-manifest.json)、[原始输入哈希](input-inventory.json)、
   [图文件清单](plot-manifest.json)；PNG 均有同名 SVG。
 - 模拟源 `5d6c50d3`；扫描工具 `192b9a09`。
-- 原始 ROOT、宏、日志、RNG 与回执仍在 `outputs/dimple-study/line-v1/`。
+- 原始 ROOT、宏、日志、RNG 与回执已包含在 [2.8 MB 原始归档](raw-campaign.tar.gz)，
+  [归档哈希与范围](raw-campaign-archive.json)可用于核对；本地原件仍在 `outputs/dimple-study/line-v1/`。
   重采样数组在 `outputs/dimple-study/line-analysis-v1/bootstrap.npz`，不重复纳入 Git；
   SHA256 为 `6a7e52aa6709e557578c7664b9021276ecbaf41b3c00dbee97e2ed0fac2de4de`。
 - 方法与边界见 [ANALYSIS.md](../../ANALYSIS.md)。

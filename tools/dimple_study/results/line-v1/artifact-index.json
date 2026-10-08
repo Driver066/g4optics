@@ -2,7 +2,9 @@
   "schema": "dimple-line-result-bundle-v1",
   "scope": "Published result bundle; raw ROOT and bootstrap draws retained in local outputs",
   "files": {
-    "README.md": "16adc91ad3e02cd5adcfae1c85dfaac95d3a6cabfce8c65e737a237fc3654126",
+    ".gitattributes": "a7d5e9890153d09f804b1d852c35457516860c5cae055f23946b36d016e0310f",
+    "README.en.md": "4f58032ff95c04d6e6053a986577730d3390f970f635854d6174e2d033c5b8cb",
+    "README.md": "5a074c6abf1668f4f8ed8c5e4125d3852b707bd67c36e69291680276cbbb02df",
     "campaign-manifest.json": "f1c2b13566103515ca569764de34142a5c5ca74802fc936f0ff38947f8206405",
     "configuration-summary.csv": "fb2c783ddf09445e5c705dd2cdb090e7857298c510cf1e4ab22f174ae29645a7",
     "contrasts.csv": "b31e4d10e123eda58ad73fe855fa633bf231c1ebcfbf030389d74a5c2c7f219d",
@@ -15,10 +17,11 @@
     "input-inventory.json": "46c61626a89bc3b3ce057f5a09dec85f611dcd6d177eefc77db7b8b1f3052826",
     "plot-manifest.json": "6863755005d2b02d3af8c92b88e7692c9c784b9fc9b37b1fff69d081360a54b6",
     "plot_program.py": "9a14b0bebc6bfa4a08d6f91d122c0a0446cd7f3a6be007a0096a1ea093471305",
+    "raw-campaign-archive.json": "0c1104558a92fb5879c8cfed6b8d59114cbf3ff9541380d5258af9f9b1e15091",
+    "raw-campaign.tar.gz": "c00ab31ac475846a508d0f6e8e00ac2b849355d9a5c2ce2c9bc9a06f5154f7dc",
     "response.png": "efcdfaf9fa69f588f1f9b8ab75bef96c7abc837a35d7c94b32ef690cd92a6d95",
     "response.svg": "958ec57c4c26ecd3bb7cf7f97b38c35359707490c23f7ffeee6c08159155f222",
-    "result.json": "168af0b10e98ecc99cffea42408c031cbafb9589bc6d26b877471ab5d9d08bfd",
-    ".gitattributes": "c3b580acc53de2ebdf818b622a6f430e97b387955a94324f389162ae8ff4ec88"
+    "result.json": "168af0b10e98ecc99cffea42408c031cbafb9589bc6d26b877471ab5d9d08bfd"
   },
   "scripts": {
     "analyze_line.py": "327f37e278200589bc37fe95bbdffc8b00f1b8b67d07b1605af99423ec9f60e5",

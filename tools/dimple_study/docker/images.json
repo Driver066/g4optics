@@ -1,0 +1,11 @@
+{
+  "verified_date": "2026-10-08",
+  "repository": "carlomt/geant4",
+  "docker": {
+    "tag": "11.4.2-gui",
+    "index": "sha256:7e660c618ad80506c66e9f509a285e7d9e76dadd75b66f28cbe378ccf91ae3f5",
+    "linux/amd64": "sha256:6cafc6d608ad91085b4c4d2d0c78721f63e737d2b0f27d5785ae68ca49eaed1f",
+    "linux/arm64": "sha256:6ca84898d1346dfd9b511251dc158eada0f906fdcae6d9139415c0c3f932e7b6",
+    "metadata_url": "https://hub.docker.com/v2/repositories/carlomt/geant4/tags/11.4.2-gui"
+  }
+}

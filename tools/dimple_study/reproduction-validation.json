@@ -1,0 +1,94 @@
+{
+  "schema": "dimple-public-reproduction-validation-v1",
+  "status": "passed",
+  "date": "2026-10-08",
+  "fresh_source_export": {
+    "git_metadata_present": false,
+    "original_outputs_present_before_run": false,
+    "historical_binary_supplied": false
+  },
+  "image": {
+    "id": "sha256:ebadd941cc9f5d5e6d884a2af577644860d54bed5829f76161aaddf1b29f1f5a",
+    "architecture": "arm64",
+    "base_public_index": "sha256:7e660c618ad80506c66e9f509a285e7d9e76dadd75b66f28cbe378ccf91ae3f5"
+  },
+  "dependencies": [
+    "awkward==2.14.0",
+    "awkward_cpp==57",
+    "contourpy==1.3.2",
+    "cramjam==2.11.0",
+    "cycler==0.12.1",
+    "fonttools==4.65.0",
+    "fsspec==2026.9.0",
+    "importlib_metadata==9.0.1",
+    "kiwisolver==1.5.1",
+    "matplotlib==3.9.4",
+    "numpy==2.0.2",
+    "packaging==26.3",
+    "pillow==12.3.0",
+    "pyparsing==3.3.3",
+    "python-dateutil==2.9.0.post0",
+    "six==1.17.0",
+    "typing_extensions==4.16.0",
+    "uproot==5.6.9",
+    "xxhash==4.0.1",
+    "zipp==4.1.1"
+  ],
+  "tests_passed": 22,
+  "figure_replay": {
+    "figures": 3,
+    "formats": [
+      "PNG",
+      "SVG"
+    ],
+    "visually_checked": true,
+    "pixel_identical_claim": false
+  },
+  "csv_replay": {
+    "status": "passed",
+    "numeric_values_checked": 1711,
+    "max_absolute_difference": 0.0
+  },
+  "raw_replay": {
+    "status": "passed",
+    "numeric_values_checked": 2101,
+    "max_absolute_difference": 0.0,
+    "independent_checks": 22323
+  },
+  "source_rebuild": {
+    "status": "passed",
+    "executable_sha256": "2996e0eeb3818d3f1801e9530fa2f38e16c297223160c2c6a5e8a791c8ef7bb6",
+    "events": 10,
+    "prefix_values_checked": 60,
+    "prefix_values_exactly_equal": true
+  },
+  "raw_archive": {
+    "schema": "dimple-raw-campaign-archive-v1",
+    "file": "raw-campaign.tar.gz",
+    "sha256": "c00ab31ac475846a508d0f6e8e00ac2b849355d9a5c2ce2c9bc9a06f5154f7dc",
+    "bytes": 2842388,
+    "files": 406,
+    "events": 5200,
+    "contains": "Original 52 ROOT files, macros, CSVs, logs, RNG states, receipts/audits and required source/runtime identity records; no datasets or bootstrap arrays.",
+    "normalization": "Archive uid/gid/names/time normalized; member content bytes unchanged."
+  },
+  "file_sha256": {
+    "csv_replay.json": "7626eb3e0638dd392cfa51afce6591e754b22bc17d5f43fae1dae52df49d61e7",
+    "dependencies.txt": "8be744a2f3e95fd38d150f8c0a8a428441096ec50b98666f9d0380243fa171b4",
+    "image-metadata.json": "048b2425dd4d474b89547341a4b4582b83c6c2264f4e71fdcade107a7e44def4",
+    "published_prefix_comparison.json": "a7a9edcd6480cbc2c03018698010a33200f79d8b86e91bd6dabddde23369c78d",
+    "raw-replay.log": "655f8949661636e665dc86add520a0bd9fff493e2f99d009efc9c2dd0ab46ca9",
+    "raw_independent_validation.json": "85e6434e6bfb449caa4a5ff907173543750f5a919ec4fb497cf6cd7f9ad28675",
+    "raw_replay_comparison.json": "03214cae7ff2222bb69c5b394557eb0e9b3c6a361a3ad0c22b9b85259643fe9f",
+    "review-replay.log": "67a6a2cc07a6626a88a7ff31fecdfb76b18ae74dfa2816c1daefa2342a4a1f78",
+    "source-smoke.log": "a4779d63a085fb44672610f9539f434ce2f858222ae05acd89ddf151b2c7792b",
+    "source_smoke.json": "d8c25fcc72f90de9ace1bfc1ee58c56e44e37e55245a4956da6df355e9581652",
+    "tests.log": "f98e1871e086688fc6b347d11b362ba342307eb9655577b480d41706c6343336"
+  },
+  "limits": [
+    "Tested linux/arm64; public amd64 base manifest verified but amd64 execution not tested.",
+    "Existing checksum-verified datasets reused read-only; fresh downloads not repeated.",
+    "10 qualification events rerun, not a second full 5200-event simulation.",
+    "Published ROOT data were reanalyzed completely; CSV replay omits spatial hit/centroid diagnostics absent from CSV."
+  ]
+}
