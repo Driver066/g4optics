@@ -59,6 +59,11 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     G4VPhysicalVolume* GetTank() const { return fTank; }
     G4double GetTankXSize() const { return fTank_x; }
     G4bool IsStackEnabled() const { return fStackEnabled; }
+    // Opt-in birth/start counters only; this is not a photon terminal ledger.
+    G4bool IsDimpleOpticalDiagnosticsEnabled() const { return fDimpleOpticalDiagnostics; }
+    void SetDimpleOpticalDiagnostics(G4bool enabled) { fDimpleOpticalDiagnostics = enabled; }
+    G4bool IsRandomStateSavingEnabled() const { return fSaveRandomState; }
+    void SetRandomStateSaving(G4bool enabled) { fSaveRandomState = enabled; }
     G4bool IsStackLayoutStudy() const { return fStackEnabled && fStackLayoutStudy; }
     G4double GetStackReadoutGap() const { return IsStackLayoutStudy() ? 0.5 * CLHEP::mm : 0.; }
     G4int GetStackSensorStride() const { return IsStackLayoutStudy() ? 4 : 2; }
@@ -185,6 +190,8 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     G4int fStackLayers = 10;
     G4bool fBottomCavityEnabled = false;
     G4bool fDimpleEnabled = false;
+    G4bool fDimpleOpticalDiagnostics = false;
+    G4bool fSaveRandomState = false;
     G4double fDimpleRadius = 3. * CLHEP::mm;
     G4String fDimpleMode = "hemisphere";
     // external keeps the active face at the original tile bottom plane;

@@ -32,13 +32,19 @@
 
 #include "RunAction.hh"
 
+#include "DetectorConstruction.hh"
+#include "DimpleOpticalDiagnostics.hh"
 #include "HistoManager.hh"
 #include "PrimaryGeneratorAction.hh"
 #include "Run.hh"
 
 #include "G4Run.hh"
+#include "G4RunManager.hh"
+#include "G4Exception.hh"
 #include "G4SystemOfUnits.hh"
+#include "G4Threading.hh"
 #include "G4UnitsTable.hh"
+#include "Randomize.hh"
 
 #include <fstream>
 #include <iomanip>
@@ -248,6 +254,14 @@ void RunAction::BeginOfRunAction(const G4Run*)
   }
 
   // histograms
+  const auto* detector = static_cast<const DetectorConstruction*>(
+    G4RunManager::GetRunManager()->GetUserDetectorConstruction());
+  if (detector && detector->IsRandomStateSavingEnabled() &&
+      G4Threading::IsMultithreadedApplication()) {
+    G4Exception("RunAction::BeginOfRunAction", "DimpleRandom_001", FatalException,
+                "The optional RNG end-state file requires a Serial run manager.");
+  }
+  DimpleOpticalDiagnostics::BeginRun(detector);
   G4AnalysisManager* analysisManager = G4AnalysisManager::Instance();
   if (analysisManager->IsActive()) {
     analysisManager->OpenFile();
@@ -406,6 +420,28 @@ void RunAction::EndOfRunAction(const G4Run*)
   if (analysisManager->IsActive()) {
     analysisManager->Write();
     analysisManager->CloseFile();
+  }
+
+  const auto* detector = static_cast<const DetectorConstruction*>(
+    G4RunManager::GetRunManager()->GetUserDetectorConstruction());
+  if (detector && detector->IsRandomStateSavingEnabled()) {
+    G4String basename = analysisManager->GetFileName();
+    if (basename.size() >= 5 && basename.substr(basename.size() - 5) == ".root") {
+      basename.erase(basename.size() - 5);
+    }
+    const G4String filename = basename + ".rng";
+    std::ofstream randomState(filename);
+    if (!randomState) {
+      G4Exception("RunAction::EndOfRunAction", "DimpleRandom_002", FatalException,
+                  ("Cannot open RNG end-state file: " + filename).c_str());
+    }
+    // Read the full engine/distribution state without drawing or resetting RNG.
+    G4Random::saveFullState(randomState);
+    randomState.close();
+    if (!randomState) {
+      G4Exception("RunAction::EndOfRunAction", "DimpleRandom_003", FatalException,
+                  ("Cannot finish RNG end-state file: " + filename).c_str());
+    }
   }
 }
 

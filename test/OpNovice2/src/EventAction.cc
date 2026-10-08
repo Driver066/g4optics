@@ -1,6 +1,7 @@
 #include "EventAction.hh"
 
 #include "DetectorConstruction.hh"
+#include "DimpleOpticalDiagnostics.hh"
 #include "Run.hh"
 
 #include "G4AnalysisManager.hh"
@@ -16,6 +17,7 @@
 
 void EventAction::BeginOfEventAction(const G4Event* event)
 {
+  DimpleOpticalDiagnostics::BeginEvent(event);
   auto run = static_cast<Run*>(G4RunManager::GetRunManager()->GetNonConstCurrentRun());
   if (run) {
     run->BeginEvent(event ? event->GetEventID() : -1);
@@ -244,5 +246,6 @@ void EventAction::EndOfEventAction(const G4Event* event)
     }
   }
 
+  DimpleOpticalDiagnostics::EndEvent(event, generatedOptical, sipmDetected);
   run->CommitEventStatistics();
 }

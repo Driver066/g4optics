@@ -32,6 +32,7 @@
 #include "SteppingAction.hh"
 
 #include "DetectorConstruction.hh"
+#include "DimpleOpticalDiagnostics.hh"
 #include "HistoManager.hh"
 #include "Run.hh"
 #include "SteppingMessenger.hh"
@@ -67,6 +68,8 @@ SteppingAction::~SteppingAction()
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 void SteppingAction::UserSteppingAction(const G4Step* step)
 {
+  // Observe all births before the legacy optical branch can return at SiPM.
+  DimpleOpticalDiagnostics::ObserveStep(step);
   static G4ParticleDefinition* opticalphoton = G4OpticalPhoton::OpticalPhotonDefinition();
 
   G4AnalysisManager* analysisMan = G4AnalysisManager::Instance();
@@ -137,6 +140,7 @@ void SteppingAction::UserSteppingAction(const G4Step* step)
   if (particleDef == opticalphoton) {
     // SiPM detection
     if (prePV && prePV->GetName() == "SiPM") {
+      DimpleOpticalDiagnostics::ObserveDetection(track);
       const G4int originLayer = trackInfo ? trackInfo->GetOpticalOriginLayer() : -1;
       run->AddSiPMDetection(prePV->GetCopyNo(), originLayer);
 

@@ -186,6 +186,21 @@ DetectorMessenger::DetectorMessenger(DetectorConstruction* Det) : G4UImessenger(
   fDimpleEnabledCmd->AvailableForStates(G4State_PreInit);
   fDimpleEnabledCmd->SetToBeBroadcasted(false);
 
+  fDimpleOpticalDiagnosticsCmd =
+    new G4UIcmdWithABool("/opnovice2/diagnostics/dimpleOptical", this);
+  fDimpleOpticalDiagnosticsCmd->SetGuidance(
+    "Enable passive single-tile optical birth/start counters; not terminal-fate closure.");
+  fDimpleOpticalDiagnosticsCmd->SetDefaultValue(false);
+  fDimpleOpticalDiagnosticsCmd->AvailableForStates(G4State_PreInit);
+  fDimpleOpticalDiagnosticsCmd->SetToBeBroadcasted(false);
+
+  fSaveRandomStateCmd = new G4UIcmdWithABool("/opnovice2/diagnostics/saveRandomState", this);
+  fSaveRandomStateCmd->SetGuidance(
+    "Save the complete Serial RNG end state to the analysis basename plus .rng.");
+  fSaveRandomStateCmd->SetDefaultValue(false);
+  fSaveRandomStateCmd->AvailableForStates(G4State_PreInit);
+  fSaveRandomStateCmd->SetToBeBroadcasted(false);
+
   fDimpleRadiusCmd = new G4UIcmdWithADoubleAndUnit("/opnovice2/dimple/radius", this);
   fDimpleRadiusCmd->SetGuidance("Set strict hemispherical dimple radius and depth.");
   fDimpleRadiusCmd->SetParameterName("radius", false);
@@ -322,6 +337,8 @@ DetectorMessenger::~DetectorMessenger()
   delete fStackLayoutStudyCmd;
   delete fStackLayersCmd;
   delete fDimpleEnabledCmd;
+  delete fDimpleOpticalDiagnosticsCmd;
+  delete fSaveRandomStateCmd;
   delete fDimpleRadiusCmd;
   delete fDimpleModeCmd;
   delete fDimpleSiPMModeCmd;
@@ -694,6 +711,12 @@ void DetectorMessenger::SetNewValue(G4UIcommand* command, G4String newValue)
   }
   else if (command == fDimpleEnabledCmd) {
     fDetector->SetDimpleEnabled(fDimpleEnabledCmd->GetNewBoolValue(newValue));
+  }
+  else if (command == fDimpleOpticalDiagnosticsCmd) {
+    fDetector->SetDimpleOpticalDiagnostics(fDimpleOpticalDiagnosticsCmd->GetNewBoolValue(newValue));
+  }
+  else if (command == fSaveRandomStateCmd) {
+    fDetector->SetRandomStateSaving(fSaveRandomStateCmd->GetNewBoolValue(newValue));
   }
   else if (command == fDimpleRadiusCmd) {
     fDetector->SetDimpleRadius(fDimpleRadiusCmd->GetNewDoubleValue(newValue));

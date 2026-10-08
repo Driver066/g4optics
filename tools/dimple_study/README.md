@@ -87,10 +87,10 @@ snapshots, build logs, macros and receipts are in
 preserved; v2 adds explicit actual-size/completion checks and a World-boundary
 negative case. Current acceptance is v2.
 
-The next step is a small optical/counting check with explicit material tables,
-source and seeds. The geometry-only macros intentionally do not define that
-optical protocol and must not be used for an efficiency scan by merely adding
-`beamOn`.
+The [small optical/counting check](OPTICAL_CHECK.md) has now passed: 30 executed
+regression events and 60 smoke events, with explicit material tables, source,
+seeds and observer noninterference checks. The geometry-only macros still must
+not be used for an efficiency scan by merely adding `beamOn`.
 
 ## Physics and counting
 
@@ -99,11 +99,13 @@ settings. Do not add an opticalphoton Scintillation disable command. The old
 W08 diagnostic code is not imported. Its rejected photon-closure result must
 not be described as a validated baseline.
 
-Before the first optical comparison, separately check produced-photon and
-collected-photon definitions. The existing G counter is a legacy production
+The optical engineering check distinguishes produced-photon and collected-photon
+definitions. The existing G counter is a legacy production
 counter, not a complete count of every optical birth; D counts optical entry
 into the SiPM proxy and does not include PDE or electronics. A geometry PASS
 does not establish G equals all optical tracks or prove full photon closure.
+The new passive observer confirmed that optical-parent births account for the
+difference between legacy G and all optical starts in this small sample.
 
 Groups 1 and 2 remain later work. For group 1, the intended compensating
 hemisphere is above the tile, preserving material thickness along z.

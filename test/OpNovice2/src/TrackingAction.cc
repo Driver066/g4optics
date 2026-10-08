@@ -31,6 +31,7 @@
 #include "TrackingAction.hh"
 
 #include "DetectorConstruction.hh"
+#include "DimpleOpticalDiagnostics.hh"
 #include "Run.hh"
 #include "TrackInformation.hh"
 
@@ -46,6 +47,7 @@
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
 void TrackingAction::PreUserTrackingAction(const G4Track* aTrack)
 {
+  DimpleOpticalDiagnostics::ObserveTrack(aTrack);
   // Create trajectory only for track in tracking region
   auto trackInfo = (TrackInformation*)(aTrack->GetUserInformation());
 
