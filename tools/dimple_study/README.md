@@ -1,5 +1,10 @@
 # Dimple study preparation
 
+**Paused on 2026-10-09:** dimple is the lowest current research priority.
+The completed electron result is preserved; no lab-like beta/grease follow-up
+has started. Read the [handoff and cross-repository evidence index](HANDOFF.md)
+before resuming.
+
 For a fresh checkout, start with the [reproduction guide](REPRODUCE.md) and
 [English results](results/line-v1/README.en.md). They cover figure replay,
 public-event/ROOT reanalysis, and a new source build without private local files.

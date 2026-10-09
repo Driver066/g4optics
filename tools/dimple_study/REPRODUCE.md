@@ -8,6 +8,7 @@ when reproducing this particular publication.
 ```sh
 git clone --branch codex/dimple-study https://github.com/Driver066/g4optics.git
 cd g4optics
+git checkout --detach 45ed24bbe697606afa88184b689905aa732d0e73
 ```
 
 All commands below use **new output directories**. Existing runs are preserved
