@@ -244,5 +244,68 @@ void EventAction::EndOfEventAction(const G4Event* event)
     }
   }
 
+  if (detector && detector->IsCombinedEnabled()) {
+    const auto& front = run->GetEventStackLayer(0);
+    const auto& back = run->GetEventStackLayer(1);
+    const auto& record = run->GetEventCombined();
+    analysisMan->FillNtupleIColumn(7, 0, event->GetEventID());
+    analysisMan->FillNtupleIColumn(7, 1, front.generatedOptical);
+    analysisMan->FillNtupleIColumn(7, 2, back.generatedOptical);
+    analysisMan->FillNtupleDColumn(7, 3, front.tileEnergyDeposit / MeV);
+    analysisMan->FillNtupleDColumn(7, 4, back.tileEnergyDeposit / MeV);
+    analysisMan->FillNtupleDColumn(7, 5, record.jointEnergyDeposit / MeV);
+    analysisMan->FillNtupleIColumn(7, 6, run->GetEventStackTransfer(0, 0));
+    analysisMan->FillNtupleIColumn(7, 7, run->GetEventStackTransfer(0, 1));
+    analysisMan->FillNtupleIColumn(7, 8, run->GetEventStackTransfer(1, 0));
+    analysisMan->FillNtupleIColumn(7, 9, run->GetEventStackTransfer(1, 1));
+    analysisMan->FillNtupleIColumn(7, 10, run->GetEventStackTransfer(-1, 0));
+    analysisMan->FillNtupleIColumn(7, 11, run->GetEventStackTransfer(-1, 1));
+    analysisMan->FillNtupleIColumn(7, 12, record.opticalBirths[0]);
+    analysisMan->FillNtupleIColumn(7, 13, record.opticalBirths[1]);
+    analysisMan->FillNtupleIColumn(7, 14, record.opticalBirths[2]);
+    analysisMan->FillNtupleIColumn(7, 15, record.opticalBirths[3]);
+    analysisMan->FillNtupleIColumn(7, 16, record.opticalParentBirths);
+    analysisMan->FillNtupleIColumn(7, 17, record.boundarySteps);
+    analysisMan->FillNtupleIColumn(7, 18, record.jointBoundarySteps);
+    analysisMan->FillNtupleIColumn(7, 19, record.noRindexSteps);
+    analysisMan->FillNtupleDColumn(7, 20, record.opticalTileEnergyDeposit[0] / MeV);
+    analysisMan->FillNtupleDColumn(7, 21, record.opticalTileEnergyDeposit[1] / MeV);
+    analysisMan->FillNtupleDColumn(7, 22, record.jointOpticalEnergyDeposit / MeV);
+    analysisMan->FillNtupleIColumn(7, 23, run->GetEventStackTransfer(0, 2));
+    analysisMan->FillNtupleIColumn(7, 24, run->GetEventStackTransfer(0, 3));
+    analysisMan->FillNtupleIColumn(7, 25, run->GetEventStackTransfer(1, 2));
+    analysisMan->FillNtupleIColumn(7, 26, run->GetEventStackTransfer(1, 3));
+    analysisMan->FillNtupleIColumn(7, 27, run->GetEventStackTransfer(-1, 2));
+    analysisMan->FillNtupleIColumn(7, 28, run->GetEventStackTransfer(-1, 3));
+    analysisMan->AddNtupleRow(7);
+    for (const auto& item : run->GetEventCombinedBoundaries()) {
+      analysisMan->FillNtupleIColumn(8, 0, event->GetEventID());
+      analysisMan->FillNtupleIColumn(8, 1, std::get<0>(item.first));
+      analysisMan->FillNtupleIColumn(8, 2, std::get<1>(item.first));
+      analysisMan->FillNtupleIColumn(8, 3, std::get<2>(item.first));
+      analysisMan->FillNtupleIColumn(8, 4, item.second);
+      analysisMan->AddNtupleRow(8);
+    }
+  }
+
+  if (detector && (detector->IsBoundaryEntryReadout() || detector->IsStandaloneLayoutStudy())) {
+    const auto& readout = run->GetEventReadout();
+    analysisMan->FillNtupleIColumn(9, 0, event->GetEventID());
+    analysisMan->FillNtupleIColumn(9, 1, readout.entries[0]);
+    analysisMan->FillNtupleIColumn(9, 2, readout.entries[1]);
+    analysisMan->FillNtupleIColumn(9, 3, readout.reflections[0]);
+    analysisMan->FillNtupleIColumn(9, 4, readout.reflections[1]);
+    analysisMan->FillNtupleIColumn(9, 5, readout.stepTooSmall[0]);
+    analysisMan->FillNtupleIColumn(9, 6, readout.stepTooSmall[1]);
+    analysisMan->FillNtupleIColumn(9, 7, readout.noRindexSteps);
+    analysisMan->FillNtupleIColumn(9, 8, readout.entries[2]);
+    analysisMan->FillNtupleIColumn(9, 9, readout.entries[3]);
+    analysisMan->FillNtupleIColumn(9, 10, readout.reflections[2]);
+    analysisMan->FillNtupleIColumn(9, 11, readout.reflections[3]);
+    analysisMan->FillNtupleIColumn(9, 12, readout.stepTooSmall[2]);
+    analysisMan->FillNtupleIColumn(9, 13, readout.stepTooSmall[3]);
+    analysisMan->AddNtupleRow(9);
+  }
+
   run->CommitEventStatistics();
 }

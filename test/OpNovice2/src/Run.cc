@@ -66,6 +66,9 @@ void Run::BeginEvent(G4int eventID)
   fEventSiPMDetectionCount = 0;
   fEventSiPMDetectionCounts.fill(0);
   fEventStackLayers.fill(StackLayerEventRecord{});
+  fEventCombined = CombinedEventRecord{};
+  fEventReadout = SiPMReadoutEventRecord{};
+  fEventCombinedBoundaries.clear();
   for (auto& origins : fEventStackTransfers) {
     origins.fill(0);
   }

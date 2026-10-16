@@ -1,0 +1,19 @@
+mode,layout,reference_layout,joined_geometry,mono_geometry,Q_ratio_of_joining_ratios,Q_ci95_low,Q_ci95_high,undefined_bootstrap_replicates,interpretation
+legacy,back-center,side-two,joined8-8,mono16,0.7203504874877247,0.5483261941351858,0.9411559510943381,0,Q=1 means equal relative joining response; pointwise interval does not establish equivalence
+legacy,back-center,side-two,joined8-16,mono24,2.050913079920437,1.5636751113838354,2.675824332259706,0,Q=1 means equal relative joining response; pointwise interval does not establish equivalence
+legacy,back-center,side-two,joined16-8,mono24,0.4430387834973727,0.3407109001534286,0.575565833345868,0,Q=1 means equal relative joining response; pointwise interval does not establish equivalence
+legacy,back-two,side-two,joined8-8,mono16,0.3321395648203144,0.25542917362345047,0.4273666593625552,0,Q=1 means equal relative joining response; pointwise interval does not establish equivalence
+legacy,back-two,side-two,joined8-16,mono24,1.3364947163423655,1.0113904931882187,1.7608191023758841,0,Q=1 means equal relative joining response; pointwise interval does not establish equivalence
+legacy,back-two,side-two,joined16-8,mono24,0.37745454920455407,0.29267321570088906,0.4868909327818159,0,Q=1 means equal relative joining response; pointwise interval does not establish equivalence
+legacy,back-four,side-two,joined8-8,mono16,0.4152279054131222,0.3222877361994587,0.5323816198171257,0,Q=1 means equal relative joining response; pointwise interval does not establish equivalence
+legacy,back-four,side-two,joined8-16,mono24,1.6604906693093406,1.2652020700411708,2.185887792619193,0,Q=1 means equal relative joining response; pointwise interval does not establish equivalence
+legacy,back-four,side-two,joined16-8,mono24,0.39959650167230815,0.30918892966299166,0.5193927964232048,0,Q=1 means equal relative joining response; pointwise interval does not establish equivalence
+boundary-entry,back-center,side-two,joined8-8,mono16,0.8859485434577299,0.6718213726167908,1.1773623412367775,0,Q=1 means equal relative joining response; pointwise interval does not establish equivalence
+boundary-entry,back-center,side-two,joined8-16,mono24,1.6392356950809277,1.2367342959943812,2.1775310692607883,0,Q=1 means equal relative joining response; pointwise interval does not establish equivalence
+boundary-entry,back-center,side-two,joined16-8,mono24,0.5018375795649953,0.3811274580710458,0.664649401919779,0,Q=1 means equal relative joining response; pointwise interval does not establish equivalence
+boundary-entry,back-two,side-two,joined8-8,mono16,0.46784147343971694,0.356149826832396,0.6160641020652196,0,Q=1 means equal relative joining response; pointwise interval does not establish equivalence
+boundary-entry,back-two,side-two,joined8-16,mono24,1.0959148272857087,0.8311333505687838,1.4544197230522762,0,Q=1 means equal relative joining response; pointwise interval does not establish equivalence
+boundary-entry,back-two,side-two,joined16-8,mono24,0.3108454863192851,0.23640813758249568,0.4075109395237686,0,Q=1 means equal relative joining response; pointwise interval does not establish equivalence
+boundary-entry,back-four,side-two,joined8-8,mono16,0.4202428875682742,0.32089239144619836,0.5516345560315515,0,Q=1 means equal relative joining response; pointwise interval does not establish equivalence
+boundary-entry,back-four,side-two,joined8-16,mono24,1.322710391904081,1.0136190629556523,1.7268170395471931,0,Q=1 means equal relative joining response; pointwise interval does not establish equivalence
+boundary-entry,back-four,side-two,joined16-8,mono24,0.3601280390276504,0.277900600559324,0.4678877337646847,0,Q=1 means equal relative joining response; pointwise interval does not establish equivalence

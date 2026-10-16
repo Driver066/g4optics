@@ -38,6 +38,8 @@
 
 #include <array>
 #include <limits>
+#include <map>
+#include <tuple>
 #include <unordered_set>
 
 class G4ParticleDefinition;
@@ -71,6 +73,29 @@ struct StackLayerEventRecord
 };
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+// Passive diagnostics for the opt-in two-piece assembly. Legacy G and Edep
+// are unchanged; optical births and optical Edep have independent counters.
+struct CombinedEventRecord
+{
+  G4double jointEnergyDeposit = 0.;
+  std::array<G4double, 2> opticalTileEnergyDeposit = {};
+  G4double jointOpticalEnergyDeposit = 0.;
+  // Parent pre-step region: front, back, joint, other.
+  std::array<G4int, 4> opticalBirths = {};
+  G4int opticalParentBirths = 0;
+  G4int boundarySteps = 0;
+  G4int jointBoundarySteps = 0;
+  G4int noRindexSteps = 0;
+};
+
+struct SiPMReadoutEventRecord
+{
+  std::array<G4int, 4> entries = {};
+  std::array<G4int, 4> reflections = {};
+  std::array<G4int, 4> stepTooSmall = {};
+  G4int noRindexSteps = 0;
+};
+
 class Run : public G4Run
 {
   public:
@@ -219,6 +244,48 @@ class Run : public G4Run
                               G4double charge,
                               G4double energy,
                               G4int layer = -1);
+
+    void ObserveReadoutBoundary(G4int candidateSensor, G4int status)
+    {
+      if (status == NoRINDEX) fEventReadout.noRindexSteps += 1;
+      if (candidateSensor < 0 || candidateSensor >= 4) return;
+      if (status == Transmission || status == FresnelRefraction || status == SameMaterial) {
+        fEventReadout.entries[candidateSensor] += 1;
+      }
+      else if (status == FresnelReflection || status == TotalInternalReflection) {
+        fEventReadout.reflections[candidateSensor] += 1;
+      }
+      else if (status == StepTooSmall) {
+        fEventReadout.stepTooSmall[candidateSensor] += 1;
+      }
+    }
+    const SiPMReadoutEventRecord& GetEventReadout() const { return fEventReadout; }
+
+    void AddCombinedEnergyDeposit(G4int region, G4double energy, G4bool optical)
+    {
+      if (region == 2) {
+        fEventCombined.jointEnergyDeposit += energy;
+        if (optical) fEventCombined.jointOpticalEnergyDeposit += energy;
+      }
+      else if (optical && region >= 0 && region < 2) {
+        fEventCombined.opticalTileEnergyDeposit[region] += energy;
+      }
+    }
+    void AddCombinedOpticalBirth(G4int region, G4bool opticalParent)
+    {
+      fEventCombined.opticalBirths[region >= 0 && region < 3 ? region : 3] += 1;
+      if (opticalParent) fEventCombined.opticalParentBirths += 1;
+    }
+    void AddCombinedBoundary(G4int preRegion, G4int postRegion, G4int status)
+    {
+      fEventCombined.boundarySteps += 1;
+      if (preRegion == 2 || postRegion == 2) fEventCombined.jointBoundarySteps += 1;
+      if (status == NoRINDEX) fEventCombined.noRindexSteps += 1;
+      ++fEventCombinedBoundaries[std::make_tuple(preRegion, postRegion, status)];
+    }
+    const CombinedEventRecord& GetEventCombined() const { return fEventCombined; }
+    const std::map<std::tuple<G4int, G4int, G4int>, G4int>&
+    GetEventCombinedBoundaries() const { return fEventCombinedBoundaries; }
 
     const StackLayerEventRecord& GetEventStackLayer(G4int layer) const;
     G4int GetEventStackTransfer(G4int originLayer, G4int sensorCopy) const;
@@ -450,6 +517,9 @@ class Run : public G4Run
     G4double fEventOtherChargedTileEnergyDeposit = 0.;
     G4double fEventNeutralTileEnergyDeposit = 0.;
     std::array<StackLayerEventRecord, kStackLayerCount> fEventStackLayers;
+    CombinedEventRecord fEventCombined;
+    SiPMReadoutEventRecord fEventReadout;
+    std::map<std::tuple<G4int, G4int, G4int>, G4int> fEventCombinedBoundaries;
     G4int fEventStackSensorStride = kStackSensorsPerLayer;
     G4int fEventStackSensorsPerLayer = kStackSensorsPerLayer;
     std::array<std::array<G4int, kMaxStackSensorCount>, kStackLayerCount + 1>

@@ -127,6 +127,7 @@ DetectorConstruction::~DetectorConstruction()
   // Frees the memory of SiPM
   delete fSiPMMPT;
   delete fGreaseMPT;
+  delete fCombinedInterfaceSurface;
   delete fSurface;
   delete fDetectorMessenger;
 }
@@ -144,7 +145,14 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
   fSiPMs.clear();
   fGrease = nullptr;
   fGrease_LV = nullptr;
+  fCombinedGrease = nullptr;
 
+  if (fStandaloneLayoutStudy) {
+    ValidateStandaloneLayoutConfiguration();
+  }
+  if (fCombinedEnabled) {
+    ValidateCombinedConfiguration();
+  }
   if (fStackLayoutStudy && !fStackEnabled) {
     G4Exception("DetectorConstruction::Construct", "OpNovice2_LayoutStudy_001",
                 FatalException, "stack/layoutStudy requires stack/enabled true.");
@@ -180,75 +188,81 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
   G4VPhysicalVolume* world_PV =
     new G4PVPlacement(nullptr, G4ThreeVector(), fWorld_LV, "World", nullptr, false, 0);
 
-  // The tank
-  auto tank_box = new G4Box("Tank_Box", fTank_x, fTank_y, fTank_z);
-  G4VSolid* tank_solid = tank_box;
-
-  if (fBottomCavityEnabled && fDimpleEnabled) {
-    G4ExceptionDescription msg;
-    msg << "/opnovice2/dimple/enabled cannot be combined with "
-        << "/opnovice2/tank/bottomCavity true. Use one cavity model at a time.";
-    G4Exception("DetectorConstruction::Construct",
-                "OpNovice2_Dimple_001",
-                FatalException,
-                msg);
-  }
-
-  if (fBottomCavityEnabled) {
-    auto bottomCavitySphere = new G4Sphere("Tank_BottomCavitySphere",
-                                           0.,
-                                           GetBottomCavityRadius(),
-                                           0.,
-                                           360. * deg,
-                                           0.,
-                                           180. * deg);
-
-    tank_solid = new G4SubtractionSolid("Tank",
-                                        tank_box,
-                                        bottomCavitySphere,
-                                        nullptr,
-                                        G4ThreeVector(0., 0., -fTank_z));
-  }
-  else if (fDimpleEnabled) {
-    ValidateDimpleConfiguration();
-
-    auto dimpleSphere = new G4Sphere("Tank_DimpleSphere",
-                                     0.,
-                                     fDimpleRadius,
-                                     0.,
-                                     360. * deg,
-                                     0.,
-                                     180. * deg);
-
-    tank_solid = new G4SubtractionSolid("Tank",
-                                        tank_box,
-                                        dimpleSphere,
-                                        nullptr,
-                                        G4ThreeVector(0., 0., -fTank_z));
-  }
-
-  fTank_LV = new G4LogicalVolume(tank_solid, fTankMaterial, "Tank");
-
+  // Combined pieces share one readout group. Stack layerCount remains one.
   const auto layerCount = GetStackLayerCount();
-  for (G4int layer = 0; layer < layerCount; ++layer) {
-    const auto center = fStackEnabled ? GetStackTileCenterZ(layer) : 0.;
-    auto placement = new G4PVPlacement(nullptr,
-                                       G4ThreeVector(0., 0., center),
-                                       fTank_LV,
-                                       "Tank",
-                                       fWorld_LV,
-                                       false,
-                                       layer,
-                                       fStackEnabled);
-    fTanks.push_back(placement);
-    if (IsStackLayoutStudy()) {
-      G4cout << "Stack tile placement: layer=" << layer
-             << ", world=" << placement->GetObjectTranslation() / mm
-             << " mm, full_size=" << G4ThreeVector(2.*fTank_x, 2.*fTank_y, 2.*fTank_z) / mm
-             << " mm" << G4endl;
+  if (fCombinedEnabled) {
+    ConstructCombinedTiles();
+  }
+  else {
+    // The tank
+    auto tank_box = new G4Box("Tank_Box", fTank_x, fTank_y, fTank_z);
+    G4VSolid* tank_solid = tank_box;
+
+    if (fBottomCavityEnabled && fDimpleEnabled) {
+      G4ExceptionDescription msg;
+      msg << "/opnovice2/dimple/enabled cannot be combined with "
+          << "/opnovice2/tank/bottomCavity true. Use one cavity model at a time.";
+      G4Exception("DetectorConstruction::Construct",
+                  "OpNovice2_Dimple_001",
+                  FatalException,
+                  msg);
     }
-    if (layer == 0) {
-      fTank = placement;
+
+    if (fBottomCavityEnabled) {
+      auto bottomCavitySphere = new G4Sphere("Tank_BottomCavitySphere",
+                                             0.,
+                                             GetBottomCavityRadius(),
+                                             0.,
+                                             360. * deg,
+                                             0.,
+                                             180. * deg);
+
+      tank_solid = new G4SubtractionSolid("Tank",
+                                          tank_box,
+                                          bottomCavitySphere,
+                                          nullptr,
+                                          G4ThreeVector(0., 0., -fTank_z));
+    }
+    else if (fDimpleEnabled) {
+      ValidateDimpleConfiguration();
+
+      auto dimpleSphere = new G4Sphere("Tank_DimpleSphere",
+                                       0.,
+                                       fDimpleRadius,
+                                       0.,
+                                       360. * deg,
+                                       0.,
+                                       180. * deg);
+
+      tank_solid = new G4SubtractionSolid("Tank",
+                                          tank_box,
+                                          dimpleSphere,
+                                          nullptr,
+                                          G4ThreeVector(0., 0., -fTank_z));
+    }
+
+    fTank_LV = new G4LogicalVolume(tank_solid, fTankMaterial, "Tank");
+
+    for (G4int layer = 0; layer < layerCount; ++layer) {
+      const auto center = fStackEnabled ? GetStackTileCenterZ(layer) : 0.;
+      auto placement = new G4PVPlacement(nullptr,
+                                         G4ThreeVector(0., 0., center),
+                                         fTank_LV,
+                                         "Tank",
+                                         fWorld_LV,
+                                         false,
+                                         layer,
+                                         fStackEnabled || fStandaloneLayoutStudy);
+      fTanks.push_back(placement);
+      if (IsStackLayoutStudy()) {
+        G4cout << "Stack tile placement: layer=" << layer
+               << ", world=" << placement->GetObjectTranslation() / mm
+               << " mm, full_size=" << G4ThreeVector(2.*fTank_x, 2.*fTank_y, 2.*fTank_z) / mm
+               << " mm" << G4endl;
+      }
+      if (layer == 0) {
+        fTank = placement;
+      }
     }
   }
 
@@ -359,6 +373,7 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
 
   // The single- or multi-SiPM steel-module layout.
   ValidateSiPMLayout();
+  G4cout << "SiPM readout mode: " << fSiPMReadoutMode << G4endl;
   G4double sipmHx = 0.0;
   G4double sipmHy = 0.0;
   G4double sipmHz = 0.0;
@@ -425,17 +440,46 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
   if (IsStackLayoutStudy()) {
     ValidateStackLayoutGeometry();
   }
+  if (fStandaloneLayoutStudy) {
+    ValidateStandaloneLayoutGeometry();
+  }
+  else if (fCombinedEnabled) {
+    LogCombinedSensorContacts();
+  }
 
   // ------------- Surface --------------
 
   G4LogicalBorderSurface* surface = nullptr;
-  for (G4int layer = 0; layer < layerCount; ++layer) {
+  for (std::size_t layer = 0; layer < fTanks.size(); ++layer) {
     const auto name = "TankToWorldSurface_" + std::to_string(layer);
     auto layerSurface =
       new G4LogicalBorderSurface(name, fTanks[layer], world_PV, fSurface);
     if (layer == 0) {
       surface = layerSurface;
     }
+  }
+
+  if (fCombinedEnabled) {
+    if (!fCombinedInterfaceSurface) {
+      fCombinedInterfaceSurface = new G4OpticalSurface("CombinedJointInterface");
+      fCombinedInterfaceSurface->SetType(dielectric_dielectric);
+      fCombinedInterfaceSurface->SetModel(unified);
+      fCombinedInterfaceSurface->SetFinish(polished);
+      fCombinedInterfaceSurface->SetSigmaAlpha(0.);
+    }
+    // Ordered border surfaces: no paint or surface MPT on either joint face.
+    // Fresnel transport uses each volume's bulk RINDEX in both directions.
+    for (std::size_t piece = 0; piece < fTanks.size(); ++piece) {
+      new G4LogicalBorderSurface("CombinedTileToJoint_" + std::to_string(piece),
+                                 fTanks[piece], fCombinedGrease,
+                                 fCombinedInterfaceSurface);
+      new G4LogicalBorderSurface("CombinedJointToTile_" + std::to_string(piece),
+                                 fCombinedGrease, fTanks[piece],
+                                 fCombinedInterfaceSurface);
+    }
+    G4cout << "Combined boundaries: tile_world=2, tile_joint=4 ordered, "
+           << "joint_interface=polished_dielectric, joint_surface_mpt=none, "
+           << "sipm_coupling=zero_gap_direct" << G4endl;
   }
 
   // The tile remains painted/wrapped where it touches the steel. Border
@@ -470,6 +514,359 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
 }
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
+void DetectorConstruction::SetStandaloneLayoutStudy(G4bool enabled)
+{
+  fStandaloneLayoutStudy = enabled;
+  G4RunManager::GetRunManager()->GeometryHasBeenModified();
+  G4cout << "Standalone layout study enabled set to " << (enabled ? "true" : "false") << G4endl;
+}
+
+G4int DetectorConstruction::GetReadoutSensorCount() const
+{
+  if (fSiPMLayout == "back-four") return 4;
+  if (fSiPMLayout == "back-two" || fSiPMLayout == "edge-two") return 2;
+  if (fSiPMLayout == "back-center" || fSiPMLayout == "single") return 1;
+  return 0;
+}
+
+void DetectorConstruction::ValidateStandaloneLayoutConfiguration() const
+{
+  const auto require = [](G4bool accepted, const G4String& message) {
+    if (!accepted) {
+      G4Exception("DetectorConstruction::ValidateStandaloneLayoutConfiguration",
+                  "OpNovice2_StandaloneLayout_001", FatalException, message.c_str());
+    }
+  };
+  const auto equalLength = [](G4double value, G4double expected) {
+    return std::isfinite(value) && std::abs(value - expected) <= 1.e-9*mm;
+  };
+  require(!fStackEnabled && !fStackLayoutStudy && !fAbsorberEnabled &&
+          !fDimpleEnabled && !fBottomCavityEnabled && !fGreaseEnabled,
+          "Standalone layout study requires one assembly without stack, steel, dimple, cavity, or SiPM grease.");
+  require(equalLength(2.*fTank_x, 100.*mm) && equalLength(2.*fTank_y, 100.*mm) &&
+          (equalLength(2.*fTank_z, 16.*mm) || equalLength(2.*fTank_z, 24.*mm)),
+          "Standalone layout study requires 100x100 mm tiles with 16 or 24 mm active plastic thickness.");
+  require(!fCombinedEnabled || equalLength(fCombinedGapThickness, 0.1*mm),
+          "Standalone joined layout study requires a 0.1 mm inter-piece grease layer.");
+  require(fTankMaterial->GetName() == "G4_PLASTIC_SC_VINYLTOLUENE",
+          "Standalone layout study requires the EJ-200 G4_PLASTIC_SC_VINYLTOLUENE material.");
+  const G4bool side = fSiPMLayout == "edge-two" &&
+                      (fSiPMFace == "+X" || fSiPMFace == "right");
+  const G4bool back = (fSiPMLayout == "back-four" || fSiPMLayout == "back-two" ||
+                       fSiPMLayout == "back-center") &&
+                      (fSiPMFace == "-Z" || fSiPMFace == "bottom");
+  require(side || back,
+          "Standalone layout study requires edge-two on +X or back-four/back-two/back-center on -Z.");
+  require(equalLength(fSiPMActiveU, 2.4*mm) && equalLength(fSiPMActiveV, 2.4*mm) &&
+          equalLength(fSiPMThickness, 0.5*mm) &&
+          equalLength(fSiPMLocalPosition.x(), 0.) &&
+          equalLength(fSiPMLocalPosition.y(), 0.) &&
+          equalLength(fSiPMLocalPosition.z(), 0.),
+          "Standalone layout study requires 2.4x2.4x0.5 mm SiPMs and localPosition 0 0 0 mm.");
+  require(fSurface->GetModel() == unified && fSurface->GetType() == dielectric_dielectric &&
+          fSurface->GetFinish() == polished && fSurface->GetSigmaAlpha() == 0. &&
+          !fSurfaceMPT->GetProperty("REFLECTIVITY") &&
+          !fSurfaceMPT->GetProperty("TRANSMITTANCE") &&
+          !fSurfaceMPT->GetProperty("EFFICIENCY"),
+          "Standalone layout study requires bare polished surfaces without optical surface overrides.");
+  const G4double envelope = fCombinedEnabled ? GetCombinedEnvelopeThickness() : 2.*fTank_z;
+  require(std::isfinite(envelope) && envelope > 0. &&
+          0.5*envelope + fSiPMThickness < fExpHall_z &&
+          fTank_x + fSiPMThickness < fExpHall_x && fTank_y < fExpHall_y,
+          "Standalone assembly and sensors must fit strictly inside World.");
+}
+
+void DetectorConstruction::ValidateStandaloneLayoutGeometry() const
+{
+  const G4double tolerance = 1.e-9*mm;
+  const auto require = [](G4bool accepted, const G4String& message) {
+    if (!accepted) {
+      G4Exception("DetectorConstruction::ValidateStandaloneLayoutGeometry",
+                  "OpNovice2_StandaloneLayout_002", FatalException, message.c_str());
+    }
+  };
+  require(fTanks.size() == (fCombinedEnabled ? 2u : 1u) && fAbsorbers.empty() &&
+          fSiPMs.size() == static_cast<std::size_t>(GetReadoutSensorCount()) &&
+          (fCombinedEnabled == (fCombinedGrease != nullptr)),
+          "Standalone assembly has an unexpected tile, joint, absorber, or sensor count.");
+  std::vector<G4VPhysicalVolume*> volumes = fTanks;
+  if (fCombinedGrease) volumes.push_back(fCombinedGrease);
+  volumes.insert(volumes.end(), fSiPMs.begin(), fSiPMs.end());
+  std::vector<G4ThreeVector> centers;
+  std::vector<G4ThreeVector> halves;
+  const G4ThreeVector worldHalf(fExpHall_x, fExpHall_y, fExpHall_z);
+  const G4double envelope = fCombinedEnabled ? GetCombinedEnvelopeThickness() : 2.*fTank_z;
+  const G4double halfEnvelope = 0.5*envelope;
+  G4cout << "Standalone layout study: layout=" << fSiPMLayout
+         << ", combined=" << (fCombinedEnabled ? "true" : "false")
+         << ", active_sensors=" << GetReadoutSensorCount()
+         << ", active_thickness=" << 2.*fTank_z/mm
+         << " mm, envelope_thickness=" << envelope/mm
+         << " mm, assembly_z_min=" << -halfEnvelope/mm
+         << " mm, assembly_z_max=" << halfEnvelope/mm
+         << " mm, readout=" << fSiPMReadoutMode << G4endl;
+  for (const auto volume : volumes) {
+    const auto box = dynamic_cast<const G4Box*>(volume->GetLogicalVolume()->GetSolid());
+    require(box && volume->GetObjectRotationValue().isIdentity() &&
+            volume->GetMotherLogical() == fWorld_LV,
+            "Standalone layout study expects unrotated boxes directly in World.");
+    const auto center = volume->GetObjectTranslation();
+    const G4ThreeVector half(box->GetXHalfLength(), box->GetYHalfLength(), box->GetZHalfLength());
+    for (G4int axis = 0; axis < 3; ++axis) {
+      require(std::isfinite(center[axis]) && std::isfinite(half[axis]) && half[axis] > 0. &&
+              std::abs(center[axis]) + half[axis] < worldHalf[axis] - tolerance,
+              "Standalone box has invalid bounds or extends outside World: " + volume->GetName());
+    }
+    centers.push_back(center);
+    halves.push_back(half);
+    G4cout << "Standalone volume bounds: name=" << volume->GetName()
+           << ", copy=" << volume->GetCopyNo()
+           << ", min=" << (center - half)/mm
+           << " mm, max=" << (center + half)/mm << " mm" << G4endl;
+  }
+  for (std::size_t a = 0; a < volumes.size(); ++a) {
+    for (std::size_t b = a + 1; b < volumes.size(); ++b) {
+      G4bool overlap = true;
+      for (G4int axis = 0; axis < 3; ++axis) {
+        overlap = overlap && halves[a][axis] + halves[b][axis] -
+                  std::abs(centers[a][axis] - centers[b][axis]) > tolerance;
+      }
+      require(!overlap, "Overlapping standalone boxes: " + volumes[a]->GetName() +
+                        " and " + volumes[b]->GetName());
+    }
+  }
+  require(std::abs(centers[0].z() + halves[0].z() - halfEnvelope) <= tolerance &&
+          std::abs(centers[fTanks.size()-1].z() - halves[fTanks.size()-1].z() + halfEnvelope) <= tolerance,
+          "Standalone plastic outer faces do not match the declared envelope.");
+  if (fCombinedEnabled) {
+    const auto jointIndex = fTanks.size();
+    require(std::abs(centers[0].z() - halves[0].z() -
+                     centers[jointIndex].z() - halves[jointIndex].z()) <= tolerance &&
+            std::abs(centers[1].z() + halves[1].z() -
+                     centers[jointIndex].z() + halves[jointIndex].z()) <= tolerance,
+            "Standalone joint does not exactly contact both plastic pieces.");
+  }
+  const auto firstSensor = fTanks.size() + (fCombinedGrease ? 1u : 0u);
+  const G4bool side = fSiPMLayout == "edge-two";
+  for (std::size_t index = 0; index < fSiPMs.size(); ++index) {
+    const auto sensorIndex = firstSensor + index;
+    const auto& sensorCenter = centers[sensorIndex];
+    const auto& sensorHalf = halves[sensorIndex];
+    require(fSiPMs[index]->GetCopyNo() == static_cast<G4int>(index),
+            "Standalone sensor copy IDs must be contiguous starting at zero.");
+    require(side ? std::abs(sensorCenter.x() - sensorHalf.x() - fTank_x) <= tolerance
+                 : std::abs(sensorCenter.z() + sensorHalf.z() + halfEnvelope) <= tolerance,
+            "Standalone sensor does not directly contact the assembly outer face.");
+    const auto contactArea = [&](std::size_t piece) {
+      const auto& center = centers[piece];
+      const auto& half = halves[piece];
+      const G4int normal = side ? 0 : 2;
+      const G4double faceDistance = side ? sensorCenter[normal] - sensorHalf[normal] -
+                                           center[normal] - half[normal]
+                                        : sensorCenter[normal] + sensorHalf[normal] -
+                                           center[normal] + half[normal];
+      if (std::abs(faceDistance) > tolerance) return 0.;
+      G4double area = 1.;
+      for (G4int axis = 0; axis < 3; ++axis) {
+        if (axis == normal) continue;
+        area *= std::max(0., std::min(sensorCenter[axis] + sensorHalf[axis], center[axis] + half[axis]) -
+                             std::max(sensorCenter[axis] - sensorHalf[axis], center[axis] - half[axis]));
+      }
+      return area;
+    };
+    const G4double mono = fCombinedEnabled ? 0. : contactArea(0);
+    const G4double front = fCombinedEnabled ? contactArea(0) : 0.;
+    const G4double back = fCombinedEnabled ? contactArea(1) : 0.;
+    const G4double joint = fCombinedEnabled ? contactArea(fTanks.size()) : 0.;
+    const G4double total = mono + front + back + joint;
+    require(std::abs(total - fSiPMActiveU*fSiPMActiveV) <= tolerance*mm,
+            "Standalone sensor active face is not fully covered by the assembly.");
+    if (!side && fCombinedEnabled) {
+      require(std::abs(back - fSiPMActiveU*fSiPMActiveV) <= tolerance*mm,
+              "Standalone back sensor must contact only the back plastic piece.");
+    }
+    G4cout << "Standalone sensor contact: copy=" << index
+           << ", face=" << (side ? "+X" : "-Z")
+           << ", center=" << sensorCenter/mm
+           << " mm, full_size=" << 2.*sensorHalf/mm
+           << " mm, mono_area=" << mono/(mm*mm)
+           << " mm2, front_area=" << front/(mm*mm)
+           << " mm2, joint_area=" << joint/(mm*mm)
+           << " mm2, back_area=" << back/(mm*mm)
+           << " mm2, total_area=" << total/(mm*mm)
+           << " mm2, coupling_gap=0 mm" << G4endl;
+  }
+  G4cout << "Standalone layout geometry: PASS, volumes=" << volumes.size()
+         << ", tiles=" << fTanks.size() << ", joints=" << (fCombinedGrease ? 1 : 0)
+         << ", sensors=" << fSiPMs.size()
+         << ", no_positive_volume_overlap=true, outer_contact=true" << G4endl;
+}
+
+void DetectorConstruction::SetCombinedEnabled(G4bool enabled)
+{
+  fCombinedEnabled = enabled;
+  G4RunManager::GetRunManager()->GeometryHasBeenModified();
+  G4cout << "Combined tile enabled set to " << (enabled ? "true" : "false") << G4endl;
+}
+
+void DetectorConstruction::SetCombinedLayers(const G4ThreeVector& layers)
+{
+  if (!std::isfinite(layers.x()) || !std::isfinite(layers.y()) ||
+      !std::isfinite(layers.z()) || layers.x() <= 0. ||
+      layers.y() <= 0. || layers.z() <= 0.) {
+    G4Exception("DetectorConstruction::SetCombinedLayers", "OpNovice2_Combined_001",
+                FatalException, "Combined front, joint, and back thicknesses must be finite and positive.");
+  }
+  fCombinedFrontThickness = layers.x();
+  fCombinedGapThickness = layers.y();
+  fCombinedBackThickness = layers.z();
+  G4RunManager::GetRunManager()->GeometryHasBeenModified();
+  G4cout << "Combined layer thicknesses: front=" << layers.x() / mm
+         << " mm, joint=" << layers.y() / mm
+         << " mm, back=" << layers.z() / mm << " mm" << G4endl;
+}
+
+void DetectorConstruction::ValidateCombinedConfiguration() const
+{
+  const auto require = [](G4bool accepted, const G4String& message) {
+    if (!accepted) {
+      G4Exception("DetectorConstruction::ValidateCombinedConfiguration",
+                  "OpNovice2_Combined_002", FatalException, message.c_str());
+    }
+  };
+  const auto equalLength = [](G4double value, G4double expected) {
+    return std::isfinite(value) && std::abs(value - expected) <= 1.e-9 * mm;
+  };
+  require(!fStackEnabled && !fStackLayoutStudy && !fAbsorberEnabled &&
+          !fDimpleEnabled && !fBottomCavityEnabled && !fGreaseEnabled,
+          "Combined tiles require stack, absorber, dimple, bottom cavity, and SiPM grease disabled.");
+  require(std::isfinite(fCombinedFrontThickness) && fCombinedFrontThickness > 0. &&
+          std::isfinite(fCombinedBackThickness) && fCombinedBackThickness > 0. &&
+          std::isfinite(fCombinedGapThickness) && fCombinedGapThickness > 0.,
+          "Combined front, joint, and back thicknesses must be finite and positive.");
+  require((equalLength(fCombinedFrontThickness, 8.*mm) &&
+           (equalLength(fCombinedBackThickness, 8.*mm) ||
+            equalLength(fCombinedBackThickness, 16.*mm))) ||
+          (equalLength(fCombinedFrontThickness, 16.*mm) &&
+           equalLength(fCombinedBackThickness, 8.*mm)),
+          "Combined tiles support front/back 8/8, 8/16, or 16/8 mm.");
+  require(equalLength(2.*fTank_x, 100.*mm) && equalLength(2.*fTank_y, 100.*mm) &&
+          equalLength(2.*fTank_z, fCombinedFrontThickness + fCombinedBackThickness),
+          "Combined tank/size must be 100 100 (front+back) mm, excluding joint thickness.");
+  require(fTankMaterial->GetName() == "G4_PLASTIC_SC_VINYLTOLUENE",
+          "Combined tiles require the EJ-200 G4_PLASTIC_SC_VINYLTOLUENE material.");
+  if (!fStandaloneLayoutStudy) {
+    require(fSiPMLayout == "edge-two" && (fSiPMFace == "+X" || fSiPMFace == "right"),
+            "Combined tiles require the edge-two SiPM layout on +X.");
+  }
+  require(equalLength(fSiPMActiveU, 2.4*mm) && equalLength(fSiPMActiveV, 2.4*mm) &&
+          equalLength(fSiPMThickness, 0.5*mm) &&
+          equalLength(fSiPMLocalPosition.x(), 0.) &&
+          equalLength(fSiPMLocalPosition.y(), 0.) &&
+          equalLength(fSiPMLocalPosition.z(), 0.),
+          "Combined tiles require 2.4x2.4x0.5 mm SiPMs and localPosition 0 0 0 mm.");
+  require(std::isfinite(GetCombinedEnvelopeThickness()) &&
+          0.5*GetCombinedEnvelopeThickness() < fExpHall_z &&
+          fTank_x + fSiPMThickness < fExpHall_x && fTank_y < fExpHall_y,
+          "Combined envelope and SiPMs must fit strictly inside World.");
+  require(fSurface->GetModel() == unified && fSurface->GetType() == dielectric_dielectric &&
+          fSurface->GetFinish() == polished && fSurface->GetSigmaAlpha() == 0. &&
+          !fSurfaceMPT->GetProperty("REFLECTIVITY") &&
+          !fSurfaceMPT->GetProperty("TRANSMITTANCE") &&
+          !fSurfaceMPT->GetProperty("EFFICIENCY"),
+          "Combined tiles require the bare polished surface preset without optical surface overrides.");
+
+  const auto emission = fTankMPT->GetProperty("SCINTILLATIONCOMPONENT1");
+  require(emission && emission->GetVectorLength() >= 2,
+          "Combined tiles require SCINTILLATIONCOMPONENT1 to audit the joint optical energy range.");
+  const G4double energyMin = emission->Energy(0);
+  const G4double energyMax = emission->Energy(emission->GetVectorLength() - 1);
+  require(std::isfinite(energyMin) && std::isfinite(energyMax) && energyMin > 0. && energyMax > energyMin,
+          "Combined scintillation spectrum must have a finite positive increasing energy range.");
+  for (const auto property : {"RINDEX", "ABSLENGTH"}) {
+    const auto vector = fGreaseMPT->GetProperty(property);
+    require(vector && vector->GetVectorLength() >= 2,
+            G4String("Combined EJ-550 joint requires greaseProperty ") + property + " with at least two entries.");
+    G4double previousEnergy = 0.;
+    for (std::size_t i = 0; i < vector->GetVectorLength(); ++i) {
+      const auto energy = vector->Energy(i);
+      require(std::isfinite(energy) && energy > previousEnergy &&
+              std::isfinite((*vector)[i]) && (*vector)[i] > 0.,
+              G4String("Combined EJ-550 ") + property + " must have increasing positive energies and positive finite values.");
+      previousEnergy = energy;
+    }
+    require(vector->Energy(0) <= energyMin &&
+            vector->Energy(vector->GetVectorLength() - 1) >= energyMax,
+            G4String("Combined EJ-550 ") + property + " must cover the scintillation emission spectrum.");
+  }
+}
+
+void DetectorConstruction::ConstructCombinedTiles()
+{
+  const G4double halfEnvelope = 0.5 * GetCombinedEnvelopeThickness();
+  const G4double jointCenter = 0.5 * (fCombinedBackThickness - fCombinedFrontThickness);
+  const G4double jointLow = jointCenter - 0.5 * fCombinedGapThickness;
+  const G4double jointHigh = jointCenter + 0.5 * fCombinedGapThickness;
+  const G4double thicknesses[] = {fCombinedFrontThickness, fCombinedBackThickness};
+  const G4double centers[] = {halfEnvelope - 0.5*fCombinedFrontThickness,
+                             -halfEnvelope + 0.5*fCombinedBackThickness};
+  const G4String names[] = {"TankFront", "TankBack"};
+  for (G4int piece = 0; piece < 2; ++piece) {
+    auto solid = new G4Box(names[piece] + "_Box", fTank_x, fTank_y, 0.5*thicknesses[piece]);
+    auto logical = new G4LogicalVolume(solid, fTankMaterial, names[piece]);
+    auto volume = new G4PVPlacement(nullptr, G4ThreeVector(0., 0., centers[piece]),
+                                    logical, names[piece], fWorld_LV, false, piece, true);
+    fTanks.push_back(volume);
+    if (piece == 0) {
+      fTank = volume;
+      fTank_LV = logical;
+    }
+    G4cout << "Combined tile placement: piece=" << piece << ", name=" << names[piece]
+           << ", center_z=" << centers[piece] / mm
+           << " mm, z_min=" << (centers[piece] - 0.5*thicknesses[piece]) / mm
+           << " mm, z_max=" << (centers[piece] + 0.5*thicknesses[piece]) / mm
+           << " mm, full_size=" << G4ThreeVector(2.*fTank_x, 2.*fTank_y, thicknesses[piece]) / mm
+           << " mm, overlap_check=true" << G4endl;
+  }
+  auto jointBox = new G4Box("CombinedGrease_Box", fTank_x, fTank_y, 0.5*fCombinedGapThickness);
+  auto jointLogical = new G4LogicalVolume(jointBox, fGreaseMaterial, "CombinedGrease");
+  fCombinedGrease = new G4PVPlacement(nullptr, G4ThreeVector(0., 0., jointCenter),
+                                     jointLogical, "CombinedGrease", fWorld_LV, false, 0, true);
+  auto jointVis = new G4VisAttributes(G4Colour(0., 0.8, 1., 0.5));
+  jointVis->SetForceSolid(true);
+  jointLogical->SetVisAttributes(jointVis);
+  G4cout << "Combined joint placement: material=" << fGreaseMaterial->GetName()
+         << ", center_z=" << jointCenter / mm << " mm, z_min=" << jointLow / mm
+         << " mm, z_max=" << jointHigh / mm << " mm, thickness=" << fCombinedGapThickness / mm
+         << " mm, overlap_check=true" << G4endl;
+  G4cout << "Combined envelope: active_thickness=" << (fCombinedFrontThickness + fCombinedBackThickness) / mm
+         << " mm, full_thickness=" << GetCombinedEnvelopeThickness() / mm
+         << " mm, z_min=" << -halfEnvelope / mm << " mm, z_max=" << halfEnvelope / mm
+         << " mm, front=+Z, sensor_groups=1, sensors=" << GetReadoutSensorCount() << G4endl;
+}
+
+void DetectorConstruction::LogCombinedSensorContacts() const
+{
+  const G4double halfEnvelope = 0.5 * GetCombinedEnvelopeThickness();
+  const G4double jointCenter = 0.5 * (fCombinedBackThickness - fCombinedFrontThickness);
+  const G4double jointLow = jointCenter - 0.5 * fCombinedGapThickness;
+  const G4double jointHigh = jointCenter + 0.5 * fCombinedGapThickness;
+  const auto contactArea = [&](G4double low, G4double high) {
+    const auto height = std::max(0., std::min(0.5*fSiPMActiveV, high) -
+                                   std::max(-0.5*fSiPMActiveV, low));
+    return fSiPMActiveU * height;
+  };
+  for (const auto sensor : fSiPMs) {
+    G4cout << "Combined sensor contact: copy=" << sensor->GetCopyNo()
+           << ", center=" << sensor->GetObjectTranslation() / mm
+           << " mm, face_x=" << fTank_x / mm
+           << " mm, front_area=" << contactArea(jointHigh, halfEnvelope) / (mm*mm)
+           << " mm2, joint_area=" << contactArea(jointLow, jointHigh) / (mm*mm)
+           << " mm2, back_area=" << contactArea(-halfEnvelope, jointLow) / (mm*mm)
+           << " mm2, overlap_check=true" << G4endl;
+  }
+}
+
 void DetectorConstruction::SetSurfaceSigmaAlpha(G4double v)
 {
   fSurface->SetSigmaAlpha(v);
@@ -1493,6 +1890,10 @@ void DetectorConstruction::ComputeSiPMPlacementFor(
                     msg);
       }
     }
+    else if (fStandaloneLayoutStudy) {
+      const G4double halfEnvelope = fCombinedEnabled ? 0.5*GetCombinedEnvelopeThickness() : fTank_z;
+      pos = G4ThreeVector(u, v, -halfEnvelope - ht);
+    }
     else {
       const G4double greaseOffset = fGreaseEnabled ? fGreaseThickness : 0.0;
       pos = G4ThreeVector(u, v, -fTank_z - greaseOffset - ht);
@@ -1635,9 +2036,10 @@ void DetectorConstruction::ValidateSiPMLayout() const
     }
     return;
   }
-  if ((fSiPMLayout == "back-two" || fSiPMLayout == "back-center") && !IsStackLayoutStudy()) {
+  if ((fSiPMLayout == "back-two" || fSiPMLayout == "back-center") &&
+      !IsStackLayoutStudy() && !fStandaloneLayoutStudy) {
     G4Exception("DetectorConstruction::ValidateSiPMLayout", "OpNovice2_LayoutStudy_004",
-                FatalException, "back-two and back-center require stack/layoutStudy true.");
+                FatalException, "back-two and back-center require stack/layoutStudy or combined/layoutStudy true.");
   }
   if (fSiPMLayout != "back-four" && fSiPMLayout != "back-two" && fSiPMLayout != "back-center") {
     G4ExceptionDescription msg;
@@ -1684,6 +2086,17 @@ void DetectorConstruction::ValidateSiPMLayout() const
                 FatalException,
                 msg);
   }
+}
+
+void DetectorConstruction::SetSiPMReadoutMode(const G4String& mode)
+{
+  if (mode != "legacy" && mode != "boundary-entry") {
+    G4ExceptionDescription msg;
+    msg << "Invalid SiPM readout mode: " << mode << ". Use legacy or boundary-entry.";
+    G4Exception("DetectorConstruction::SetSiPMReadoutMode", "OpNovice2_SiPM_015",
+                FatalException, msg);
+  }
+  fSiPMReadoutMode = mode;
 }
 
 void DetectorConstruction::SetSiPMLayout(const G4String& layout)

@@ -1,0 +1,50 @@
+{
+  "archived_on": "2026-10-16",
+  "files": {
+    "comparisons.csv": {
+      "published_sha256": "2076a32014c79d95a7323d2f8431c68285134c50593dc3e63a6c7983a23377e6",
+      "source": "outputs/combined-layouts/20261012-dual-readout-v1/analysis/comparisons.csv",
+      "source_sha256": "0951a21d05d95aface67623f6db46e60f4030db8ec4a3c10886c3d80339b5563",
+      "transformation": "CRLF line endings normalized to LF; CSV fields and values unchanged"
+    },
+    "interactions.csv": {
+      "published_sha256": "7d19e3f746949fd13cb32cfcda673c8be6f0f0b306a3aa8140907a9d919d7026",
+      "source": "outputs/combined-layouts/20261012-dual-readout-v1/analysis/interactions.csv",
+      "source_sha256": "8999adfbdaba3f4cb8c10c7021dd3f64dde8035e56303c9d42c05f80976c1ba2",
+      "transformation": "CRLF line endings normalized to LF; CSV fields and values unchanged"
+    },
+    "joining-response.pdf": {
+      "published_sha256": "317a5350bc50867c0b44e00368f086e6509c7b10d3d09fbbd776f6db779e43e6",
+      "source": "outputs/combined-layouts/20261012-dual-readout-v1/analysis/joining-response.pdf",
+      "source_sha256": "317a5350bc50867c0b44e00368f086e6509c7b10d3d09fbbd776f6db779e43e6",
+      "transformation": "byte-for-byte copy"
+    },
+    "joining-response.png": {
+      "published_sha256": "e6fb4fc67f5caa0953b86b02647ce4bd916d003f54ab30d2c62832d5205bf410",
+      "source": "outputs/combined-layouts/20261012-dual-readout-v1/analysis/joining-response.png",
+      "source_sha256": "e6fb4fc67f5caa0953b86b02647ce4bd916d003f54ab30d2c62832d5205bf410",
+      "transformation": "byte-for-byte copy"
+    },
+    "mechanism-summary.csv": {
+      "published_sha256": "5ed2c68a3a892d6c12d5ff7d2d2f5468f13e868d759ae528f8209b849fd41b0d",
+      "source": "outputs/combined-layouts/20261012-existing-diagnostics-v1/mechanism-summary.csv",
+      "source_sha256": "202edcc7ea34b14f7d1133a03c530b197dfce1936bb5343615f0e23826a7d381",
+      "transformation": "CRLF line endings normalized to LF; CSV fields and values unchanged"
+    },
+    "summary.csv": {
+      "published_sha256": "d4d27f14933a2b9d3df2c207bd3d881662d8962bd330a680fc9b4ec824fa6166",
+      "source": "outputs/combined-layouts/20261012-dual-readout-v1/analysis/summary.csv",
+      "source_sha256": "c0cefadab256064f7f2fa37cd1a3e19b957458098b20d2db048ed78c0fdaa839",
+      "transformation": "CRLF line endings normalized to LF; CSV fields and values unchanged"
+    }
+  },
+  "scope": "Small publication assets; images are exact copies and CSVs retain all values with LF line endings. Full raw data, regression reference, diagnostic scripts, and build evidence remain local under ignored outputs/. No additional simulation.",
+  "source_analysis_sha256": "35fe55bb110d8cdafe85a3ff61c7d24f47afc0a249aab3289333cc67eb117feb",
+  "source_manifest_sha256": "66d8b2e4d479f3ac80f115d1c0f97820ea586320fd11a8ff199f90425676b68c",
+  "source_mechanism_summary_sha256": "ae8c2734fdd4ae1e217b00fd0d66fb6881114ad141cf5b31bdc71b2a067c60a5",
+  "verification": {
+    "figure_hashes_equal_final_validation_receipt": true,
+    "mechanism_CSV_rows_equal_summary_JSON": true,
+    "summary_and_contrast_CSV_rows_equal_analysis_JSON": true
+  }
+}

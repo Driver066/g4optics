@@ -273,6 +273,65 @@ void HistoManager::Book()
   analysisMan->CreateNtupleIColumn("detected_photons");
   analysisMan->FinishNtuple();
 
+  // New tables are appended; all existing table IDs and columns stay fixed.
+  // They are empty unless combined/enabled is true.
+  analysisMan->CreateNtuple("combined_events", "Two-piece event accounting v1");
+  analysisMan->CreateNtupleIColumn("event_id");
+  analysisMan->CreateNtupleIColumn("front_generated");
+  analysisMan->CreateNtupleIColumn("back_generated");
+  analysisMan->CreateNtupleDColumn("front_edep_mev");
+  analysisMan->CreateNtupleDColumn("back_edep_mev");
+  analysisMan->CreateNtupleDColumn("joint_edep_mev");
+  analysisMan->CreateNtupleIColumn("lineage_front_to_sensor0");
+  analysisMan->CreateNtupleIColumn("lineage_front_to_sensor1");
+  analysisMan->CreateNtupleIColumn("lineage_back_to_sensor0");
+  analysisMan->CreateNtupleIColumn("lineage_back_to_sensor1");
+  analysisMan->CreateNtupleIColumn("unknown_to_sensor0");
+  analysisMan->CreateNtupleIColumn("unknown_to_sensor1");
+  analysisMan->CreateNtupleIColumn("all_births_front");
+  analysisMan->CreateNtupleIColumn("all_births_back");
+  analysisMan->CreateNtupleIColumn("all_births_joint");
+  analysisMan->CreateNtupleIColumn("all_births_other");
+  analysisMan->CreateNtupleIColumn("optical_parent_births");
+  analysisMan->CreateNtupleIColumn("boundary_steps");
+  analysisMan->CreateNtupleIColumn("joint_boundary_steps");
+  analysisMan->CreateNtupleIColumn("no_rindex_steps");
+  analysisMan->CreateNtupleDColumn("front_optical_edep_mev");
+  analysisMan->CreateNtupleDColumn("back_optical_edep_mev");
+  analysisMan->CreateNtupleDColumn("joint_optical_edep_mev");
+  // Append extra sensors without renumbering any existing columns.
+  analysisMan->CreateNtupleIColumn("lineage_front_to_sensor2");
+  analysisMan->CreateNtupleIColumn("lineage_front_to_sensor3");
+  analysisMan->CreateNtupleIColumn("lineage_back_to_sensor2");
+  analysisMan->CreateNtupleIColumn("lineage_back_to_sensor3");
+  analysisMan->CreateNtupleIColumn("unknown_to_sensor2");
+  analysisMan->CreateNtupleIColumn("unknown_to_sensor3");
+  analysisMan->FinishNtuple();
+  analysisMan->CreateNtuple("combined_boundaries", "All optical geometric boundary steps v1");
+  analysisMan->CreateNtupleIColumn("event_id");
+  analysisMan->CreateNtupleIColumn("pre_region");
+  analysisMan->CreateNtupleIColumn("post_region");
+  analysisMan->CreateNtupleIColumn("status");
+  analysisMan->CreateNtupleIColumn("count");
+  analysisMan->FinishNtuple();
+
+  analysisMan->CreateNtuple("readout_events", "Boundary-entry SiPM readout accounting v1");
+  analysisMan->CreateNtupleIColumn("event_id");
+  analysisMan->CreateNtupleIColumn("sensor0_entries");
+  analysisMan->CreateNtupleIColumn("sensor1_entries");
+  analysisMan->CreateNtupleIColumn("sensor0_reflections");
+  analysisMan->CreateNtupleIColumn("sensor1_reflections");
+  analysisMan->CreateNtupleIColumn("sensor0_step_too_small");
+  analysisMan->CreateNtupleIColumn("sensor1_step_too_small");
+  analysisMan->CreateNtupleIColumn("no_rindex_steps");
+  analysisMan->CreateNtupleIColumn("sensor2_entries");
+  analysisMan->CreateNtupleIColumn("sensor3_entries");
+  analysisMan->CreateNtupleIColumn("sensor2_reflections");
+  analysisMan->CreateNtupleIColumn("sensor3_reflections");
+  analysisMan->CreateNtupleIColumn("sensor2_step_too_small");
+  analysisMan->CreateNtupleIColumn("sensor3_step_too_small");
+  analysisMan->FinishNtuple();
+
   for (G4int i = 0; i < analysisMan->GetNofH1s(); ++i) {
     analysisMan->SetH1Activation(i, false);
   }

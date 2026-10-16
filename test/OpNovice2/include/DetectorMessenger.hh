@@ -80,6 +80,9 @@ class DetectorMessenger : public G4UImessenger
     G4UIcmdWithABool* fTankBottomCavityCmd = nullptr;
     G4UIcmdWithABool* fAbsorberEnabledCmd = nullptr;
     G4UIcmdWith3VectorAndUnit* fAbsorberSizeCmd = nullptr;
+    G4UIcmdWithABool* fCombinedEnabledCmd = nullptr;
+    G4UIcmdWithABool* fCombinedLayoutStudyCmd = nullptr;
+    G4UIcmdWith3VectorAndUnit* fCombinedLayersCmd = nullptr;
     G4UIcmdWithABool* fStackEnabledCmd = nullptr;
     G4UIcmdWithABool* fStackLayoutStudyCmd = nullptr;
     G4UIcmdWithAnInteger* fStackLayersCmd = nullptr;
@@ -95,6 +98,7 @@ class DetectorMessenger : public G4UImessenger
 
     // SiPM geometry
     G4UIcmdWithAString* fSiPMLayoutCmd = nullptr;
+    G4UIcmdWithAString* fSiPMReadoutModeCmd = nullptr;
     G4UIcmdWithAString* fSiPMFaceCmd = nullptr;
     G4UIcmdWithAString* fSiPMCavityModeCmd = nullptr;
     G4UIcmdWith3VectorAndUnit* fSiPMLocalPositionCmd = nullptr;

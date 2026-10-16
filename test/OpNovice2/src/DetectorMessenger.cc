@@ -157,6 +157,33 @@ DetectorMessenger::DetectorMessenger(DetectorConstruction* Det) : G4UImessenger(
   fAbsorberSizeCmd->AvailableForStates(G4State_PreInit);
   fAbsorberSizeCmd->SetToBeBroadcasted(false);
 
+  fCombinedEnabledCmd = new G4UIcmdWithABool("/opnovice2/combined/enabled", this);
+  fCombinedEnabledCmd->SetGuidance(
+    "Enable two EJ-200 pieces joined by a full-face EJ-550 layer; front faces +Z.");
+  fCombinedEnabledCmd->SetDefaultValue(false);
+  fCombinedEnabledCmd->AvailableForStates(G4State_PreInit);
+  fCombinedEnabledCmd->SetToBeBroadcasted(false);
+
+  fCombinedLayoutStudyCmd = new G4UIcmdWithABool("/opnovice2/combined/layoutStudy", this);
+  fCombinedLayoutStudyCmd->SetGuidance(
+    "Enable four fixed SiPM layouts on one monolith or joined assembly, without steel or stack gaps.");
+  fCombinedLayoutStudyCmd->SetGuidance(
+    "Back sensors contact the complete assembly's -Z face; combined/enabled independently selects two pieces.");
+  fCombinedLayoutStudyCmd->SetDefaultValue(false);
+  fCombinedLayoutStudyCmd->AvailableForStates(G4State_PreInit);
+  fCombinedLayoutStudyCmd->SetToBeBroadcasted(false);
+
+  fCombinedLayersCmd = new G4UIcmdWith3VectorAndUnit("/opnovice2/combined/layers", this);
+  fCombinedLayersCmd->SetGuidance(
+    "Set front plastic, joint grease, back plastic thicknesses. Example: 8 0.1 16 mm.");
+  fCombinedLayersCmd->SetGuidance(
+    "tank/size thickness is front+back; the outer envelope also includes the joint.");
+  fCombinedLayersCmd->SetParameterName("front", "joint", "back", false);
+  fCombinedLayersCmd->SetUnitCategory("Length");
+  fCombinedLayersCmd->SetDefaultUnit("mm");
+  fCombinedLayersCmd->AvailableForStates(G4State_PreInit);
+  fCombinedLayersCmd->SetToBeBroadcasted(false);
+
   fStackEnabledCmd =
     new G4UIcmdWithABool("/opnovice2/stack/enabled", this);
   fStackEnabledCmd->SetGuidance(
@@ -227,6 +254,14 @@ DetectorMessenger::DetectorMessenger(DetectorConstruction* Det) : G4UImessenger(
     "back-four (four -Z sensors at x,y=+/-25 mm), or layout-study back-two/back-center.");
   fSiPMLayoutCmd->AvailableForStates(G4State_PreInit);
   fSiPMLayoutCmd->SetToBeBroadcasted(false);
+
+  fSiPMReadoutModeCmd = new G4UIcmdWithAString("/opnovice2/sipm/readoutMode", this);
+  fSiPMReadoutModeCmd->SetGuidance(
+    "Set SiPM readout: legacy (historical pre-volume counter) or boundary-entry (transmitted optical entry).");
+  fSiPMReadoutModeCmd->SetGuidance("Default: legacy. Select boundary-entry explicitly for the combined-tile study.");
+  fSiPMReadoutModeCmd->SetParameterName("mode", false);
+  fSiPMReadoutModeCmd->AvailableForStates(G4State_PreInit);
+  fSiPMReadoutModeCmd->SetToBeBroadcasted(false);
 
   fSiPMFaceCmd = new G4UIcmdWithAString("/opnovice2/sipm/face", this);
   fSiPMFaceCmd->SetGuidance("Set SiPM attached face: +X, -X, +Y, -Y, +Z, -Z, bottomCavity.");
@@ -316,6 +351,9 @@ DetectorMessenger::~DetectorMessenger()
   delete fTankBottomCavityCmd;
   delete fAbsorberEnabledCmd;
   delete fAbsorberSizeCmd;
+  delete fCombinedEnabledCmd;
+  delete fCombinedLayoutStudyCmd;
+  delete fCombinedLayersCmd;
   delete fStackEnabledCmd;
   delete fStackLayoutStudyCmd;
   delete fStackLayersCmd;
@@ -327,6 +365,7 @@ DetectorMessenger::~DetectorMessenger()
   delete fWorldMatPropConstCmd;
   delete fWorldMaterialCmd;
   delete fSiPMLayoutCmd;
+  delete fSiPMReadoutModeCmd;
   delete fSiPMFaceCmd;
   delete fSiPMCavityModeCmd;
   delete fSiPMLocalPositionCmd;
@@ -681,6 +720,15 @@ void DetectorMessenger::SetNewValue(G4UIcommand* command, G4String newValue)
   else if (command == fAbsorberSizeCmd) {
     fDetector->SetAbsorberSize(fAbsorberSizeCmd->GetNew3VectorValue(newValue));
   }
+  else if (command == fCombinedEnabledCmd) {
+    fDetector->SetCombinedEnabled(fCombinedEnabledCmd->GetNewBoolValue(newValue));
+  }
+  else if (command == fCombinedLayoutStudyCmd) {
+    fDetector->SetStandaloneLayoutStudy(fCombinedLayoutStudyCmd->GetNewBoolValue(newValue));
+  }
+  else if (command == fCombinedLayersCmd) {
+    fDetector->SetCombinedLayers(fCombinedLayersCmd->GetNew3VectorValue(newValue));
+  }
   else if (command == fStackEnabledCmd) {
     fDetector->SetStackEnabled(fStackEnabledCmd->GetNewBoolValue(newValue));
   }
@@ -706,6 +754,9 @@ void DetectorMessenger::SetNewValue(G4UIcommand* command, G4String newValue)
   // --- SiPM commands ---
   else if (command == fSiPMLayoutCmd) {
     fDetector->SetSiPMLayout(newValue);
+  }
+  else if (command == fSiPMReadoutModeCmd) {
+    fDetector->SetSiPMReadoutMode(newValue);
   }
   else if (command == fSiPMFaceCmd) {
     fDetector->SetSiPMFace(newValue);

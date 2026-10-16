@@ -58,12 +58,29 @@ class DetectorConstruction : public G4VUserDetectorConstruction
 
     G4VPhysicalVolume* GetTank() const { return fTank; }
     G4double GetTankXSize() const { return fTank_x; }
+    G4bool IsCombinedEnabled() const { return fCombinedEnabled; }
+    G4bool IsStandaloneLayoutStudy() const { return fStandaloneLayoutStudy; }
+    void SetStandaloneLayoutStudy(G4bool enabled);
+    // Active sensors in one readout group; does not encode stack destination layers.
+    G4int GetReadoutSensorCount() const;
+    G4double GetCombinedFrontThickness() const { return fCombinedFrontThickness; }
+    G4double GetCombinedBackThickness() const { return fCombinedBackThickness; }
+    G4double GetCombinedGapThickness() const { return fCombinedGapThickness; }
+    G4double GetCombinedEnvelopeThickness() const
+    {
+      return fCombinedFrontThickness + fCombinedGapThickness + fCombinedBackThickness;
+    }
+    G4VPhysicalVolume* GetCombinedGrease() const { return fCombinedGrease; }
+    void SetCombinedEnabled(G4bool enabled);
+    void SetCombinedLayers(const G4ThreeVector& layers);
     G4bool IsStackEnabled() const { return fStackEnabled; }
     G4bool IsStackLayoutStudy() const { return fStackEnabled && fStackLayoutStudy; }
     G4double GetStackReadoutGap() const { return IsStackLayoutStudy() ? 0.5 * CLHEP::mm : 0.; }
     G4int GetStackSensorStride() const { return IsStackLayoutStudy() ? 4 : 2; }
     G4int GetStackSensorsPerLayer() const;
     const G4String& GetSiPMLayout() const { return fSiPMLayout; }
+    G4bool IsBoundaryEntryReadout() const { return fSiPMReadoutMode == "boundary-entry"; }
+    const G4String& GetSiPMReadoutMode() const { return fSiPMReadoutMode; }
     const G4String& GetSiPMFace() const { return fSiPMFace; }
     G4int GetStackLayerCount() const { return fStackEnabled ? fStackLayers : 1; }
     G4double GetStackLength() const
@@ -158,6 +175,7 @@ class DetectorConstruction : public G4VUserDetectorConstruction
 
     // setting SiPM
     void SetSiPMLayout(const G4String& layout);
+    void SetSiPMReadoutMode(const G4String& mode);
     void SetSiPMFace(const G4String& face);
     void SetSiPMCavityMode(const G4String& mode);
     void SetSiPMLocalPosition(const G4ThreeVector& pos);
@@ -180,6 +198,17 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     G4double fAbsorber_x = 25. * CLHEP::cm;
     G4double fAbsorber_y = 25. * CLHEP::cm;
     G4double fAbsorber_z = 2. * CLHEP::cm;
+    // An opt-in two-piece tile, independent of the repeated steel stack.
+    // Front is the +Z piece facing the source; the envelope is centred at z=0.
+    G4bool fCombinedEnabled = false;
+    // Four fixed readout layouts on one monolith or one joined assembly.
+    G4bool fStandaloneLayoutStudy = false;
+    G4double fCombinedFrontThickness = 8. * CLHEP::mm;
+    G4double fCombinedGapThickness = 0.1 * CLHEP::mm;
+    G4double fCombinedBackThickness = 8. * CLHEP::mm;
+    G4VPhysicalVolume* fCombinedGrease = nullptr;
+    G4OpticalSurface* fCombinedInterfaceSurface = nullptr;
+
     G4bool fStackEnabled = false;
     G4bool fStackLayoutStudy = false;
     G4int fStackLayers = 10;
@@ -232,6 +261,9 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     // steel-module scan's four fixed -Z placements. The opt-in stack layout
     // study also supports diagonal "back-two" and fixed "back-center".
     G4String fSiPMLayout = "single";
+    // Legacy mode preserves the historical counter; boundary-entry counts
+    // only optical steps transmitted into a SiPM at a physical boundary.
+    G4String fSiPMReadoutMode = "legacy";
 
     // fSiPMFace controls which tile face the SiPM is attached to.
     // Accepted values: +X, -X, +Y, -Y, +Z, -Z, bottomCavity.
@@ -278,6 +310,11 @@ class DetectorConstruction : public G4VUserDetectorConstruction
                                 G4double& hy,
                                 G4double& hz,
                                 G4ThreeVector& pos) const;
+    void ValidateStandaloneLayoutConfiguration() const;
+    void ValidateStandaloneLayoutGeometry() const;
+    void ValidateCombinedConfiguration() const;
+    void ConstructCombinedTiles();
+    void LogCombinedSensorContacts() const;
     void ValidateDimpleConfiguration() const;
     void ValidateGreaseConfiguration() const;
     void ValidateAbsorberConfiguration() const;

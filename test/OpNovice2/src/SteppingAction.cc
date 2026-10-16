@@ -89,6 +89,27 @@ void SteppingAction::UserSteppingAction(const G4Step* step)
 
   auto trackInfo = (TrackInformation*)(track->GetUserInformation());
 
+  const G4bool boundaryReadout = detector && detector->IsBoundaryEntryReadout();
+  // The standalone layout study observes actual entries in BOTH readout modes.
+  // This is passive: legacy count/kill decisions below remain unchanged.
+  const G4bool observeReadout = boundaryReadout || (detector && detector->IsStandaloneLayoutStudy());
+  G4OpBoundaryProcessStatus observedBoundary = Undefined;
+  if (particleDef == opticalphoton && endPoint->GetStepStatus() == fGeomBoundary
+      && detector && (detector->IsCombinedEnabled() || observeReadout)) {
+    auto processes = opticalphoton->GetProcessManager()->GetPostStepProcessVector(typeDoIt);
+    for (G4int i = 0; i < processes->entries(); ++i) {
+      if (const auto boundary = dynamic_cast<G4OpBoundaryProcess*>((*processes)[i])) {
+        observedBoundary = boundary->GetStatus();
+        break;
+      }
+    }
+    if (observeReadout) {
+      const G4int candidate = postPV && postPV != prePV && postPV->GetName() == "SiPM"
+        ? postPV->GetCopyNo() : -1;
+      run->ObserveReadoutBoundary(candidate, static_cast<G4int>(observedBoundary));
+    }
+  }
+
   const G4bool entersTile = postTileLayer >= 0 && preTileLayer != postTileLayer;
   if (track->GetParentID() == 0 && entersTile) {
     run->SetPrimaryHitPosition(endPoint->GetPosition());
@@ -106,6 +127,37 @@ void SteppingAction::UserSteppingAction(const G4Step* step)
   }
 
   const G4double energyDeposit = step->GetTotalEnergyDeposit();
+  // Combined-only passive accounting: inspect existing step/secondary/process
+  // data, without any random draw, navigation, or change to track physics.
+  if (detector && detector->IsCombinedEnabled()) {
+    const auto region = [detector](const G4VPhysicalVolume* volume) -> G4int {
+      if (!volume) return 7;
+      const auto tile = detector->GetTileLayer(volume);
+      if (tile >= 0 && tile < 2) return tile;
+      if (volume == detector->GetCombinedGrease()) return 2;
+      if (volume->GetName() == "SiPM" && volume->GetCopyNo() >= 0
+          && volume->GetCopyNo() < 4) {
+        // Preserve the original IDs: front/back/joint=0/1/2, S0/S1=3/4,
+        // World/other/outside=5/6/7. Additional sensors use S2/S3=8/9.
+        const auto sensor = volume->GetCopyNo();
+        return sensor < 2 ? 3 + sensor : 6 + sensor;
+      }
+      return volume->GetName() == "World" ? 5 : 6;
+    };
+    const auto preRegion = region(prePV);
+    run->AddCombinedEnergyDeposit(preRegion, energyDeposit, particleDef == opticalphoton);
+    for (const auto secondary : *step->GetSecondaryInCurrentStep()) {
+      if (secondary->GetDefinition() == opticalphoton) {
+        run->AddCombinedOpticalBirth(preRegion, particleDef == opticalphoton);
+      }
+    }
+    if (particleDef == opticalphoton && endPoint->GetStepStatus() == fGeomBoundary) {
+      // postRegion is the geometric candidate on the other side of the
+      // boundary. Reflection is NOT recorded as successful transfer.
+      run->AddCombinedBoundary(preRegion, region(postPV), static_cast<G4int>(observedBoundary));
+    }
+  }
+
   if (absorberLayer >= 0) {
     run->AddSteelEnergyDeposit(energyDeposit, absorberLayer);
   }
@@ -135,8 +187,24 @@ void SteppingAction::UserSteppingAction(const G4Step* step)
   }
 
   if (particleDef == opticalphoton) {
-    // SiPM detection
-    if (prePV && prePV->GetName() == "SiPM") {
+    // Corrected opt-in readout accepts an actual optical transmission INTO
+    // the sensor. A reflected boundary's StepTooSmall relocation may report
+    // prePV=SiPM; it must neither count nor kill that returning photon.
+    const G4bool entersSensor = boundaryReadout
+      && endPoint->GetStepStatus() == fGeomBoundary
+      && postPV && postPV != prePV && postPV->GetName() == "SiPM"
+      && (observedBoundary == Transmission || observedBoundary == FresnelRefraction
+          || observedBoundary == SameMaterial);
+    if (entersSensor) {
+      run->AddSiPMDetection(postPV->GetCopyNo(), trackInfo ? trackInfo->GetOpticalOriginLayer() : -1);
+      analysisMan->FillH1(27, endPoint->GetKineticEnergy() / eV);
+      analysisMan->FillH1(28, endPoint->GetGlobalTime() / ns);
+      track->SetTrackStatus(fStopAndKill);
+      return;
+    }
+
+    // Default legacy path is retained verbatim for historical reproduction.
+    if (!boundaryReadout && prePV && prePV->GetName() == "SiPM") {
       const G4int originLayer = trackInfo ? trackInfo->GetOpticalOriginLayer() : -1;
       run->AddSiPMDetection(prePV->GetCopyNo(), originLayer);
 
