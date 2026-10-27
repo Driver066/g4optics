@@ -45,8 +45,10 @@
 #include "G4NistManager.hh"
 #include "G4OpticalSurface.hh"
 #include "G4PVPlacement.hh"
+#include "G4PhysicalConstants.hh"
 #include "G4Sphere.hh"
 #include "G4SubtractionSolid.hh"
+#include "G4UnionSolid.hh"
 #include "G4SystemOfUnits.hh"
 #include "G4ThreeVector.hh"
 #include "G4VSolid.hh"
@@ -56,6 +58,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iomanip>
+#include <vector>
 #include <string>
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
@@ -145,6 +149,15 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
   fGrease = nullptr;
   fGrease_LV = nullptr;
 
+  if (fDimpleFrontCompensation && !fDimpleEnabled) {
+    G4Exception("DetectorConstruction::Construct", "OpNovice2_Issue9_007",
+                FatalException, "frontCompensation requires dimple/enabled true.");
+  }
+  if (fIssue9GeometryAudit || (fDimpleEnabled &&
+      (fDimpleMode == "cube" || fDimpleFrontCompensation))) {
+    ValidateIssue9GeometryConfiguration();
+  }
+
   if (fStackLayoutStudy && !fStackEnabled) {
     G4Exception("DetectorConstruction::Construct", "OpNovice2_LayoutStudy_001",
                 FatalException, "stack/layoutStudy requires stack/enabled true.");
@@ -216,19 +229,47 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
            << " mm, sipm_mode=" << GetEffectiveDimpleSiPMMode()
            << ", opening_z=" << -fTank_z / mm << " mm" << G4endl;
 
-    auto dimpleSphere = new G4Sphere("Tank_DimpleSphere",
-                                     0.,
-                                     fDimpleRadius,
-                                     0.,
-                                     360. * deg,
-                                     0.,
-                                     180. * deg);
+    // Build the front extension on the uncut tile, then subtract the rear
+    // cavity. This ordering also avoids refilling a cavity in a thin tile.
+    G4VSolid* compensatedBase = tank_box;
+    const G4double join = std::min({1.e-4 * mm, 0.2 * fTank_z,
+                                    0.1 * GetDimpleCubeSide()});
+    if (fDimpleFrontCompensation) {
+      G4VSolid* frontSolid = nullptr;
+      G4double frontCenterZ = fTank_z;
+      if (fDimpleMode == "hemisphere") {
+        // A complete sphere overlaps the tile; the exposed portion is exactly
+        // the hemisphere removed at the back. No face-only union is used.
+        frontSolid = new G4Sphere("Tank_FrontSphere", 0., fDimpleRadius,
+                                  0., 360. * deg, 0., 180. * deg);
+      }
+      else {
+        const G4double side = GetDimpleCubeSide();
+        frontSolid = new G4Box("Tank_FrontCube", 0.5 * side, 0.5 * side,
+                               0.5 * (side + join));
+        // The join extends inward only; the exposed height remains side.
+        frontCenterZ += 0.5 * (side - join);
+      }
+      compensatedBase = new G4UnionSolid("Tank_CompensatedBase", tank_box,
+                                          frontSolid, nullptr,
+                                          G4ThreeVector(0., 0., frontCenterZ));
+    }
 
-    tank_solid = new G4SubtractionSolid("Tank",
-                                        tank_box,
-                                        dimpleSphere,
-                                        nullptr,
-                                        G4ThreeVector(0., 0., -fTank_z));
+    G4VSolid* cavitySolid = nullptr;
+    G4double cavityCenterZ = -fTank_z;
+    if (fDimpleMode == "hemisphere") {
+      cavitySolid = new G4Sphere("Tank_DimpleSphere", 0., fDimpleRadius,
+                                 0., 360. * deg, 0., 180. * deg);
+    }
+    else {
+      const G4double side = GetDimpleCubeSide();
+      cavitySolid = new G4Box("Tank_DimpleCube", 0.5 * side, 0.5 * side,
+                              0.5 * (side + join));
+      // Extend the cutting tool outside the rear face, keeping depth=side.
+      cavityCenterZ += 0.5 * (side - join);
+    }
+    tank_solid = new G4SubtractionSolid("Tank", compensatedBase, cavitySolid,
+                                        nullptr, G4ThreeVector(0., 0., cavityCenterZ));
   }
 
   fTank_LV = new G4LogicalVolume(tank_solid, fTankMaterial, "Tank");
@@ -474,6 +515,7 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
   }
   G4cout << "******  end of opticalSurface->DumpInfo" << G4endl;
 
+  if (fIssue9GeometryAudit) AuditIssue9Geometry();
   return world_PV;
 }
 
@@ -873,6 +915,14 @@ void DetectorConstruction::SetDimpleEnabled(G4bool enabled)
          << (fDimpleEnabled ? "true" : "false") << G4endl;
 }
 
+void DetectorConstruction::SetDimpleFrontCompensation(G4bool enabled)
+{
+  fDimpleFrontCompensation = enabled;
+  G4RunManager::GetRunManager()->GeometryHasBeenModified();
+  G4cout << "Dimple front compensation set to "
+         << (enabled ? "true" : "false") << G4endl;
+}
+
 void DetectorConstruction::SetDimpleRadius(G4double radius)
 {
   if (radius <= 0.) {
@@ -893,10 +943,10 @@ void DetectorConstruction::SetDimpleRadius(G4double radius)
 
 void DetectorConstruction::SetDimpleMode(const G4String& mode)
 {
-  if (mode != "hemisphere") {
+  if (mode != "hemisphere" && mode != "cube") {
     G4ExceptionDescription msg;
     msg << "Invalid dimple mode: " << mode
-        << ". Only hemisphere is supported in Week 8.1.";
+        << ". Use hemisphere or cube.";
     G4Exception("DetectorConstruction::SetDimpleMode",
                 "OpNovice2_Dimple_013",
                 FatalException,
@@ -1174,14 +1224,210 @@ void DetectorConstruction::ValidateStackLayoutGeometry() const
          << "9 internal gaps of 0.5 mm, final tile followed by World." << G4endl;
 }
 
+G4double DetectorConstruction::GetDimpleCubeSide() const
+{
+  // r remains the reference hemisphere radius, so changing the shape does
+  // not change the analytic removed volume. Avoid any Monte Carlo volume API.
+  return std::cbrt(2. * CLHEP::pi / 3.) * fDimpleRadius;
+}
+
+void DetectorConstruction::ValidateIssue9GeometryConfiguration() const
+{
+  const G4double safety = 1.e-6 * mm;
+  if (fGreaseEnabled && fDimpleEnabled && GetEffectiveDimpleSiPMMode() == "external") {
+    G4Exception("DetectorConstruction::ValidateIssue9GeometryConfiguration",
+                "OpNovice2_Dimple_015", FatalException,
+                "External dimple SiPM placement does not yet support grease coupling.");
+  }
+  if (fStackEnabled || fAbsorberEnabled || fBottomCavityEnabled || fGreaseEnabled ||
+      fSiPMLayout != "single" || (fSiPMFace != "-Z" && fSiPMFace != "bottom") ||
+      (fDimpleEnabled && GetEffectiveDimpleSiPMMode() != "external") ||
+      !std::isfinite(fSiPMLocalPosition.x()) ||
+      !std::isfinite(fSiPMLocalPosition.y()) ||
+      !std::isfinite(fSiPMLocalPosition.z()) ||
+      std::abs(fSiPMLocalPosition.x()) > safety ||
+      std::abs(fSiPMLocalPosition.y()) > safety ||
+      std::abs(fSiPMLocalPosition.z()) > safety) {
+    G4Exception("DetectorConstruction::ValidateIssue9GeometryConfiguration",
+                "OpNovice2_Issue9_001", FatalException,
+                "Cube, front compensation, and issue9Geometry require one centered -Z SiPM, "
+                "external placement for a dimple, and no stack, absorber, legacy cavity, or grease.");
+  }
+  for (const auto dimension : {fTank_x, fTank_y, fTank_z, fSiPMActiveU,
+                               fSiPMActiveV, fSiPMThickness, fDimpleRadius,
+                               fExpHall_x, fExpHall_y, fExpHall_z}) {
+    if (!std::isfinite(dimension) || dimension <= safety) {
+      G4Exception("DetectorConstruction::ValidateIssue9GeometryConfiguration",
+                  "OpNovice2_Issue9_002", FatalException,
+                  "Issue #9 geometry dimensions must be finite and positive with a safety margin.");
+    }
+  }
+  const G4double depth = fDimpleEnabled
+    ? (fDimpleMode == "cube" ? GetDimpleCubeSide() : fDimpleRadius) : 0.;
+  if (depth >= 2. * fTank_z - safety) {
+    G4Exception("DetectorConstruction::ValidateIssue9GeometryConfiguration",
+                "OpNovice2_Issue9_003", FatalException,
+                "The complete cavity depth must be smaller than the nominal tile thickness.");
+  }
+  const G4double footprint = fDimpleEnabled
+    ? (fDimpleMode == "cube" ? 0.5 * GetDimpleCubeSide() : fDimpleRadius) : 0.;
+  if (footprint >= fTank_x - safety || footprint >= fTank_y - safety ||
+      0.5 * fSiPMActiveU > fTank_x + safety ||
+      0.5 * fSiPMActiveV > fTank_y + safety) {
+    G4Exception("DetectorConstruction::ValidateIssue9GeometryConfiguration",
+                "OpNovice2_Issue9_004", FatalException,
+                "The cavity footprint must be inside the tile and the SiPM must fit on its back face.");
+  }
+  const G4double frontExtent = fDimpleFrontCompensation ? depth : 0.;
+  if (fTank_x >= fExpHall_x - safety || fTank_y >= fExpHall_y - safety ||
+      fTank_z + frontExtent >= fExpHall_z - safety ||
+      fTank_z + fSiPMThickness >= fExpHall_z - safety) {
+    G4Exception("DetectorConstruction::ValidateIssue9GeometryConfiguration",
+                "OpNovice2_Issue9_005", FatalException,
+                "The tile, front compensation, and external SiPM must be fully inside the World.");
+  }
+}
+
+void DetectorConstruction::AuditIssue9Geometry() const
+{
+  ValidateIssue9GeometryConfiguration();
+  const auto require = [](G4bool condition, const char* message) {
+    if (!condition) {
+      G4Exception("DetectorConstruction::AuditIssue9Geometry", "OpNovice2_Issue9_006",
+                  FatalException, message);
+    }
+  };
+  require(fTanks.size() == 1 && fSiPMs.size() == 1 && fTank && fSiPM,
+          "The constructed geometry must contain exactly one tile and one SiPM.");
+  require(fTank->GetObjectTranslation() == G4ThreeVector() &&
+          fTank->GetObjectRotationValue().isIdentity() &&
+          fSiPM->GetObjectRotationValue().isIdentity(),
+          "Issue #9 audit requires an unrotated centered tile and unrotated SiPM.");
+  const auto* solid = fTank->GetLogicalVolume()->GetSolid();
+  const auto* sensor = dynamic_cast<const G4Box*>(fSiPM->GetLogicalVolume()->GetSolid());
+  require(solid && sensor, "Constructed tile solid and box SiPM are required.");
+  require(fTank->GetLogicalVolume()->GetNoDaughters() == 0 &&
+          fTank->GetLogicalVolume()->GetMaterial() == fTankMaterial,
+          "The restored material must belong to the same seamless scintillator solid.");
+  const G4double tolerance = 1.e-6 * mm;
+  const G4double receivingPlane = fSiPM->GetObjectTranslation().z() + sensor->GetZHalfLength();
+  require(std::abs(receivingPlane + fTank_z) < tolerance &&
+          std::abs(fSiPM->GetObjectTranslation().x()) < tolerance &&
+          std::abs(fSiPM->GetObjectTranslation().y()) < tolerance &&
+          std::abs(2. * sensor->GetXHalfLength() - fSiPMActiveU) < tolerance &&
+          std::abs(2. * sensor->GetYHalfLength() - fSiPMActiveV) < tolerance &&
+          std::abs(2. * sensor->GetZHalfLength() - fSiPMThickness) < tolerance,
+          "The actual external sensor position or dimensions differ from the requested geometry.");
+
+  const G4double side = GetDimpleCubeSide();
+  const G4double volume = fDimpleEnabled
+    ? 2. * CLHEP::pi * fDimpleRadius * fDimpleRadius * fDimpleRadius / 3. : 0.;
+  const G4double frontExtent = fDimpleFrontCompensation
+    ? (fDimpleMode == "cube" ? side : fDimpleRadius) : 0.;
+  const G4String shape = fDimpleEnabled ? fDimpleMode : "flat";
+  const auto oldPrecision = G4cout.precision();
+  G4cout << std::setprecision(17)
+         << "Issue9 geometry: shape=" << shape
+         << " front_compensation=" << (fDimpleFrontCompensation ? 1 : 0)
+         << " reference_radius_mm=" << fDimpleRadius / mm
+         << " cube_side_mm=" << side / mm
+         << " removed_volume_mm3=" << volume / (mm * mm * mm)
+         << " restored_volume_mm3=" << (fDimpleFrontCompensation ? volume : 0.) / (mm * mm * mm)
+         << " nominal_volume_mm3=" << 8. * fTank_x * fTank_y * fTank_z / (mm * mm * mm)
+         << " analytic_scintillator_volume_mm3="
+         << (8. * fTank_x * fTank_y * fTank_z - volume
+             + (fDimpleFrontCompensation ? volume : 0.)) / (mm * mm * mm)
+         << " front_extent_mm=" << frontExtent / mm
+         << " receiving_plane_z_mm=" << receivingPlane / mm
+         << " solid_type=" << solid->GetEntityType() << G4endl;
+
+  // Probe the actual Boolean solid. No GetCubicVolume/overlap sampler is called
+  // here: those may consume RNG state, whereas these navigation queries do not.
+  struct RayProbe { const char* label; G4double x; G4double y; };
+  const std::vector<RayProbe> probes = {
+    {"center", 0., 0.},
+    {"sphere_inner", 0.9 * fDimpleRadius, 0.},
+    {"sphere_outer", 1.1 * fDimpleRadius, 0.},
+    {"cube_inner", 0.45 * side, 0.},
+    {"cube_outer", 0.55 * side, 0.},
+    {"diagonal_inner", 0.45 * fDimpleRadius, 0.45 * fDimpleRadius},
+    {"diagonal_outer", 0.8 * fDimpleRadius, 0.8 * fDimpleRadius},
+    {"far_x", 0.8 * fTank_x, 0.},
+    {"far_y", 0., 0.8 * fTank_y}
+  };
+  G4int insideProbes = 0;
+  for (const auto& ray : probes) {
+    const G4double x = std::min(ray.x, 0.95 * fTank_x);
+    const G4double y = std::min(ray.y, 0.95 * fTank_y);
+    G4double height = 0.;
+    if (fDimpleEnabled) {
+      if (fDimpleMode == "cube") {
+        if (std::abs(x) < 0.5 * side && std::abs(y) < 0.5 * side) height = side;
+      }
+      else if (x * x + y * y < fDimpleRadius * fDimpleRadius) {
+        height = std::sqrt(fDimpleRadius * fDimpleRadius - x * x - y * y);
+      }
+    }
+    const G4double expectedEntry = fTank_z + (fDimpleFrontCompensation ? height : 0.);
+    const G4double expectedExit = -fTank_z + height;
+    const G4double expectedThickness = expectedEntry - expectedExit;
+    const G4double step = std::min(1.e-4 * mm, 0.1 * expectedThickness);
+    const G4ThreeVector direction(0., 0., -1.);
+    const G4ThreeVector start(x, y, fTank_z + frontExtent + mm);
+    require(solid->Inside(start) == kOutside, "A vertical-ray starting point is not outside the tile.");
+    const G4double distanceIn = solid->DistanceToIn(start, direction);
+    require(std::isfinite(distanceIn) && distanceIn < 2. * fExpHall_z,
+            "The actual solid did not admit an expected vertical ray.");
+    const G4double entry = start.z() - distanceIn;
+    const G4ThreeVector inside(x, y, entry - step);
+    require(solid->Inside(inside) == kInside, "The vertical ray did not enter solid material.");
+    const G4double distanceOut = solid->DistanceToOut(inside, direction);
+    require(std::isfinite(distanceOut) && distanceOut < 2. * fExpHall_z,
+            "The actual solid did not provide a finite vertical exit.");
+    const G4double exit = inside.z() - distanceOut;
+    const G4double thickness = entry - exit;
+    G4cout << "Issue9 ray: label=" << ray.label << " x_mm=" << x / mm << " y_mm=" << y / mm
+           << " entry_z_mm=" << entry / mm << " exit_z_mm=" << exit / mm
+           << " thickness_mm=" << thickness / mm
+           << " expected_entry_z_mm=" << expectedEntry / mm
+           << " expected_exit_z_mm=" << expectedExit / mm
+           << " expected_thickness_mm=" << expectedThickness / mm << G4endl;
+    require(std::abs(entry - expectedEntry) < tolerance &&
+            std::abs(exit - expectedExit) < tolerance &&
+            std::abs(thickness - expectedThickness) < tolerance,
+            "Actual vertical-ray intersections disagree with the intended material profile.");
+    const G4ThreeVector afterExit(x, y, exit - step);
+    require(solid->Inside(afterExit) == kOutside &&
+            solid->DistanceToIn(afterExit, direction) > 2. * fExpHall_z,
+            "The vertical ray found an unexpected extra material segment.");
+    const G4double sampleZ[] = {expectedEntry + step, expectedEntry - step,
+                                0.5 * (expectedEntry + expectedExit),
+                                expectedExit + step, expectedExit - step};
+    const EInside expectedStates[] = {kOutside, kInside, kInside, kInside, kOutside};
+    for (G4int index = 0; index < 5; ++index) {
+      const auto observed = solid->Inside(G4ThreeVector(x, y, sampleZ[index]));
+      G4cout << "Issue9 inside: label=" << ray.label << "_" << index
+             << " x_mm=" << x / mm << " y_mm=" << y / mm << " z_mm=" << sampleZ[index] / mm
+             << " observed=" << static_cast<G4int>(observed)
+             << " expected=" << static_cast<G4int>(expectedStates[index]) << G4endl;
+      require(observed == expectedStates[index], "An actual-solid Inside probe failed.");
+      ++insideProbes;
+    }
+  }
+  G4cout << "Issue9 geometry audit: PASS rays=" << probes.size()
+         << " inside_probes=" << insideProbes << G4endl;
+  G4cout.precision(oldPrecision);
+}
+
+
 void DetectorConstruction::ValidateDimpleConfiguration() const
 {
   const G4double safety = 1.e-6 * mm;
 
-  if (fDimpleMode != "hemisphere") {
+  if (fDimpleMode != "hemisphere" && fDimpleMode != "cube") {
     G4ExceptionDescription msg;
     msg << "Invalid dimple mode: " << fDimpleMode
-        << ". Only hemisphere is supported in Week 8.1.";
+        << ". Use hemisphere or cube.";
     G4Exception("DetectorConstruction::ValidateDimpleConfiguration",
                 "OpNovice2_Dimple_003",
                 FatalException,

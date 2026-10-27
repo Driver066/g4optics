@@ -181,10 +181,26 @@ DetectorMessenger::DetectorMessenger(DetectorConstruction* Det) : G4UImessenger(
   fStackLayersCmd->SetToBeBroadcasted(false);
 
   fDimpleEnabledCmd = new G4UIcmdWithABool("/opnovice2/dimple/enabled", this);
-  fDimpleEnabledCmd->SetGuidance("Enable the Week 8.1 bottom-center hemispherical dimple.");
+  fDimpleEnabledCmd->SetGuidance("Enable a bottom-center dimple; hemisphere is the default shape.");
   fDimpleEnabledCmd->SetDefaultValue(false);
   fDimpleEnabledCmd->AvailableForStates(G4State_PreInit);
   fDimpleEnabledCmd->SetToBeBroadcasted(false);
+
+  fDimpleFrontCompensationCmd =
+    new G4UIcmdWithABool("/opnovice2/dimple/frontCompensation", this);
+  fDimpleFrontCompensationCmd->SetGuidance(
+    "Restore the removed scintillator above the matching front footprint; external placement only.");
+  fDimpleFrontCompensationCmd->SetDefaultValue(false);
+  fDimpleFrontCompensationCmd->AvailableForStates(G4State_PreInit);
+  fDimpleFrontCompensationCmd->SetToBeBroadcasted(false);
+
+  fIssue9GeometryAuditCmd =
+    new G4UIcmdWithABool("/opnovice2/diagnostics/issue9Geometry", this);
+  fIssue9GeometryAuditCmd->SetGuidance(
+    "Check the actual flat/dimple solid using deterministic Inside and vertical-ray probes.");
+  fIssue9GeometryAuditCmd->SetDefaultValue(false);
+  fIssue9GeometryAuditCmd->AvailableForStates(G4State_PreInit);
+  fIssue9GeometryAuditCmd->SetToBeBroadcasted(false);
 
   fDimpleOpticalDiagnosticsCmd =
     new G4UIcmdWithABool("/opnovice2/diagnostics/dimpleOptical", this);
@@ -202,7 +218,7 @@ DetectorMessenger::DetectorMessenger(DetectorConstruction* Det) : G4UImessenger(
   fSaveRandomStateCmd->SetToBeBroadcasted(false);
 
   fDimpleRadiusCmd = new G4UIcmdWithADoubleAndUnit("/opnovice2/dimple/radius", this);
-  fDimpleRadiusCmd->SetGuidance("Set strict hemispherical dimple radius and depth.");
+  fDimpleRadiusCmd->SetGuidance("Set hemisphere radius/depth; for cube, the reference radius defines equal removed volume.");
   fDimpleRadiusCmd->SetParameterName("radius", false);
   fDimpleRadiusCmd->SetUnitCategory("Length");
   fDimpleRadiusCmd->SetDefaultUnit("mm");
@@ -210,7 +226,7 @@ DetectorMessenger::DetectorMessenger(DetectorConstruction* Det) : G4UImessenger(
   fDimpleRadiusCmd->SetToBeBroadcasted(false);
 
   fDimpleModeCmd = new G4UIcmdWithAString("/opnovice2/dimple/mode", this);
-  fDimpleModeCmd->SetGuidance("Set dimple shape mode. Week 8.1 supports hemisphere only.");
+  fDimpleModeCmd->SetGuidance("Set dimple shape: hemisphere or equal-volume cube (external SiPM only).");
   fDimpleModeCmd->AvailableForStates(G4State_PreInit);
   fDimpleModeCmd->SetToBeBroadcasted(false);
 
@@ -337,6 +353,8 @@ DetectorMessenger::~DetectorMessenger()
   delete fStackLayoutStudyCmd;
   delete fStackLayersCmd;
   delete fDimpleEnabledCmd;
+  delete fDimpleFrontCompensationCmd;
+  delete fIssue9GeometryAuditCmd;
   delete fDimpleOpticalDiagnosticsCmd;
   delete fSaveRandomStateCmd;
   delete fDimpleRadiusCmd;
@@ -711,6 +729,12 @@ void DetectorMessenger::SetNewValue(G4UIcommand* command, G4String newValue)
   }
   else if (command == fDimpleEnabledCmd) {
     fDetector->SetDimpleEnabled(fDimpleEnabledCmd->GetNewBoolValue(newValue));
+  }
+  else if (command == fDimpleFrontCompensationCmd) {
+    fDetector->SetDimpleFrontCompensation(fDimpleFrontCompensationCmd->GetNewBoolValue(newValue));
+  }
+  else if (command == fIssue9GeometryAuditCmd) {
+    fDetector->SetIssue9GeometryAudit(fIssue9GeometryAuditCmd->GetNewBoolValue(newValue));
   }
   else if (command == fDimpleOpticalDiagnosticsCmd) {
     fDetector->SetDimpleOpticalDiagnostics(fDimpleOpticalDiagnosticsCmd->GetNewBoolValue(newValue));

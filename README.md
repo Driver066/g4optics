@@ -1,5 +1,15 @@
 # Undergraduate Research Plan: Scintillator Light Uniformity Study with Geant4
 
+## Issue #9: controlled dimple mechanism infrastructure
+
+The opt-in 24 mm study supports seven bare-polished, air-recess configurations,
+including equal-volume cubic wells and matching front material compensation.
+The local infrastructure passed geometry, optical/counting and historical
+regression checks; no formal scientific scan has started. See the
+[model and execution guide](tools/dimple_mechanism/README.md) and
+[acceptance record](tools/dimple_mechanism/VALIDATION.md). The historical 5 mm
+dimple results and default behavior are preserved.
+
 ## Ten-layer SiPM layout study (baseline restart)
 
 The clean restart uses the July 22 `a2d05dfe` baseline. All four layouts

@@ -160,6 +160,8 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     void SetDimpleRadius(G4double radius);
     void SetDimpleMode(const G4String& mode);
     void SetDimpleSiPMMode(const G4String& mode);
+    void SetDimpleFrontCompensation(G4bool enabled);
+    void SetIssue9GeometryAudit(G4bool enabled) { fIssue9GeometryAudit = enabled; }
 
     // setting SiPM
     void SetSiPMLayout(const G4String& layout);
@@ -190,6 +192,8 @@ class DetectorConstruction : public G4VUserDetectorConstruction
     G4int fStackLayers = 10;
     G4bool fBottomCavityEnabled = false;
     G4bool fDimpleEnabled = false;
+    G4bool fDimpleFrontCompensation = false;
+    G4bool fIssue9GeometryAudit = false;
     G4bool fDimpleOpticalDiagnostics = false;
     G4bool fSaveRandomState = false;
     G4double fDimpleRadius = 3. * CLHEP::mm;
@@ -288,6 +292,9 @@ class DetectorConstruction : public G4VUserDetectorConstruction
                                 G4double& hz,
                                 G4ThreeVector& pos) const;
     void ValidateDimpleConfiguration() const;
+    G4double GetDimpleCubeSide() const;
+    void ValidateIssue9GeometryConfiguration() const;
+    void AuditIssue9Geometry() const;
     void ValidateGreaseConfiguration() const;
     void ValidateAbsorberConfiguration() const;
     void ValidateStackConfiguration() const;

@@ -1,5 +1,17 @@
 # Dimple check scanning
 
+## Controlled 24 mm study, 2026-10-27
+
+The owner approved the seven-case controlled mechanism plan for
+[upstream issue #9](https://github.com/jdbrice/g4optics/issues/9#issuecomment-6441837362),
+using the existing bare-polished, air-recess model with no paint or grease.
+The new infrastructure and local engineering acceptance are documented in
+[tools/dimple_mechanism](tools/dimple_mechanism/README.md).
+This extends the work to 24 mm; the 5 mm preparation and results below remain
+historical evidence. No formal scientific campaign has started.
+
+## Original scan groups
+
 We need to perform three groups of scanning to see the collection efficiency:
 1. Adding a half sphere on the top of SiPM
 2. Replacing the dimple with a cube with same volume
