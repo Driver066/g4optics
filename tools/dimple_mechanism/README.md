@@ -5,6 +5,12 @@ It is a new 24 mm model, based on `codex/dimple-study` at `68153c0b`.
 The historical 5 mm source, result bundle and reproduction checks remain frozen.
 The scope here is geometry and engineering validation, not a scientific campaign.
 
+The independently prepared 35,000-electron mechanism pilot is specified in
+[PILOT.md](PILOT.md). Its separate runner freezes 350 tasks, reuses the accepted
+binary, and preserves the engineering sample and checks unchanged. See
+[the preparation record](PILOT_PREPARATION.md) for the verified input identity
+and current zero-execution state.
+
 ## Fixed model
 
 - A single 100 × 100 × 24 mm EJ-200 tile, nominal front/back at z = ±12 mm.

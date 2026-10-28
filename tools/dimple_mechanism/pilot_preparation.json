@@ -1,0 +1,49 @@
+{
+  "independent_review": {
+    "status": "passed",
+    "method": "Read-only verification of all 717 frozen files, 350 macros, accepted source/binary/protocol, historical seed evidence and absence of pilot attempts",
+    "simulation_reexecuted": false
+  },
+  "accepted_executable_sha256": "65b5700fd5c54a07162bcf3838b01efe30eada1d4d906869cb839e1da8cea27d",
+  "batch": "outputs/dimple-mechanism/pilot-v1",
+  "blocks": 2,
+  "configurations": 7,
+  "events_per_task": 100,
+  "excluded_historical_seed_values": 218,
+  "frozen_files": 717,
+  "frozen_protocol_sha256": "11fceaac53fe0b0834f7c4d775fa02a27b98f1a758e841430dd8c02370b37871",
+  "image_id": "sha256:316f3970072d236f994a98f05b9702f7888c577c0b1971ce6e826689220b71ee",
+  "input_manifest_sha256": "71ccbc55fdb010b8971de95dc0edae29444afca8d66ab50f3404a26a2280651b",
+  "new_offline_tests_passed": 20,
+  "pilot_events_executed": 0,
+  "planned_events": 35000,
+  "planned_tasks": 350,
+  "position_figure": {
+    "png": "outputs/dimple-mechanism/pilot-plan-v2/pilot-positions.png",
+    "svg": "outputs/dimple-mechanism/pilot-plan-v2/pilot-positions.svg"
+  },
+  "positions": 25,
+  "preflight_executed": false,
+  "preparation_tool_sha256": {
+    "tools/dimple_mechanism/pilot.py": "9ab91d48f7282e76154f001df479478482c060c99b4405ee4da18d98109c7b16",
+    "tools/dimple_mechanism/pilot_audit.py": "cda79bc2e6ca56cb2f18709f8ccce44eb3b5c1d659570079ec50ede01871e907",
+    "tools/dimple_mechanism/pilot_model.py": "48495a912bde5ae4315ff1e4b1b991c29f03a44d95b3301ddd549e30d230d90c",
+    "tools/dimple_mechanism/plot_pilot_plan.py": "82c53eee61b797ddb7a98d5cfe016e34028f2b44df0d9b3ae3f98d044d05c1b9",
+    "tools/dimple_mechanism/tests/test_pilot_model_audit.py": "e61dc252351638d946118355dc43ee4c63dea00a140d548d058b4d7167159084",
+    "tools/dimple_mechanism/tests/test_pilot_runner.py": "899c2aee2038d937e1235b59e77bbefa2ce325694831e1a6aa3dec836454593d"
+  },
+  "prepared_date": "2026-10-28",
+  "scheduler_submission": false,
+  "schema": "issue9-pilot-preparation-validation-v1",
+  "scope": "Preparation and offline validation only. Accepted engineering ROOT files in the package are copied prior evidence, not pilot events. No scientific result or precision claim.",
+  "simulation_source_commit": "38c94b29969438626774a8d4424d2f662de167b9",
+  "status": "prepared_and_verified",
+  "task_status": {
+    "accepted": 0,
+    "attempted": 0,
+    "failed": 0,
+    "invalid": 0,
+    "unstarted": 350
+  },
+  "unique_pilot_seed_values": 700
+}
